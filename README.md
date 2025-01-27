@@ -17,9 +17,16 @@ cd metric_video_depth_anything
 ## Usage 
 
 ```bash
-cd metric_video_depth_anything/Video-Depth-Anything
 
+# Create a metric depth video from a normal video
+
+# Note that the script is copied to the Video-Depth-Anything folder on installation.
+cd Video-Depth-Anything
 python video_metric_convert.py --input_video some_video.mp4
+
+# Convert the output video to grayscale
+python rgb_depth_to_greyscale.py --video some_video_depth.mp4
+
 
 ```
 
