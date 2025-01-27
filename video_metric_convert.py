@@ -11,6 +11,10 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+
+
+# Also copyright Me, for the parts i wrote.
+
 import argparse
 import numpy as np
 import os
@@ -34,9 +38,15 @@ def save_24bit(frames, output_video_path, fps):
 
     out = cv2.VideoWriter(output_video_path, cv2.VideoWriter_fourcc(*"mp4v"), fps, (width, height))
 
-    print("max metric depth: ", frames.max())
+    max_depth = frames.max()
+    print("max metric depth: ", max_depth)
 
-    MODEL_maxOUTPUT_depth = 6 ####XXXXX hack imortant pick a value  slitght above max metric depth to save the depth in th video file nicly
+    MODEL_maxOUTPUT_depth = 6 ### pick a value slitght above max metric depth to save the depth in th video file nicly
+    # if you pick a high value you will lose resolution
+    
+    # incase you did not pick a absolute value we max out (this mean each video will have depth relative to max_depth)
+    # (if you want to use the video as a depth souce a absolute value is prefrable)
+    MODEL_maxOUTPUT_depth = max(MODEL_maxOUTPUT_depth, max_depth)
 
     for i in range(frames.shape[0]):
         depth = frames[i]
@@ -64,7 +74,7 @@ if __name__ == '__main__':
     parser.add_argument('--encoder', type=str, default='vitl', choices=['vits', 'vitl'])
     parser.add_argument('--max_len', type=int, default=-1, help='maximum length of the input video, -1 means no limit')
     parser.add_argument('--target_fps', type=int, default=-1, help='target fps of the input video, -1 means the original fps')
-    parser.add_argument('--shift', type=float, default=0.0, help='Use this shift value instead of the rolling average')
+    parser.add_argument('--shift', type=float, default=0.0, help='Use this shift value instead of the rolling average(no used any longer)')
 
     args = parser.parse_args()
 
@@ -90,58 +100,90 @@ if __name__ == '__main__':
     #Figure out metric conversion factor and rescale depth
 
     #often_control_metric_depth = 4
-    metric_scalings = []
-    metric_shifts = []
+
+    std_std_constants = []
+    inv_metric_means = []
+    norm_inv_means = []
+
     last_metric_depth, last_inv_depth = None, None
     for i in range(0, len(frames)):
 
         print("---- frame ", i, " ---")
         #We techinally only calculate the metric conversion every so often as it genreally is slow to change
-        #if i % often_control_metric_depth == 0 or len(metric_scalings) < 32/often_control_metric_depth:
+        #if i % often_control_metric_depth == 0 or len(std_std_constants) < 32/often_control_metric_depth:
 
 		# get the metric depthmap
         metric_depth = metric_dpt_func.get_metric_depth(frames[i])
 
         metric_min = metric_depth.min()
-        # We align both depth maps to their respective midpoints and use those aligned depthmaps to calculate the metric scaling
-        # I am unsure if the actual midpoint is the best point to scale around
-
-        inv_depth = max_depth - depths[i] #the video depth is inverted so we uninvert it
-        zero_mask = inv_depth == 0.0
-        inv_depth[zero_mask] = 0.01 # Fix devide by zero
-
-        rel2met_scale = np.mean((metric_depth-metric_min)/inv_depth)
-        metric_scalings.append(rel2met_scale)
-
-        inv_depth[zero_mask] = 0.0 # Fix devide by zero
-
-        # Calculate the rolling avergae scaling
-        rolling_avg_scale = np.mean(metric_scalings)
+        metric_max = metric_depth.max()
 
 
-        print("rolling_avg_scale:", rolling_avg_scale)
+        inverse_metric_max = 1/metric_min
+        inverse_metric_min = 1/metric_max
 
-        # We rescale the video depth to match the rolling avg metric depth
-        rescaled_depth = inv_depth * rolling_avg_scale
+        #The inverse_metric_min comes from the unstable depthmap if you use the real one there is brutal jittering so we overide it and just use 0
+        inverse_metric_min = 0
 
-		#We only use pixels closer than 2 meter to calculate shift
-        close_pixels = metric_depth < 2.0
-        metric_vs_rel_shift = np.mean(metric_depth[close_pixels] - rescaled_depth[close_pixels])
-        metric_shifts.append(metric_vs_rel_shift)
+        inv_metric_depth = 1/metric_depth
 
-        rolling_avg_shift = np.mean(metric_shifts)
+        inv_metric_std = inv_metric_depth.std()
+        inv_metric_mean = inv_metric_depth.mean() - inverse_metric_min
+
+        norm_inv = depths[i]
+        norm_inv_std = norm_inv.std()
+        norm_inv_mean = norm_inv.mean()
+
+        std_std_constant = inv_metric_std / norm_inv_std
+
+
+        #Debug stuff
+        print("inv_metric_std: ", inv_metric_std)
+        print("norm_inv_std: ", norm_inv_std)
+        print("std_std_constant: ", std_std_constant)
+        print("norm_inv_mean: ", norm_inv_mean)
+        print("inv_metric_mean: ", inv_metric_mean)
+        print("std_std_constant: ", std_std_constant)
+
+        std_std_constants.append(std_std_constant)
+        inv_metric_means.append(inv_metric_mean)
+        norm_inv_means.append(norm_inv_mean)
+
+
+        #When there is less than 10 frames in the rolling average we use the first frame for reference instead the rolling average need to stabilize
+        if len(std_std_constants) < 10:
+            std_std_constant = std_std_constants[0]
+            inv_metric_mean = inv_metric_means[0]
+            norm_inv_mean = norm_inv_means[0]
+        else:
+            std_std_constant = np.mean(std_std_constants)
+            inv_metric_mean = np.mean(inv_metric_means)
+            norm_inv_mean = np.mean(norm_inv_means)
+            
+            
+        # Looking the constants instead of using rolling averages can give better results but it may allso have issues with moving cameras (i think)
+        #std_std_constant = 0.00031527123
+        #inv_metric_mean = 0.395
+        #norm_inv_mean = 680
+
+        #Convert from metric model std to rel model std
+        inverse_depth_m_min = ((norm_inv - norm_inv_mean) * std_std_constant) + inv_metric_mean
+
+        #the above can also be done using min and max instead of standard deviations but it is less robust (i think)
+        #inverse_depth_m_min = norm_inverse_depth * (inverse_metric_max-inverse_metric_min)
+
+        inverse_reconstructed_metric_depth = inverse_depth_m_min + inverse_metric_min
+
+        metric_depth2 = 1/inverse_reconstructed_metric_depth
+
         
-        use_shift = rolling_avg_shift
-        if args.use_shift is 0.0:
-            use_shift = rolling_avg_shift
-            print("rolling_avg_shift:", rolling_avg_shift)
+        # clear the rolling average when it has over 100 frames
+        if len(std_std_constants) > 100:
+            std_std_constants.pop(0)
+            inv_metric_means.pop(0)
+            norm_inv_means.pop(0)
 
-        if len(metric_scalings) > 100:
-            metric_scalings.pop(0)
-            metric_shifts.pop(0)
-
-        # Then we shift the depth so that the camera pos matches metric
-        depths[i] = rescaled_depth + use_shift
+        depths[i] = metric_depth2
 
 
     video_name = os.path.basename(args.input_video)
