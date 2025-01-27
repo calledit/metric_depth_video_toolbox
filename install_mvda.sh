@@ -25,6 +25,7 @@ cd ..
 
 cd ..
 cd ..
+cd ..
 
 cp -a metric_dpt_func.py Video-Depth-Anything/Depth-Anything-V2/metric_depth/.
 cp -a video_metric_convert.py Video-Depth-Anything/.
