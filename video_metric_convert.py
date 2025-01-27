@@ -26,71 +26,31 @@ from utils.dc_utils import read_video_frames, save_video
 
 
 def save_24bit(frames, output_video_path, fps):
+    """
+    Saves depth maps encoded in the R, G and B channels of a video (to increse accuracy as when compared to gray scale)
+    """
     height = frames.shape[1]
     width = frames.shape[2]
 
-    #writer = imageio.get_writer(output_video_path, fps=fps, macro_block_size=1, codec='libx264', ffmpeg_params=['-crf', '0'])
-
-    #out = cv2.VideoWriter(output_video_path, cv2.VideoWriter_fourcc(*"FFV1"), fps, (width, height))
     out = cv2.VideoWriter(output_video_path, cv2.VideoWriter_fourcc(*"mp4v"), fps, (width, height))
 
     print("max metric depth: ", frames.max())
 
     MODEL_maxOUTPUT_depth = 6 ####XXXXX hack imortant pick a value  slitght above max metric depth to save the depth in th video file nicly
 
-    #ycrcb_ofset = 16
-    #Y_range = 235 - ycrcb_ofset
-    #C_range = 240 - ycrcb_ofset
-
-    #Y_convert = 255/Y_range
-    #C_convert = 255/C_range
-
     for i in range(frames.shape[0]):
         depth = frames[i]
-        #print(depth)
-        #exit(0)
         scaled_depth = (((255**4)/MODEL_maxOUTPUT_depth)*depth.astype(np.float64)).astype(np.uint32)
 
         # View the depth as raw bytes: shape (H, W, 4)
         depth_bytes = scaled_depth.view(np.uint8).reshape(height, width, 4)
 
-        # We only have 3 channels to store in so we discard the least significant bits
-        #Y = (depth_bytes[:, :, 3]/Y_convert) + ycrcb_ofset #Chnages indicate late differances
-        #Y = (depth_bytes[:, :, 3]) #Chnages indicate late differances
-        #Cb = (depth_bytes[:, :, 2]/C_convert) + ycrcb_ofset #Chnages Cb medium difs
-        #Cr = (depth_bytes[:, :, 2]/C_convert) + ycrcb_ofset #and in Cr small chnages
 
-        #scale = 64
-        #3Cr = np.ones((height, width), dtype=np.uint8)*(128-scale)+(depth_bytes[:, :, 2]/(256/scale))
-        #Cb = np.ones((height, width), dtype=np.uint8)*(128-scale)+(depth_bytes[:, :, 2]/(256/scale))
-        #Cb = np.ones((height, width), dtype=np.uint8)*(128) # +(depth_bytes[:, :, 2]/(256/scale))
-
-        #ycrcb24bit = np.dstack((Y, Cr, Cb)).astype(np.uint8)
-
-        #print("ycrcb in: ",ycrcb24bit[0][0])
-        #rgb24bit  = np.rint(cv2.cvtColor(ycrcb24bit.astype(np.float32), cv2.COLOR_YCrCb2RGB)).astype(np.uint8)
-        #rgb24bit  = cv2.cvtColor(ycrcb24bit, cv2.COLOR_YCrCb2RGB)
-        #print("rgb: ",rgb24bit[0][0])
-
-        #print("decode")
-        #ycrcb = np.rint(cv2.cvtColor(rgb24bit, cv2.COLOR_RGB2YCrCb)).astype(np.uint8)
-        #ycrcb = cv2.cvtColor(rgb24bit, cv2.COLOR_RGB2YCrCb)
-        #print("ycrcb out: ",ycrcb[0][0])
-        #print(ycrcb)
-        #print(rgb24bit)
-
-
-        R = (depth_bytes[:, :, 3]) #Chnages indicate late differances
+        R = (depth_bytes[:, :, 3]) # Most significant bits in R and G channel (duplicated to reduce compression artifacts)
         G = (depth_bytes[:, :, 3])
-        #G = np.zeros((height, width), dtype=np.uint8)
-        B = (depth_bytes[:, :, 2])
+        B = (depth_bytes[:, :, 2]) # Least significant bit in blue channel
         bgr24bit = np.dstack((B, G, R))
-        #rgb24bit = np.dstack((R, G, B))
-        #print("rgb: ",rgb24bit[0][0])
-        #print("bgr: ",bgr24bit[0][0])
-        #exit(0)
         out.write(bgr24bit)
-        #writer.append_data(rgb24bit)
 
     out.release()
 
@@ -104,6 +64,7 @@ if __name__ == '__main__':
     parser.add_argument('--encoder', type=str, default='vitl', choices=['vits', 'vitl'])
     parser.add_argument('--max_len', type=int, default=-1, help='maximum length of the input video, -1 means no limit')
     parser.add_argument('--target_fps', type=int, default=-1, help='target fps of the input video, -1 means the original fps')
+    parser.add_argument('--shift', type=float, default=0.0, help='Use this shift value instead of the rolling average')
 
     args = parser.parse_args()
 
@@ -119,48 +80,68 @@ if __name__ == '__main__':
     video_depth_anything = video_depth_anything.to(DEVICE).eval()
 
     frames, target_fps = read_video_frames(args.input_video, args.max_len, args.target_fps, args.max_res)
+
+    height = frames.shape[1]
+    width = frames.shape[2]
     depths, fps = video_depth_anything.infer_video_depth(frames, target_fps, input_size=args.input_size, device=DEVICE)
 
     max_depth = depths.max()
 
     #Figure out metric conversion factor and rescale depth
-    
+
     #often_control_metric_depth = 4
     metric_scalings = []
+    metric_shifts = []
+    last_metric_depth, last_inv_depth = None, None
     for i in range(0, len(frames)):
-        
-        #We only calculate the metric conversion every so often as it genreally is slow to change
-        
-        ## Nah we need to know the metric_shift so this need to be calculated every frame
+
+        print("---- frame ", i, " ---")
+        #We techinally only calculate the metric conversion every so often as it genreally is slow to change
         #if i % often_control_metric_depth == 0 or len(metric_scalings) < 32/often_control_metric_depth:
-        
+
+		# get the metric depthmap
         metric_depth = metric_dpt_func.get_metric_depth(frames[i])
-        
+
+        metric_min = metric_depth.min()
         # We align both depth maps to their respective midpoints and use those aligned depthmaps to calculate the metric scaling
         # I am unsure if the actual midpoint is the best point to scale around
-        metric_mid_point_shift = metric_depth.mean()
-        vid_depth_mid_point_shift = depths[i].mean()
 
-        inv_depth = (max_depth-vid_depth_mid_point_shift) - depths[i] #the video depth is inverted so we uninvert it
+        inv_depth = max_depth - depths[i] #the video depth is inverted so we uninvert it
         zero_mask = inv_depth == 0.0
         inv_depth[zero_mask] = 0.01 # Fix devide by zero
 
-        metric_scalings.append(np.mean((metric_depth-metric_mid_point_shift)/inv_depth))
-        
+        rel2met_scale = np.mean((metric_depth-metric_min)/inv_depth)
+        metric_scalings.append(rel2met_scale)
+
         inv_depth[zero_mask] = 0.0 # Fix devide by zero
-        
-        
-    
-        if len(metric_scalings) > 32:
-            metric_scalings.pop(0)
-        
+
+        # Calculate the rolling avergae scaling
         rolling_avg_scale = np.mean(metric_scalings)
-        
+
+
+        print("rolling_avg_scale:", rolling_avg_scale)
+
         # We rescale the video depth to match the rolling avg metric depth
         rescaled_depth = inv_depth * rolling_avg_scale
+
+		#We only use pixels closer than 2 meter to calculate shift
+        close_pixels = metric_depth < 2.0
+        metric_vs_rel_shift = np.mean(metric_depth[close_pixels] - rescaled_depth[close_pixels])
+        metric_shifts.append(metric_vs_rel_shift)
+
+        rolling_avg_shift = np.mean(metric_shifts)
         
-        # Then we shift the depth so that the camera pos matches metric (XXX: Feels like this could be done in a better way)
-        depths[i] = metric_mid_point_shift+rescaled_depth
+        use_shift = rolling_avg_shift
+        if args.use_shift is 0.0:
+            use_shift = rolling_avg_shift
+            print("rolling_avg_shift:", rolling_avg_shift)
+
+        if len(metric_scalings) > 100:
+            metric_scalings.pop(0)
+            metric_shifts.pop(0)
+
+        # Then we shift the depth so that the camera pos matches metric
+        depths[i] = rescaled_depth + use_shift
 
 
     video_name = os.path.basename(args.input_video)
