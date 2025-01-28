@@ -81,7 +81,7 @@ apt-get install xvfb
 Xvfb :2 &
 export DISPLAY=:2
 
-# on OSX
+# on OSX (OSX only supports post processing of depth videos not generation of them. As the ML models need CUDA)
 
 # First setup any required venv (open3d requires python3.11 on OSX (as of 2025)))
 pip3.11 install open3d numpy
