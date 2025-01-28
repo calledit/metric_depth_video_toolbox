@@ -46,7 +46,8 @@ def save_24bit(frames, output_video_path, fps, max_depth_arg):
     
     # incase you did not pick a absolute value we max out (this mean each video will have depth relative to max_depth)
     # (if you want to use the video as a depth souce a absolute value is prefrable)
-    MODEL_maxOUTPUT_depth = max(MODEL_maxOUTPUT_depth, max_depth)
+    if MODEL_maxOUTPUT_depth < max_depth:
+        print("warning: output depth is deeper than max_depth. The depth will be clipped")
 
     for i in range(frames.shape[0]):
         depth = frames[i]
@@ -67,7 +68,7 @@ def save_24bit(frames, output_video_path, fps, max_depth_arg):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Video Depth Anything')
-    parser.add_argument('--input_video', type=str, default='./assets/example_videos/davis_rollercoaster.mp4')
+    parser.add_argument('--color_video', type=str, default='./assets/example_videos/davis_rollercoaster.mp4')
     parser.add_argument('--output_dir', type=str, default='./outputs')
     parser.add_argument('--input_size', type=int, default=518)
     parser.add_argument('--max_res', type=int, default=1440)
@@ -88,7 +89,7 @@ if __name__ == '__main__':
     video_depth_anything.load_state_dict(torch.load(f'./checkpoints/video_depth_anything_vitl.pth', map_location='cpu'), strict=True)
     video_depth_anything = video_depth_anything.to(DEVICE).eval()
 
-    frames, target_fps = read_video_frames(args.input_video, args.max_len, args.target_fps, args.max_res)
+    frames, target_fps = read_video_frames(args.color_video, args.max_len, args.target_fps, args.max_res)
 
     height = frames.shape[1]
     width = frames.shape[2]
@@ -185,7 +186,7 @@ if __name__ == '__main__':
         depths[i] = metric_depth2
 
 
-    video_name = os.path.basename(args.input_video)
+    video_name = os.path.basename(args.color_video)
     if not os.path.exists(args.output_dir):
         os.makedirs(args.output_dir)
 

@@ -30,7 +30,7 @@ if __name__ == '__main__':
     # Setup arguments
     parser = argparse.ArgumentParser(description='Generate a depth video in greyscale from a rgb encoded depth video')
     
-    parser.add_argument('--video', type=str, help='video file to use as input', required=True)
+    parser.add_argument('--depth_video', type=str, help='video file to use as input', required=True)
     parser.add_argument('--bit16', action='store_true', help='Store outut as 16bit file', required=False)
     parser.add_argument('--max_depth', default=6, type=int, help='the max depth that the video uses', required=False)
     
@@ -42,13 +42,13 @@ if __name__ == '__main__':
     MODEL_maxOUTPUT_depth = args.max_depth
     
     # Verify input file exists
-    if not os.path.isfile(args.video):
+    if not os.path.isfile(args.depth_video):
         raise Exception("input video does not exist")
 
         
-    output_file = args.video + "_grey_depth.mkv"
+    output_file = args.depth_video + "_grey_depth.mkv"
     
-    raw_video = cv2.VideoCapture(args.video)
+    raw_video = cv2.VideoCapture(args.depth_video)
     frame_width, frame_height = int(raw_video.get(cv2.CAP_PROP_FRAME_WIDTH)), int(raw_video.get(cv2.CAP_PROP_FRAME_HEIGHT))
     frame_rate = raw_video.get(cv2.CAP_PROP_FPS)
     out = None
