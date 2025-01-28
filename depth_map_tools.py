@@ -121,7 +121,7 @@ def render(pcd, cam_mat, depth = False, w = None, h = None, extrinsic_matric = n
         v_w = w
 
 
-    #We never use OffscreenRenderer cause it is bugged and is missing required API's
+    #We set use_ofscreen to False to disable OffscreenRenderer cause it is bugged and is missing required API's
     use_ofscreen = False
     if use_ofscreen:
         if rend is None:

@@ -55,16 +55,22 @@ the lower 8 bits. The values are scaled to the argument --max_depth, default is 
 ```bash
 
 
-
-
 git clone https://github.com/calledit/metric_video_depth_anything
 cd metric_video_depth_anything
 
 # on linux
-sudo apt-get install -y libgl1 libegl1
+sudo apt-get install -y libgl1
 ./install_mvda.sh
 pip install open3d numpy
 
+# Follow this if you want to save videos with the avc1 codec which is required if you want to watch the exported videos on a Quest device (i think)
+echo https://swiftlane.com/blog/generating-mp4s-using-opencv-python-with-the-avc1-codec/
+
+# if using headless linux
+apt-get install xvfb
+# then run before using the tools (ie. start a virtual x11 server)
+Xvfb :2 &
+export DISPLAY=:2
 
 # on OSX
 
