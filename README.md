@@ -64,4 +64,4 @@ Has been tested on machines that support Cuda 12.4 on vast.ai "template PyTorch 
 ### Limitations
 Depth-Anything-V2 does not take any FOV input and it does not give any FOV outputs. I recommend [PerspectiveFields](https://huggingface.co/spaces/jinlinyi/PerspectiveFields) to estimate the original FOV if you want to project the output in to 3D. But since Depth-Anything-V2 does not take FOV as input the results may look distorted, to thin, to wide or to narrow as the model may have estimated a different FOV internally and used that for its depth estimations. This is especially problematic in dolly zoom shots, where the FOV is very hard to get right.
 
-Longer shots with loots of camera movement may be problematic, metric_video_depth_anything uses metric conversion constants based on rolling averages to to try to mitigate this but it can still be an issue.
+Longer shots with loots of camera movement may be problematic, video_metric_convert.py uses metric conversion constants based on rolling averages to to try to mitigate this but it can still be an issue.
