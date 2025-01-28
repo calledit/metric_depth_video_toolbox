@@ -22,6 +22,8 @@ By taking the stability in the videos from [Video-Depth-Anything](https://github
 _Uses ML to create stable metric depth video from any normal video file_
 ```bash
 # Create a metric depth video from a normal video (Note that the video_metric_convert.py script is copied to the Video-Depth-Anything folder on installation.)
+
+#For some reason Video-Depth-Anything does not like videos in 16:9 format. Crop them down if this is an issue. Aspect ratio of 4:3 works best.
 cd Video-Depth-Anything
 python video_metric_convert.py --color_video some_video.mkv
 
