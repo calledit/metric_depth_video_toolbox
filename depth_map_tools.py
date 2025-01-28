@@ -94,7 +94,7 @@ def create_mesh_from_point_cloud(points, height, width, image_frame = None):
 vis = None
 v_h = None
 v_w = None
-def render(pcd, cam_mat, depth = False, w = None, h = None):
+def render(pcd, cam_mat, depth = False, w = None, h = None, extrinsic_matric = np.eye(4)):
     global vis, v_h, v_w
     
     if w is None:
@@ -123,7 +123,7 @@ def render(pcd, cam_mat, depth = False, w = None, h = None):
     params = ctr.convert_to_pinhole_camera_parameters()
 
     #print("pos", params.extrinsic, params.intrinsic)
-    params.extrinsic = np.eye(4)
+    params.extrinsic = extrinsic_matric
     intrinsic = o3d.camera.PinholeCameraIntrinsic()
     #There is a bug in open3d where focaly is not used
     #https://github.com/isl-org/Open3D/issues/1343
@@ -155,7 +155,28 @@ def render(pcd, cam_mat, depth = False, w = None, h = None):
     
     return np.asarray(image)
     
+def cam_look_at(cam_pos, target, up = np.array([0.0, 1.0, 0.0])):
     
+    f = target - cam_pos
+    f /= np.linalg.norm(f)
+
+    # 2) Right vector: cross(Up, Forward)
+    r = np.cross(up, f)
+    r /= np.linalg.norm(r)
+
+    # 3) Actual up vector: cross(Forward, Right)
+    u = np.cross(f, r)
+
+    # 4) Build the view matrix in row-major form
+    mat = np.array([
+        [r[0],   u[0],   f[0],   cam_pos[0]],
+        [r[1],   u[1],   f[1],   cam_pos[1]],
+        [r[2],   u[2],   f[2],   -cam_pos[2]],
+        [-np.dot(r, target), -np.dot(u, target), -np.dot(f, target), 1.0]
+    ], dtype=float)
+
+    return mat
+
 def fov_from_camera_matrix(mat):
     w = mat[0][2]*2
     h = mat[1][2]*2

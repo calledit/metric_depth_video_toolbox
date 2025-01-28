@@ -13,7 +13,7 @@ np.set_printoptions(suppress=True, precision=4)
 if __name__ == '__main__':
     
     # Setup arguments
-    parser = argparse.ArgumentParser(description='Generate a depth video in greyscale from a rgb encoded depth video')
+    parser = argparse.ArgumentParser(description='Take a rgb encoded depth video and a color video, and render them it as a steroscopic 3D video')
     
     parser.add_argument('--video', type=str, help='video file to use as input', required=True)
     parser.add_argument('--color_video', type=str, help='video file to use as color input', required=False)
@@ -100,7 +100,7 @@ if __name__ == '__main__':
         
         out.write(cv2.cvtColor(stero_image, cv2.COLOR_RGB2BGR))
         
-        if args.max_frames == frame_n:
+        if args.max_frames < frame_n and args.max_frames != -1:
             break
         
     raw_video.release()
