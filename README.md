@@ -23,7 +23,7 @@ _Uses ML to create stable metric depth video from any normal video file_
 ```bash
 # Create a metric depth video from a normal video (Note that the video_metric_convert.py script is copied to the Video-Depth-Anything folder on installation.)
 
-#For some reason Video-Depth-Anything does not like videos in 16:9 format. Crop them down if this is an issue. Aspect ratio of 4:3 works best.
+# Video-Depth-Anything memory usage scales with aspect ratio. If you are using a 3090 with 24Gb memory and video with 16:9 aspect you need to lower the --input_size to 440 or crop the video down. Aspect ratio of 4:3 works well.
 cd Video-Depth-Anything
 python video_metric_convert.py --color_video some_video.mkv
 
@@ -59,7 +59,7 @@ The result is a metric depth video file called something like outputs/{filename}
 
 The depth file is a normal video file with RGB values where the _red_ and _green_ channels represent the
 upper 8 bits (duplicated to reduce compression artefacts) and the _blue_ channel represent
-the lower 8 bits. The values are scaled to the argument --max_depth, default is 6 meters.
+the lower 8 bits. The values are scaled to the argument --max_depth, default is 20 meters.
 
 
 ## Install
