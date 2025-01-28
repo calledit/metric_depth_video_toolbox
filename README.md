@@ -7,6 +7,9 @@ Tools for Generating and working with monocular-depth-estimation ML and metric 3
 ## Video showcase
 https://youtu.be/nEiUloZ591Q
 
+Stero video clip samples can be found here:
+https://github.com/calledit/metric_video_depth_anything/releases/tag/Showcase
+
 ### This Repo consists of:
 1. A tool for generating metric 3D videos based on the Depth-Anything series of machine learning models.
 By taking the stability in the videos from [Video-Depth-Anything](https://github.com/DepthAnything/Video-Depth-Anything) and combining it with the  metric version of [Depth-Anything-V2](https://github.com/DepthAnything/Depth-Anything-V2) it is possible to generate stable metric depth videos.
