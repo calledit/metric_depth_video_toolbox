@@ -44,7 +44,7 @@ python rgb_depth_to_greyscale.py --video some_video_depth.mkv
 
 
 ## Output
-The result is a metric depth video file called something like _outputs/{filename}__depth.mkv_.
+The result is a metric depth video file called something like outputs/{filename}_depth.mkv.
 
 The depth file is a normal video file with RGB values where the _red_ and _green_ channels represent the
 upper 8 bits (duplicated to reduce compression artefacts) and the _blue_ channel represent
