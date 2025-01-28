@@ -1,8 +1,10 @@
 # Metric video depth anything
-Generate metric 3d video with ML.
+Tools for Generating and working with monocular-depth-estimation ML and metric 3D videos.
 
-By taking the stability in the videos from [Video-Depth-Anything](https://github.com/DepthAnything/Video-Depth-Anything) and combining it with the  metric version of [Depth-Anything-V2](https://github.com/DepthAnything/Depth-Anything-V2) it is posible to generate stable metric depth videos.
-
+This Repo consists of:
+1. A tool for generating metric 3D videos based on the Depth-Anything series of machine learning models.
+By taking the stability in the videos from [Video-Depth-Anything](https://github.com/DepthAnything/Video-Depth-Anything) and combining it with the  metric version of [Depth-Anything-V2](https://github.com/DepthAnything/Depth-Anything-V2) it is possible to generate stable metric depth videos.
+2. Tools for working with and visualising the metric 3D videos. Tools for doing things like 3D stereo rendering or viewing a video from above or othervise altering the camera perspective. In the pipeline there is also some work on using the generated metric 3D video for very accurate camera tracking.
 
 
 ## Usage 
