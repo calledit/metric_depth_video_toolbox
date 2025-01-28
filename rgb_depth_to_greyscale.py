@@ -67,7 +67,7 @@ if __name__ == '__main__':
             ],
         )
     else:
-        out = cv2.VideoWriter(output_file, cv2.VideoWriter_fourcc(*"mp4v"), frame_rate, (frame_width, frame_height))
+        out = cv2.VideoWriter(output_file, cv2.VideoWriter_fourcc(*"FFV1"), frame_rate, (frame_width, frame_height))
 
     
     frame_n = 0
@@ -85,7 +85,7 @@ if __name__ == '__main__':
         
         depth_unit = depth.view(np.uint8).reshape((frame_height, frame_width, 4))
         
-        depth_unit[..., 3] = (rgb[..., 0] + rgb[..., 1]) / 2
+        depth_unit[..., 3] = ((rgb[..., 0].astype(np.uint32) + rgb[..., 1]).astype(np.uint32) / 2)
         depth_unit[..., 2] = rgb[..., 2]
         
         

@@ -36,7 +36,7 @@ def save_24bit(frames, output_video_path, fps):
     height = frames.shape[1]
     width = frames.shape[2]
 
-    out = cv2.VideoWriter(output_video_path, cv2.VideoWriter_fourcc(*"mp4v"), fps, (width, height))
+    out = cv2.VideoWriter(output_video_path, cv2.VideoWriter_fourcc(*"FFV1"), fps, (width, height))
 
     max_depth = frames.max()
     print("max metric depth: ", max_depth)
@@ -70,11 +70,9 @@ if __name__ == '__main__':
     parser.add_argument('--input_video', type=str, default='./assets/example_videos/davis_rollercoaster.mp4')
     parser.add_argument('--output_dir', type=str, default='./outputs')
     parser.add_argument('--input_size', type=int, default=518)
-    parser.add_argument('--max_res', type=int, default=1280)
-    parser.add_argument('--encoder', type=str, default='vitl', choices=['vits', 'vitl'])
+    parser.add_argument('--max_res', type=int, default=1440)
     parser.add_argument('--max_len', type=int, default=-1, help='maximum length of the input video, -1 means no limit')
     parser.add_argument('--target_fps', type=int, default=-1, help='target fps of the input video, -1 means the original fps')
-    parser.add_argument('--shift', type=float, default=0.0, help='Use this shift value instead of the rolling average(no used any longer)')
 
     args = parser.parse_args()
 
@@ -85,8 +83,8 @@ if __name__ == '__main__':
         'vitl': {'encoder': 'vitl', 'features': 256, 'out_channels': [256, 512, 1024, 1024]},
     }
 
-    video_depth_anything = VideoDepthAnything(**model_configs[args.encoder])
-    video_depth_anything.load_state_dict(torch.load(f'./checkpoints/video_depth_anything_{args.encoder}.pth', map_location='cpu'), strict=True)
+    video_depth_anything = VideoDepthAnything(**model_configs['vitl'])
+    video_depth_anything.load_state_dict(torch.load(f'./checkpoints/video_depth_anything_vitl.pth', map_location='cpu'), strict=True)
     video_depth_anything = video_depth_anything.to(DEVICE).eval()
 
     frames, target_fps = read_video_frames(args.input_video, args.max_len, args.target_fps, args.max_res)
@@ -191,5 +189,5 @@ if __name__ == '__main__':
         os.makedirs(args.output_dir)
 
     processed_video_path = os.path.join(args.output_dir, os.path.splitext(video_name)[0]+'_src.mp4')
-    output_video_path = os.path.join(args.output_dir, os.path.splitext(video_name)[0]+'_depth.mp4')
+    output_video_path = os.path.join(args.output_dir, os.path.splitext(video_name)[0]+'_depth.mkv')
     save_24bit(depths, output_video_path, fps)
