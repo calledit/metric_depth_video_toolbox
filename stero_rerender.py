@@ -20,6 +20,9 @@ if __name__ == '__main__':
     parser.add_argument('--xfov', type=int, help='fov in deg in the x-direction', required=True)
     parser.add_argument('--yfov', type=int, help='fov in deg in the y-direction, calculated from aspectratio and xfov in not given', required=False)
     parser.add_argument('--max_depth', default=6, type=int, help='the max depth that the video uses', required=False)
+    parser.add_argument('--pupillary_distance', default=63, type=int, help='pupillary distance in mm', required=False)
+    parser.add_argument('--max_frames', default=-1, type=int, help='quit after max_frames nr of frames', required=False)
+    
     
     
     
@@ -43,22 +46,14 @@ if __name__ == '__main__':
     frame_rate = raw_video.get(cv2.CAP_PROP_FPS)
         
     cam_matrix = depth_map_tools.compute_camera_matrix(args.xfov, args.yfov, frame_width, frame_height)
-
-    vis = o3d.visualization.Visualizer()
-    vis.create_window()
-    vis.clear_geometries()
-    rend_opt = vis.get_render_option()
-    ctr = vis.get_view_control()
-    ctr.set_lookat([0, 0, 1])
-    ctr.set_up([0, -1, 0])
-    ctr.set_front([0, 0, -1])
-    ctr.set_zoom(1)
-    vis.update_renderer()
+    
+    output_file = args.video + "_stereo.mp4"
+    
+    out = cv2.VideoWriter(output_file, cv2.VideoWriter_fourcc(*"avc1"), frame_rate, (frame_width*2, frame_height))
     
     
-    params = ctr.convert_to_pinhole_camera_parameters()
-    
-    org_mesh = None
+    left_shift = -(args.pupillary_distance/1000)/2
+    right_shift = +(args.pupillary_distance/1000)/2
 
     frame_n = 0
     while raw_video.isOpened():
@@ -90,28 +85,24 @@ if __name__ == '__main__':
         #This is very slow needs optimizing (i think)
         mesh = depth_map_tools.get_mesh_from_depth_map(depth, cam_matrix, color_frame)
         
-        if org_mesh is None:
-            org_mesh = mesh
-            vis.add_geometry(org_mesh)
-            
-        org_mesh.vertices = mesh.vertices
-        org_mesh.vertex_colors = mesh.vertex_colors
-        vis.update_geometry(org_mesh)
-        params.extrinsic = [
-            [ 0.8837,-0.1421,-0.4459,  1.0534],
-            [-0.0598 , 0.9107, -0.4088 , 2.038 ],
-            [ 0.4642 , 0.3879 , 0.7963 , 4.442 ],
-            [ 0.    ,  0.     , 0.   ,   1.    ]
-        ]
-        ctr.convert_from_pinhole_camera_parameters(params, allow_arbitrary=True)
-        start_time = time.time()
-        while time.time() - start_time < 0.1: #should be (1/frame_rate) but we dont rach that speed anyway
-            vis.poll_events()
-            vis.update_renderer()
+        #move mesh for left eye render
+        mesh.translate([-left_shift, 0.0, 0.0])
+        left_image = (depth_map_tools.render(mesh, cam_matrix)*255).astype(np.uint8)
+        mesh.translate([left_shift, 0.0, 0.0])
+        
+        #move mesh for right eye render
+        mesh.translate([-right_shift, 0.0, 0.0])
+        right_image = (depth_map_tools.render(mesh, cam_matrix)*255).astype(np.uint8)
         
         
-        #depth_map_tools.draw([mesh])
+        stero_image = cv2.hconcat([left_image, right_image])
         
+        
+        out.write(cv2.cvtColor(stero_image, cv2.COLOR_RGB2BGR))
+        
+        if args.max_frames == frame_n:
+            break
         
     raw_video.release()
-    
+    out.release()
+

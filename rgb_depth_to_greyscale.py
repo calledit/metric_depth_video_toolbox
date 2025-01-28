@@ -45,7 +45,7 @@ if __name__ == '__main__':
     if not os.path.isfile(args.video):
         raise Exception("input video does not exist")
 
-    # the Touchly1 format has the depth video underneeth the normal video
+        
     output_file = args.video + "_grey_depth.mkv"
     
     raw_video = cv2.VideoCapture(args.video)
