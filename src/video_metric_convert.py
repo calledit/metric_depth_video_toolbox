@@ -29,7 +29,7 @@ from video_depth_anything.video_depth import VideoDepthAnything
 from utils.dc_utils import read_video_frames, save_video
 
 
-def save_24bit(frames, output_video_path, fps):
+def save_24bit(frames, output_video_path, fps, max_depth_arg):
     """
     Saves depth maps encoded in the R, G and B channels of a video (to increse accuracy as when compared to gray scale)
     """
@@ -41,7 +41,7 @@ def save_24bit(frames, output_video_path, fps):
     max_depth = frames.max()
     print("max metric depth: ", max_depth)
 
-    MODEL_maxOUTPUT_depth = 6 ### pick a value slitght above max metric depth to save the depth in th video file nicly
+    MODEL_maxOUTPUT_depth = max_depth_arg ### pick a value slitght above max metric depth to save the depth in th video file nicly
     # if you pick a high value you will lose resolution
     
     # incase you did not pick a absolute value we max out (this mean each video will have depth relative to max_depth)
@@ -73,6 +73,7 @@ if __name__ == '__main__':
     parser.add_argument('--max_res', type=int, default=1440)
     parser.add_argument('--max_len', type=int, default=-1, help='maximum length of the input video, -1 means no limit')
     parser.add_argument('--target_fps', type=int, default=-1, help='target fps of the input video, -1 means the original fps')
+    parser.add_argument('--max_depth', default=6, type=int, help='the max depth that the video uses', required=False)
 
     args = parser.parse_args()
 
@@ -190,4 +191,4 @@ if __name__ == '__main__':
 
     processed_video_path = os.path.join(args.output_dir, os.path.splitext(video_name)[0]+'_src.mp4')
     output_video_path = os.path.join(args.output_dir, os.path.splitext(video_name)[0]+'_depth.mkv')
-    save_24bit(depths, output_video_path, fps)
+    save_24bit(depths, output_video_path, fps, args.max_depth)
