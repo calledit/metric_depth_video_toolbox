@@ -19,7 +19,7 @@ if __name__ == '__main__':
     parser.add_argument('--color_video', type=str, help='video file to use as color input', required=False)
     parser.add_argument('--xfov', type=int, help='fov in deg in the x-direction, calculated from aspectratio and yfov in not given', required=False)
     parser.add_argument('--yfov', type=int, help='fov in deg in the y-direction, calculated from aspectratio and xfov in not given', required=False)
-    parser.add_argument('--max_depth', default=6, type=int, help='the max depth that the video uses', required=False)
+    parser.add_argument('--max_depth', default=20, type=int, help='the max depth that the video uses', required=False)
     parser.add_argument('--pupillary_distance', default=63, type=int, help='pupillary distance in mm', required=False)
     parser.add_argument('--max_frames', default=-1, type=int, help='quit after max_frames nr of frames', required=False)
     parser.add_argument('--touchly0', action='store_true', help='Render as touchly0 format. ie. stereo video with 3d ', required=False)

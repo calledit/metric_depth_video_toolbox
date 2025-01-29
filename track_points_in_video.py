@@ -87,8 +87,23 @@ if __name__ == '__main__':
     if len(clip1) != 0:
         clip_tracking_points.append(process_clip(np.array(clip1)))
     if len(clip2) < (nr_of_tracking_frames/2):
-        clip_tracking_points.append(process_clip(np.array(clip2)))
+        clip_tracking_points.append(process_clip(np.array(clip2))
+        
+    track_frames = []
+    clip_start = 0
+    global_point_id_start = 0
+    for clip_id, clip in enumerate(clip_tracking_points):
+        for point_id, point in enumerate(clip):
+            for frame_id, frame_point in enumerate(point):
+                frame_no = clip_start + frame_id
+                if frame_no >= len(track_frames):
+                    track_frames.append([])
+                if frame_point is not None:
+                    track_frames[frame_no].append([global_point_id_start+point_id, frame_point[0], frame_point[1]])
+        
+        global_point_id_start += len(clip)
+        clip_start += nr_of_tracking_frames/2
 
     fp = open(out_file, "w")
-    fp.write(json.dumps(clip_tracking_points))
+    fp.write(json.dumps(track_frames))
     fp.close()

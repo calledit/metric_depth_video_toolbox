@@ -1,6 +1,7 @@
 import numpy as np
 import open3d as o3d
 import copy
+import cv2
 
 def compute_camera_matrix(fov_horizontal_deg, fov_vertical_deg, image_width, image_height):
 
@@ -35,6 +36,73 @@ def compute_camera_matrix(fov_horizontal_deg, fov_vertical_deg, image_width, ima
                               [ 0,  0,  1]], dtype=np.float64)
 
     return camera_matrix
+
+
+def svd(source_points, target_points):
+    # Compute the centroid of each set of points
+
+    centroid_source = np.mean(source_points, axis=0)
+    centroid_target = np.mean(target_points, axis=0)
+
+    #print(source_points, target_points)
+    # Center the points around the centroid
+    source_centered = source_points - centroid_source
+    target_centered = target_points - centroid_target
+
+    # Compute the covariance matrix
+    H = np.dot(source_centered.T, target_centered)
+
+    # Perform Singular Value Decomposition (SVD)
+    U, S, Vt = np.linalg.svd(H)
+
+    # Compute the rotation matrix
+    Rot = np.dot(Vt.T, U.T)
+
+    #Special reflection case handling
+    if np.linalg.det(Rot) < 0:
+        Vt[2, :] *= -1
+        Rot = np.dot(Vt.T, U.T)
+
+    # Compute the translation vector
+    t = centroid_target - np.dot(Rot, centroid_source)#original function
+
+
+    # Form the transformation matrix
+    transformation_matrix = np.eye(4)
+    transformation_matrix[:3, :3] = Rot
+    transformation_matrix[:3, 3] = t
+
+    return transformation_matrix
+
+def pts_2_pcd(points):
+    pcd = o3d.geometry.PointCloud()
+    pcd.points = o3d.utility.Vector3dVector(points)
+    return pcd
+
+def project_2d_points_to_3d(points, depth, camera_matrix, distCoeffs = None):
+    
+    xx = points[:,0]
+    yy = points[:,1]
+    z = depth[points[:,1].astype(np.int32), points[:,0].astype(np.int32)]
+    
+    if distCoeffs is None:
+        distCoeffs = np.array([0, 0, 0, 0], dtype=np.float64)  # distortion coefficients
+
+    # Step 1: Prepare 2D points in the format (N, 1, 2) for OpenCV
+    points_2d = np.array([[[x, y]] for x, y in zip(xx, yy)], dtype=np.float64)
+
+    # Step 2: Undistort the 2D points using distCoeffs
+    undistorted_points = cv2.undistortPoints(points_2d, camera_matrix, distCoeffs)
+
+    u = undistorted_points[:, 0, 0]
+    v = undistorted_points[:, 0, 1]
+
+    # Use numpy to perform element-wise multiplication and stacking
+    points_3d = np.column_stack((u * z, v * z, z))
+
+    # Convert the result to a numpy array for easier use
+    return np.array(points_3d)
+
 
 def get_mesh_from_depth_map(depth_map, cam_mat, color_frame = None):
     points, height, width = create_point_cloud_from_depth(depth_map, cam_mat, True)
