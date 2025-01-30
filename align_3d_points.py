@@ -40,6 +40,8 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Align 3D video based on depth video and a point tracking file')
 
     parser.add_argument('--track_file', type=str, help='file with 2d point tracking data', required=True)
+    parser.add_argument('--mask_video', type=str, help='black and white mask video for thigns that should not be tracked', required=False)
+    parser.add_argument('--strict_mask', default=False, action='store_true', help='Remove any points that has ever been masked out even in frames where they are not masked', required=False)
     parser.add_argument('--xfov', type=int, help='fov in deg in the x-direction, calculated from aspectratio and yfov in not given', required=False)
     parser.add_argument('--yfov', type=int, help='fov in deg in the y-direction, calculated from aspectratio and xfov in not given', required=False)
     parser.add_argument('--depth_video', type=str, help='depth video', required=True)
@@ -54,6 +56,9 @@ if __name__ == '__main__':
 
     if not os.path.isfile(args.track_file):
         raise Exception("input track_file does not exist")
+        
+    if not os.path.isfile(args.mask_video):
+        raise Exception("input mask_video does not exist")
         
     if not os.path.isfile(args.depth_video):
         raise Exception("input depth_video does not exist")
@@ -74,13 +79,19 @@ if __name__ == '__main__':
         if not os.path.isfile(args.color_video):
             raise Exception("input color_video does not exist")
         color_video = cv2.VideoCapture(args.color_video)
-        
+    
+    mask_video = None
+    if args.mask_video is not None:
+        if not os.path.isfile(args.mask_video):
+            raise Exception("input color_video does not exist")
+        mask_video = cv2.VideoCapture(args.mask_video)
     
     for i, frame in enumerate(frames):
         frames[i] = np.array(frames[i])
     
     depth_frames = []
     rgb_frames = []
+    fr_n = 0
     while raw_video.isOpened():
         ret, raw_frame = raw_video.read()
         if not ret:
@@ -94,6 +105,31 @@ if __name__ == '__main__':
             rgb_frames.append(col_vid)
         else:
             rgb_frames.append(raw_frame)
+            
+        if mask_video is not None:
+            ret, mask = mask_video.read()
+            mask = cv2.cvtColor(mask, cv2.COLOR_BGR2GRAY)
+            
+            
+            rem = []
+            rem_global = []
+            for i, point in enumerate(frames[fr_n]):
+                if mask[point[2], point[1]] > 0:
+                    rem.append(i)
+                    rem_global.append(point[0])
+            
+            if len(rem) > 0:    
+                frames[fr_n] = np.delete(frames[fr_n], rem, axis=0)
+            
+            if args.strict_mask:
+                for global_id in rem_global:
+                    for frame_id, frame in enumerate(frames):
+                        rem = []
+                        for i, point in enumerate(frames[fr_n]):
+                            if global_id == point[0]:
+                                rem.append(i)
+                        if len(rem) > 0:
+                            frames[frame_id] = np.delete(frames[frame_id], rem, axis=0)
         
         
         depth = np.zeros((frame_height, frame_width), dtype=np.uint32)
@@ -104,8 +140,10 @@ if __name__ == '__main__':
         depth_frames.append(depth)
         
         #DEBUG: Only looking at 25 frames dont want to load entire video when DEBUGING
-        if len(depth_frames) > 25:
+        if fr_n > 210:
             break
+            
+        fr_n += 1
     raw_video.release()
     if color_video is not None:
         color_video.release()
@@ -124,7 +162,8 @@ if __name__ == '__main__':
     ref_mesh = depth_map_tools.get_mesh_from_depth_map(depth_frames[frame_n], cam_matrix, rgb_frames[frame_n])
     ref_mesh.paint_uniform_color([0, 0, 1])
     
-    
+    meshes = [ref_mesh]
+    to_ref_zero = np.eye(4)
     while len(used_frames) < len(frames):
         print("--- frame ", frame_n, " ---")
         #2. Find most connected frame (tends to be the next frame)
@@ -148,18 +187,36 @@ if __name__ == '__main__':
         
         ref_pcd = depth_map_tools.pts_2_pcd(ref_points_3d)
         frame_pcd = depth_map_tools.pts_2_pcd(points_3d)
+        
         ref_pcd.paint_uniform_color([1, 0, 0])
         frame_pcd.paint_uniform_color([0, 1, 0])
         
         #Use SVD to find transformation from one frame to the next
         tranformation_to_ref = depth_map_tools.svd(points_3d, ref_points_3d)
         
-        mesh = depth_map_tools.get_mesh_from_depth_map(depth_frames[best_match_frame_no], cam_matrix, rgb_frames[best_match_frame_no])
+        to_ref_zero @= tranformation_to_ref
+        
+        
+        ref_pcd.transform(to_ref_zero)
+        frame_pcd.transform(to_ref_zero)
+        
+        meshes.append(ref_pcd)
+        meshes.append(frame_pcd)
+        
+        
         
         #Transform the mesh so that we can see how well it aligns in the GUI
-        mesh.transform(tranformation_to_ref)
+        #mesh.transform(tranformation_to_ref)
         
-        depth_map_tools.draw([ref_pcd, frame_pcd, mesh, ref_mesh])
+        #if frame_n % 25 == 0:
+        
+        if frame_n == 200:
+            mesh = depth_map_tools.get_mesh_from_depth_map(depth_frames[best_match_frame_no], cam_matrix, rgb_frames[best_match_frame_no])
+            mesh.transform(to_ref_zero)
+            meshes.append(mesh)
+        
+        
+            depth_map_tools.draw(meshes)
         
         frame_n = best_match_frame_no
         used_frames.append(frame_n)
