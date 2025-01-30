@@ -74,7 +74,7 @@ if __name__ == '__main__':
     parser.add_argument('--max_res', type=int, default=1440)
     parser.add_argument('--max_len', type=int, default=-1, help='maximum length of the input video, -1 means no limit')
     parser.add_argument('--target_fps', type=int, default=-1, help='target fps of the input video, -1 means the original fps')
-    parser.add_argument('--max_depth', default=6, type=int, help='the max depth that the video uses', required=False)
+    parser.add_argument('--max_depth', default=20, type=int, help='the max depth that the video uses', required=False)
 
     args = parser.parse_args()
 
@@ -128,12 +128,14 @@ if __name__ == '__main__':
         inv_metric_depth = 1/metric_depth
 
         inv_metric_std = inv_metric_depth.std()
-        inv_metric_mean = inv_metric_depth.mean() - inverse_metric_min
+        inv_metric_mean = inv_metric_depth.mean()
 
         norm_inv = depths[i]
         norm_inv_std = norm_inv.std()
         norm_inv_mean = norm_inv.mean()
 
+        #std_std_constant is used convert from rel depth (as given by the model) -> rel depth standard vales -> metric depthnstandard vales -> metric depth
+        #all that it baked in to the var but the intermidate steps cancel out, so are not writen out.
         std_std_constant = inv_metric_std / norm_inv_std
 
 
@@ -166,13 +168,8 @@ if __name__ == '__main__':
         #inv_metric_mean = 0.395
         #norm_inv_mean = 680
 
-        #Convert from metric model std to rel model std
-        inverse_depth_m_min = ((norm_inv - norm_inv_mean) * std_std_constant) + inv_metric_mean
-
-        #the above can also be done using min and max instead of standard deviations but it is less robust (i think)
-        #inverse_depth_m_min = norm_inverse_depth * (inverse_metric_max-inverse_metric_min)
-
-        inverse_reconstructed_metric_depth = inverse_depth_m_min + inverse_metric_min
+        #Convert from inverse rel depth to inverse metric depth
+        inverse_reconstructed_metric_depth = ((norm_inv - norm_inv_mean) * std_std_constant) + inv_metric_mean
 
         metric_depth2 = 1/inverse_reconstructed_metric_depth
 

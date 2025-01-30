@@ -57,6 +57,8 @@ if __name__ == '__main__':
     frame_rate = raw_video.get(cv2.CAP_PROP_FPS)
         
     cam_matrix = depth_map_tools.compute_camera_matrix(args.xfov, args.yfov, frame_width, frame_height)
+    fovx, fovy = depth_map_tools.fov_from_camera_matrix(cam_matrix)
+    print("Camera fovx: ", fovx, "fovy:", fovy)
 
     out = None
     if args.draw_frame == -1:
