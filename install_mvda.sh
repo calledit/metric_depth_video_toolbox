@@ -31,8 +31,7 @@ cp -a src/metric_dpt_func.py Video-Depth-Anything/Depth-Anything-V2/metric_depth
 cp -a src/video_metric_convert.py Video-Depth-Anything/.
 
 #to install with support for unidepth (requires cuda 11.8 and torch 2.2.0)
-if false
-then
+if [[ " $@ " =~ " -unidepth " ]]; then
 	git clone https://github.com/lpiccinelli-eth/UniDepth
 
 	cd UniDepth
