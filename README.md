@@ -13,7 +13,7 @@ https://github.com/calledit/metric_video_depth_anything/releases/tag/Showcase
 ## This Repo consists of:
 1. A tool for generating metric 3D depth videos based on the Depth-Anything series of machine learning models.
 By taking the stability in the videos from [Video-Depth-Anything](https://github.com/DepthAnything/Video-Depth-Anything) and combining it with the  metric version of [Depth-Anything-V2](https://github.com/DepthAnything/Depth-Anything-V2) it is possible to generate stable metric depth videos.
-2. A tool for generating metric 3D depth videos based on [UniDepth](https://github.com/lpiccinelli-eth/UniDepth) UniDepth is not made for video so the videos it produces are very jittery. However UniDepth has the capability of using FOV as given by the user. Which means it's output tend to be more accurate as a whole. That said UniDepth has been trained wiht less data so it strugles with certain types of scenes. 
+2. A tool for generating metric 3D depth videos based on [UniDepth](https://github.com/lpiccinelli-eth/UniDepth)
 3. Tools for working with and visualising the metric 3D videos.
 4. Tools for doing things like 3D stereo rendering or viewing a video from above or othervise altering the camera perspective.
 5. (WIP) Tools for using the generated metric 3D videos for camera tracking(camera pose estimation) and (full scene 3D recunstruction).
@@ -33,7 +33,7 @@ python video_metric_convert.py --color_video some_video.mkv
 ```
 
 #### unidepth_video.py (rquires installation with  ./install_mvda.sh -unidepth )
-_Uses ML to create FOV locked metric depth video from any normal video file_ 
+_Uses ML to create FOV locked metric depth video from any normal video file._ UniDepth is not made for video so the videos it produces are very jittery. However UniDepth has the capability of using FOV as given by the user. Which means it's output tend to be more accurate as a whole. That said UniDepth has been trained wiht less data so it strugles with certain types of scenes. 
 ```bash
 # Create a metric depth video from a normal video (Note that the unidepth_video.py script is copied to the UniDepth folder on installation.)
 
