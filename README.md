@@ -10,10 +10,13 @@ https://youtu.be/nEiUloZ591Q
 Stero video clip samples can be found here:
 https://github.com/calledit/metric_video_depth_anything/releases/tag/Showcase
 
-### This Repo consists of:
-1. A tool for generating metric 3D videos based on the Depth-Anything series of machine learning models.
+## This Repo consists of:
+1. A tool for generating metric 3D depth videos based on the Depth-Anything series of machine learning models.
 By taking the stability in the videos from [Video-Depth-Anything](https://github.com/DepthAnything/Video-Depth-Anything) and combining it with the  metric version of [Depth-Anything-V2](https://github.com/DepthAnything/Depth-Anything-V2) it is possible to generate stable metric depth videos.
-2. Tools for working with and visualising the metric 3D videos. Tools for doing things like 3D stereo rendering or viewing a video from above or othervise altering the camera perspective. In the pipeline there is also some work on using the generated metric 3D video for very accurate camera tracking.
+2. A tool for generating metric 3D depth videos based on [UniDepth](https://github.com/lpiccinelli-eth/UniDepth) UniDepth is not made for video so the videos it produces are very jittery. However UniDepth has the capability of using FOV as given by the user. Which means it's output tend to be more accurate as a whole. That said UniDepth has been trained wiht less data so it strugles with certain types of scenes. 
+3. Tools for working with and visualising the metric 3D videos.
+4. Tools for doing things like 3D stereo rendering or viewing a video from above or othervise altering the camera perspective.
+5. (WIP) Tools for using the generated metric 3D videos for camera tracking(camera pose estimation) and (full scene 3D recunstruction).
 
 
 ## Usage 
@@ -26,6 +29,16 @@ _Uses ML to create stable metric depth video from any normal video file_
 # Video-Depth-Anything memory usage scales with aspect ratio. If you are using a 3090 with 24Gb memory and video with 16:9 aspect you need to lower the --input_size to 440 or crop the video down. Aspect ratio of 4:3 works well.
 cd Video-Depth-Anything
 python video_metric_convert.py --color_video some_video.mkv
+
+```
+
+#### unidepth_video.py (rquires installation with  ./install_mvda.sh -unidepth )
+_Uses ML to create FOV locked metric depth video from any normal video file_ 
+```bash
+# Create a metric depth video from a normal video (Note that the unidepth_video.py script is copied to the UniDepth folder on installation.)
+
+cd UniDepth
+python unidepth_video.py --color_video some_video.mkv -xfov 45
 
 ```
 
@@ -52,7 +65,26 @@ _Converts a RGB encoded depth video to a simple greyscale video, a format which 
 python rgb_depth_to_greyscale.py --depth_video some_video_depth.mkv
 ```
 
+#### create_video_mask.sh
+_Create a vido mask for the videos main subjects uses rembg and ffmpeg. Install with pip install rembg_
+```bash
+#Create a vido mask
+./create_video_mask.sh some_video.mkv
+```
 
+#### track_points_in_video.py
+_Tracks points in the video. Used for 3D alignment and camera tracking. Generates a file called some_video_tracking.json what contains tracking points for the entire video._
+```bash
+#track points
+python track_points_in_video.py --color_video some_video.mkv
+```
+
+#### align_3d_points.py (WIP)
+_Uses tracked points in the video and projectes them on to the depth video for 3D alignment and camera tracking._
+```bash
+#align 3d points
+python align_3d_points.py --track_file some_video_tracking.json --color_video some_video.mkv --depth_video some_video_depth.mkv --xfov 45 
+```
 
 ## Output
 The result is a metric depth video file called something like outputs/{filename}_depth.mkv.
