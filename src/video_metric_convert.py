@@ -43,7 +43,7 @@ def save_24bit(frames, output_video_path, fps, max_depth_arg):
 
     MODEL_maxOUTPUT_depth = max_depth_arg ### pick a value slitght above max metric depth to save the depth in th video file nicly
     # if you pick a high value you will lose resolution
-    
+
     # incase you did not pick a absolute value we max out (this mean each video will have depth relative to max_depth)
     # (if you want to use the video as a depth souce a absolute value is prefrable)
     if MODEL_maxOUTPUT_depth < max_depth:
@@ -99,7 +99,7 @@ if __name__ == '__main__':
 
     #Figure out metric conversion factor and rescale depth
 
-    #often_control_metric_depth = 4
+    often_control_metric_depth = 4
 
     std_std_constants = []
     inv_metric_means = []
@@ -109,47 +109,45 @@ if __name__ == '__main__':
     for i in range(0, len(frames)):
 
         print("---- frame ", i, " ---")
-        #We techinally only calculate the metric conversion every so often as it genreally is slow to change
-        #if i % often_control_metric_depth == 0 or len(std_std_constants) < 32/often_control_metric_depth:
-
-		# get the metric depthmap
-        metric_depth = metric_dpt_func.get_metric_depth(frames[i])
-
-        metric_min = metric_depth.min()
-        metric_max = metric_depth.max()
-
-
-        inverse_metric_max = 1/metric_min
-        inverse_metric_min = 1/metric_max
-
-        #The inverse_metric_min comes from the unstable depthmap if you use the real one there is brutal jittering so we overide it and just use 0
-        inverse_metric_min = 0
-
-        inv_metric_depth = 1/metric_depth
-
-        inv_metric_std = inv_metric_depth.std()
-        inv_metric_mean = inv_metric_depth.mean()
 
         norm_inv = depths[i]
         norm_inv_std = norm_inv.std()
         norm_inv_mean = norm_inv.mean()
 
-        #std_std_constant is used convert from rel depth (as given by the model) -> rel depth standard vales -> metric depthnstandard vales -> metric depth
-        #all that it baked in to the var but the intermidate steps cancel out, so are not writen out.
-        std_std_constant = inv_metric_std / norm_inv_std
+        #We techinally only calculate the metric conversion every so often as it genreally is slow to change
+        if i % often_control_metric_depth == 0 or len(std_std_constants) < 10:
+
+            # get the metric depthmap
+            metric_depth = metric_dpt_func.get_metric_depth(frames[i])
+
+            metric_min = metric_depth.min()
+            metric_max = metric_depth.max()
 
 
-        #Debug stuff
-        print("inv_metric_std: ", inv_metric_std)
-        print("norm_inv_std: ", norm_inv_std)
-        print("std_std_constant: ", std_std_constant)
-        print("norm_inv_mean: ", norm_inv_mean)
-        print("inv_metric_mean: ", inv_metric_mean)
-        print("std_std_constant: ", std_std_constant)
+            inverse_metric_max = 1/metric_min
+            inverse_metric_min = 1/metric_max
 
-        std_std_constants.append(std_std_constant)
-        inv_metric_means.append(inv_metric_mean)
-        norm_inv_means.append(norm_inv_mean)
+            #The inverse_metric_min comes from the unstable depthmap if you use the real one there is brutal jittering so we overide it and just use 0
+            inverse_metric_min = 0
+
+            inv_metric_depth = 1/metric_depth
+
+            inv_metric_std = inv_metric_depth.std()
+            inv_metric_mean = inv_metric_depth.mean()
+
+            #std_std_constant is used convert from rel depth (as given by the model) -> rel depth standard vales -> metric depthnstandard vales -> metric depth
+            #all that it baked in to the var but the intermidate steps cancel out, so are not writen out.
+            std_std_constant = inv_metric_std / norm_inv_std
+
+
+            #Debug stuff
+            print("raw inv_metric_std: ", inv_metric_std)
+            print("raw norm_inv_std: ", norm_inv_std)
+            print("raw std_std_constant: ", std_std_constant)
+
+            std_std_constants.append(std_std_constant)
+            inv_metric_means.append(inv_metric_mean)
+            norm_inv_means.append(norm_inv_mean)
 
 
         #When there is less than 10 frames in the rolling average we use the first frame for reference instead the rolling average need to stabilize
@@ -162,7 +160,11 @@ if __name__ == '__main__':
             inv_metric_mean = np.mean(inv_metric_means)
             norm_inv_mean = np.mean(norm_inv_means)
             
-            
+        print("norm_inv_mean: ", norm_inv_mean)
+        print("inv_metric_mean: ", inv_metric_mean)
+        print("std_std_constant: ", std_std_constant)
+
+
         # Looking the constants instead of using rolling averages can give better results but it may allso have issues with moving cameras (i think)
         #std_std_constant = 0.00031527123
         #inv_metric_mean = 0.395
@@ -173,9 +175,9 @@ if __name__ == '__main__':
 
         metric_depth2 = 1/inverse_reconstructed_metric_depth
 
-        
-        # clear the rolling average when it has over 100 frames
-        if len(std_std_constants) > 100:
+
+        # clear the rolling average when it has a timespan over 60 frames (which i guess might be about 2 s)
+        if len(std_std_constants) > 60/often_control_metric_depth:
             std_std_constants.pop(0)
             inv_metric_means.pop(0)
             norm_inv_means.pop(0)
