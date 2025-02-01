@@ -148,6 +148,15 @@ Uses ML to create a video mask for the main subjects in the video based on rembg
 ./create_video_mask.sh some_video.mkv
 ```
 
+
+#### apply_inpainting.sh
+Uses ML paint over logos, text overlays or other objects from a video, can be usefull to do before runing the depth ML models as they thend to produce prro results when the video has logos over text overlays.
+```bash
+example:
+Create a overlay_mask.png that is white where the overlay is.
+./create_video_mask.sh some_video.mkv
+```
+
 #### track_points_in_video.py
 Tracks points in the video. Uses ML model cotracker3 to track points in the video. Outputs a _tracking.json_ file that contains tracking points for the entire video.
 ```bash
