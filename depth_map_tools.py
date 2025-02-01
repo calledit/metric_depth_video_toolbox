@@ -2,6 +2,16 @@ import numpy as np
 import open3d as o3d
 import copy
 import cv2
+from contextlib import contextmanager
+import time
+
+@contextmanager
+def timer(name = 'not named'):
+    start = time.perf_counter()
+    yield
+    end = time.perf_counter()
+    print(f"{name}: {end - start:.6f} seconds")
+
 
 def compute_camera_matrix(fov_horizontal_deg, fov_vertical_deg, image_width, image_height):
 
@@ -38,11 +48,14 @@ def compute_camera_matrix(fov_horizontal_deg, fov_vertical_deg, image_width, ima
     return camera_matrix
 
 
-def svd(source_points, target_points):
+def svd(source_points, target_points, ZeroCentroid = False):
     # Compute the centroid of each set of points
-
-    centroid_source = np.mean(source_points, axis=0)
-    centroid_target = np.mean(target_points, axis=0)
+    if ZeroCentroid: #If we only care about rotation. ie the camera is locked in place
+        centroid_source = np.array([0.0,0.0,0.0])
+        centroid_target = np.array([0.0,0.0,0.0])
+    else:
+        centroid_source = np.mean(source_points, axis=0)
+        centroid_target = np.mean(target_points, axis=0)
 
     #print(source_points, target_points)
     # Center the points around the centroid
@@ -74,6 +87,65 @@ def svd(source_points, target_points):
 
     return transformation_matrix
 
+def transform_points(points, transform):
+    """
+    Transform a set of 3D points using a 4x4 homogeneous transform.
+
+    Parameters
+    ----------
+    points : numpy.ndarray, shape (N, 3)
+        Input 3D points.
+    transform : numpy.ndarray, shape (4, 4)
+        4x4 homogeneous transformation matrix.
+
+    Returns
+    -------
+    numpy.ndarray, shape (N, 3)
+        Transformed 3D points.
+    """
+    # 1. Convert Nx3 points to Nx4 homogeneous coordinates by appending a column of 1s.
+    ones = np.ones((points.shape[0], 1), dtype=points.dtype)
+    points_hom = np.hstack([points, ones])  # Now shape is (N, 4)
+
+    # 2. Multiply by the 4x4 transformation matrix
+    # Note: We use transform.T for correct multiplication with row vectors
+    transformed_hom = points_hom @ transform.T  # Still (N, 4)
+
+    # 3. Convert back to Nx3 by dropping the last column (the 'w' component)
+    transformed_points = transformed_hom[:, :3]
+
+    return transformed_points
+
+def pnpSolve_ransac(t3d_points_new_frame, mkpts2, cam_mat, distCoeffs = None, refine = False):
+    """
+        returns a transformation matrix
+    """
+    if distCoeffs is None:
+        distCoeffs = np.array([0, 0, 0, 0], dtype=np.float64)  # distortion coefficients
+
+    #mkpts2 = cv.undistortPoints(mkpts2.reshape(-1, 1, 2), cam_mat, distCoeffs).squeeze()
+    #mkpts2 = np.dot(mkpts2, cam_mat[:2, :2].T) + cam_mat[:2, 2 ]
+    #if you set the reprojectionError to low the algorithm goes to shit
+    reperr = 6
+    if refine:
+        reperr = 1
+    success, rvec, tvec, inliers = cv2.solvePnPRansac(t3d_points_new_frame, np.array(mkpts2,dtype=np.float64), cam_mat, distCoeffs, reprojectionError=reperr, iterationsCount=100000)
+    matrix = np.eye(4)
+    if success:
+        tv = np.array([tvec[0][0], tvec[1][0], tvec[2][0]])
+        mat, jac = cv2.Rodrigues(rvec)
+
+        if refine:
+            rvec2, tvec2 = cv2.solvePnPRefineLM(np.array(t3d_points_new_frame[inliers],dtype=np.float64), np.array(mkpts2[inliers],dtype=np.float64), cam_mat, distCoeffs, rvec, tvec)
+            tv = np.array([tvec2[0][0], tvec2[1][0], tvec2[2][0]])
+            mat, jac = cv2.Rodrigues(rvec2)
+
+        matrix[:3, :3] = mat
+        matrix[:3, 3] = tv
+        return matrix
+    print("solvePnP FAIL")
+    return None
+
 def pts_2_pcd(points):
     pcd = o3d.geometry.PointCloud()
     pcd.points = o3d.utility.Vector3dVector(points)
@@ -104,11 +176,11 @@ def project_2d_points_to_3d(points, depth, camera_matrix, distCoeffs = None):
     return np.array(points_3d)
 
 
-def get_mesh_from_depth_map(depth_map, cam_mat, color_frame = None):
+def get_mesh_from_depth_map(depth_map, cam_mat, color_frame = None, inp_mesh = None, remove_edges = False):
     points, height, width = create_point_cloud_from_depth(depth_map, cam_mat, True)
 
     # Create mesh from point cloud
-    mesh = create_mesh_from_point_cloud(points, height, width, color_frame)
+    mesh = create_mesh_from_point_cloud(points, height, width, color_frame, inp_mesh, remove_edges)
     return mesh
 
 def create_point_cloud_from_depth(depth_image, intrinsics, of_by_one = False):
@@ -134,39 +206,179 @@ def create_point_cloud_from_depth(depth_image, intrinsics, of_by_one = False):
     return points, height, width
 
 
-def create_mesh_from_point_cloud(points, height, width, image_frame = None):
-    # Create a mesh by connecting adjacent points
+
+
+def is_triangle_valid(v1, v2, v3, depth_threshold_scale):
+    """
+    Checks if the triangle defined by vertices v1, v2, and v3 is valid.
+    Instead of a fixed threshold, the maximum allowed depth difference is 
+    computed as depth_threshold_scale * average_depth of the triangle.
+    
+    Parameters:
+      - v1, v2, v3: Each is a numpy array [x, y, z] representing a vertex.
+      - depth_threshold_scale: A scaling factor applied to the triangle's 
+                               average depth to determine the threshold.
+    
+    Returns:
+      - True if the depth difference is within the computed threshold; False otherwise.
+    """
+    depths = np.array([v1[2], v2[2], v3[2]])
+    avg_depth = depths.mean()
+    # Compute the threshold as a linear function of the average depth.
+    threshold = depth_threshold_scale * avg_depth
+    return (depths.max() - depths.min()) <= threshold
+
+zero_identity_matrix = np.identity(4)
+def create_mesh_from_point_cloud(points, height, width,
+                                 image_frame=None, inp_mesh=None, remove_edges=False):
+    """
+    Creates (or updates) an Open3D TriangleMesh from a grid-organized point cloud.
+    If no input mesh is provided or if remove_edges is True, the triangles are computed.
+    Otherwise (when inp_mesh is provided and remove_edges is False), the function
+    simply updates the vertices (and optionally the vertex colors).
+
+    Parameters:
+      - points: a numpy array that can be reshaped to (-1, 3) containing the 3D points.
+      - height: number of rows in the grid.
+      - width: number of columns in the grid.
+      - image_frame: (optional) image whose colors are mapped to the mesh vertices.
+      - inp_mesh: (optional) an existing mesh to update.
+      - remove_edges: if True, triangles with large depth gaps are filtered out.
+
+    Returns:
+      - mesh: an Open3D TriangleMesh with updated vertices (and triangles if computed).
+    """
+    
+    # Reshape the points into a (N, 3) array of vertices.
+    vertices = points.reshape(-1, 3)
+    
+    # Case 1: We need to compute triangles (either no input mesh exists, or we need to remove edges).
+    if inp_mesh is None or remove_edges:
+        # If there's no input mesh, create a new one; otherwise, update the provided mesh.
+        if inp_mesh is None:
+            mesh = o3d.geometry.TriangleMesh()
+        else:
+            mesh = inp_mesh
+            mesh.transform(zero_identity_matrix)
+        
+        # Generate grid-based triangle indices using vectorized operations.
+        # For each cell at (i, j) with i in [0, height-2] and j in [0, width-2]:
+        #   - The four corner indices of the cell are computed.
+        #   - Two triangles are formed:
+        #         tri1: (i, j), (i+1, j), (i+1, j+1)
+        #         tri2: (i, j), (i+1, j+1), (i, j+1)
+        grid_i, grid_j = np.meshgrid(np.arange(height - 1), np.arange(width - 1), indexing='ij')
+        grid_i = grid_i.ravel()
+        grid_j = grid_j.ravel()
+        
+        idx1 = grid_i * width + grid_j
+        idx2 = (grid_i + 1) * width + grid_j
+        idx3 = (grid_i + 1) * width + (grid_j + 1)
+        idx4 = grid_i * width + (grid_j + 1)
+        
+        tri1 = np.stack([idx1, idx2, idx3], axis=1)
+        tri2 = np.stack([idx1, idx3, idx4], axis=1)
+        triangles_all = np.vstack([tri1, tri2])
+        
+        # If remove_edges is True, filter triangles based on a depth gap that scales with average depth.
+        if remove_edges:
+            depth_threshold_scale = 0.04
+            # Gather vertices for each triangle; shape: (N_tri, 3, 3)
+            tri_vertices = vertices[triangles_all]
+            # Extract the z-values (depth) for each vertex.
+            depths = tri_vertices[:, :, 2]
+            # Compute the average depth for each triangle.
+            avg_depth = depths.mean(axis=1)
+            # Allowed depth gap is linear with average depth.
+            allowed_thresholds = depth_threshold_scale * avg_depth
+            # Compute the actual depth range for each triangle.
+            depth_ranges = depths.max(axis=1) - depths.min(axis=1)
+            # Only keep triangles where the depth range is within the allowed threshold.
+            valid_mask = depth_ranges <= allowed_thresholds
+            triangles_all = triangles_all[valid_mask]
+        
+        # Set the computed triangles and vertices on the mesh.
+        mesh.triangles = o3d.utility.Vector3iVector(triangles_all)
+        mesh.vertices = o3d.utility.Vector3dVector(vertices)
+    
+    # Case 2: We already have an input mesh and we are not removing edges.
+    # In this case, simply update the vertices (and leave the triangles unchanged).
+    else:
+        mesh = inp_mesh
+        mesh.vertices = o3d.utility.Vector3dVector(vertices)
+    
+    # Optionally, assign vertex colors if an image frame is provided.
+    if image_frame is not None:
+        colors = np.array(image_frame).reshape(-1, 3) / 255.0
+        mesh.vertex_colors = o3d.utility.Vector3dVector(colors)
+    
+    #mesh.compute_vertex_normals()
+    return mesh
+
+def create_mesh_from_point_cloud2(points, height, width,
+                                 image_frame=None, inp_mesh=None, remove_edges=False):
+    """
+    Creates an Open3D TriangleMesh from a grid-organized point cloud while
+    filtering out triangles that span large depth gaps. The allowable depth gap 
+    scales linearly with the triangle's average depth.
+    
+    Returns:
+      - mesh: the Open3D TriangleMesh with only the valid triangles.
+    """
+    
+    if remove_edges:
+        depth_threshold_scale = 0.04
+                                 
+    # Reshape the points into a list of vertices.
     vertices = points.reshape(-1, 3)
 
-    # Create triangles based on the grid layout
-    triangles = []
-    for i in range(height - 1):
-        for j in range(width - 1):
-            # Indices for the square formed by the current grid cell
-            idx1 = i * width + j
-            idx2 = (i + 1) * width + j
-            idx3 = (i + 1) * width + (j + 1)
-            idx4 = i * width + (j + 1)
+    # Create or update the Open3D mesh. (This is very sow so we only do it when we need to)
+    if remove_edges or inp_mesh is None:
+        if inp_mesh is None:
+            mesh = o3d.geometry.TriangleMesh()
+        else:
+            mesh = inp_mesh
+            mesh.transform(zero_identity_matrix)
+        # Build triangles by connecting grid-adjacent points,
+        # and only keep triangles that pass the depth continuity check.
+        triangles = []
+        for i in range(height - 1):
+            for j in range(width - 1):
+                # Indices for the four corners of the current grid cell.
+                idx1 = i * width + j
+                idx2 = (i + 1) * width + j
+                idx3 = (i + 1) * width + (j + 1)
+                idx4 = i * width + (j + 1)
 
-            # Create two triangles for each square
-            triangles.append([idx1, idx2, idx3])
-            triangles.append([idx1, idx3, idx4])
+                # Define two candidate triangles for the cell.
+                tri1 = [idx1, idx2, idx3]
+                tri2 = [idx1, idx3, idx4]
 
-    # Convert triangles to a NumPy array
-    triangles = np.array(triangles)
+                if remove_edges:
+                    # Check each triangle with a depth threshold that scales linearly with depth.
+                    if is_triangle_valid(vertices[idx1], vertices[idx2], vertices[idx3], depth_threshold_scale):
+                        triangles.append(tri1)
+                    if is_triangle_valid(vertices[idx1], vertices[idx3], vertices[idx4], depth_threshold_scale):
+                        triangles.append(tri2)
+                else:
+                    triangles.append(tri1)
+                    triangles.append(tri2)
 
-    # Create Open3D mesh
-    mesh = o3d.geometry.TriangleMesh()
+        
+        mesh.triangles = o3d.utility.Vector3iVector(np.array(triangles))
+    else:
+        mesh = inp_mesh
+        # Assume zero_identity_matrix is defined elsewhere if needed.
+        mesh.transform(zero_identity_matrix)
+    
     mesh.vertices = o3d.utility.Vector3dVector(vertices)
-    mesh.triangles = o3d.utility.Vector3iVector(triangles)
 
+    # Optionally, assign vertex colors from an image frame.
     if image_frame is not None:
-        color_image = image_frame
-        colors = np.array(color_image).reshape(-1, 3) / 255.0
+        colors = np.array(image_frame).reshape(-1, 3) / 255.0
         mesh.vertex_colors = o3d.utility.Vector3dVector(colors)
 
     #mesh.compute_vertex_normals()
-
     return mesh
 
 vis = None
@@ -174,7 +386,7 @@ v_h = None
 use_ofscreen = True
 v_w = None
 rend = None
-def render(pcd, cam_mat, depth = False, w = None, h = None, extrinsic_matric = np.eye(4)):
+def render(pcd, cam_mat, depth = False, w = None, h = None, extrinsic_matric = np.eye(4), bg_color = np.array([0, 0, 0])):
     global vis, v_h, v_w, use_ofscreen, rend
 
     if w is None:
@@ -208,6 +420,7 @@ def render(pcd, cam_mat, depth = False, w = None, h = None, extrinsic_matric = n
         vis.clear_geometries()
 
         rend_opt = vis.get_render_option()
+        rend_opt.background_color = bg_color
         ctr = vis.get_view_control()
         ctr.set_lookat([0, 0, 1])
         ctr.set_up([0, -1, 0])
@@ -247,10 +460,14 @@ def render(pcd, cam_mat, depth = False, w = None, h = None, extrinsic_matric = n
         vis.update_renderer()
 
 
-        if depth:
-            image = vis.capture_depth_float_buffer(do_render=True)
-        else:
-            image = vis.capture_screen_float_buffer(do_render=True)
+        #For some reason using capture_depth_float_buffer is very slow taking about a tenth of a second while capture_screen_float_buffer is like 100 times faster
+        #Probably due to this https://github.com/isl-org/Open3D/blob/c6d474b3fa0b47adbcff51219f5928855c3bb806/cpp/open3d/visualization/visualizer/VisualizerRender.cpp#L286
+        if depth == -2:
+            return (np.asarray(vis.capture_screen_float_buffer(do_render=True)), np.asarray(vis.capture_depth_float_buffer(do_render=False)))
+        if depth == False:
+            return(np.asarray(vis.capture_screen_float_buffer(do_render=True)))
+        if depth == True:
+            return(np.asarray(vis.capture_depth_float_buffer(do_render=True)))
     else:
 
         scene = rend.scene

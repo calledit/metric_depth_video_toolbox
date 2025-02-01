@@ -2,6 +2,7 @@ import argparse
 import cv2
 import numpy as np
 import os
+import json
 import sys
 import time
 
@@ -21,8 +22,12 @@ if __name__ == '__main__':
     parser.add_argument('--yfov', type=int, help='fov in deg in the y-direction, calculated from aspectratio and xfov in not given', required=False)
     parser.add_argument('--max_depth', default=20, type=int, help='the max depth that the video uses', required=False)
     parser.add_argument('--render', action='store_true', help='Render to video insted of GUI', required=False)
+    parser.add_argument('--remove_edges', action='store_true', help='Tries to remove edges that was not visible in image(it is a bit slow)', required=False)
+    parser.add_argument('--compressed', action='store_true', help='Render the video in a compressed format. Reduces file size but also quality.', required=False)
     parser.add_argument('--draw_frame', default=-1, type=int, help='open gui with specific frame', required=False)
     parser.add_argument('--max_frames', default=-1, type=int, help='quit after max_frames nr of frames', required=False)
+    parser.add_argument('--transformation_file', type=str, help='file with scene transformations from the aligner', required=False)
+    parser.add_argument('--transformation_lock_frame', default=0, type=int, help='the frame that the transfomrmation will use as a base', required=False)
     
     parser.add_argument('--x', default=2.0, type=float, help='cam x in meters', required=False)
     parser.add_argument('--y', default=2.0, type=float, help='cam y in meters', required=False)
@@ -51,6 +56,19 @@ if __name__ == '__main__':
         if not os.path.isfile(args.color_video):
             raise Exception("input color_video does not exist")
         color_video = cv2.VideoCapture(args.color_video)
+    
+    transformations = None
+    if args.transformation_file is not None:
+        if not os.path.isfile(args.transformation_file):
+            raise Exception("input transformation_file does not exist")
+        with open(args.transformation_file) as json_file_handle:
+            transformations = json.load(json_file_handle)
+        
+        if args.transformation_lock_frame != 0:
+            ref_frame = transformations[args.transformation_lock_frame]
+            ref_frame_inv_trans = np.linalg.inv(ref_frame)
+            for i, transformation in enumerate(transformations):
+                transformations[i] = transformation @ ref_frame_inv_trans
         
     raw_video = cv2.VideoCapture(args.depth_video)
     frame_width, frame_height = int(raw_video.get(cv2.CAP_PROP_FRAME_WIDTH)), int(raw_video.get(cv2.CAP_PROP_FRAME_HEIGHT))
@@ -75,11 +93,18 @@ if __name__ == '__main__':
             vis.update_renderer()
             params = ctr.convert_to_pinhole_camera_parameters()
         else:
-            output_file = args.depth_video + "_render.mp4"
+            
             # avc1 seams to be required for Quest 2 if linux complains use mp4v those video files that wont work on Quest 2
             # Read this to install avc1 codec from source https://swiftlane.com/blog/generating-mp4s-using-opencv-python-with-the-avc1-codec/
-            out = cv2.VideoWriter(output_file, cv2.VideoWriter_fourcc(*"avc1"), frame_rate, (frame_width, frame_height))
-    org_mesh = None
+            # generally it is better to render without compression then Add compression at a later stage with a better compresser like FFMPEG.
+            if args.compressed:
+                output_file = args.depth_video + "_render.mp4"
+                codec = cv2.VideoWriter_fourcc(*"avc1")
+            else:
+                output_file = args.depth_video + "_render.mkv"
+                codec = cv2.VideoWriter_fourcc(*"FFV1")
+            out = cv2.VideoWriter(output_file, codec, frame_rate, (frame_width, frame_height))
+    mesh = None
 
     frame_n = 0
     while raw_video.isOpened():
@@ -112,22 +137,28 @@ if __name__ == '__main__':
         depth = depth.astype(np.float32)/((255**4)/MODEL_maxOUTPUT_depth)
         
         #This is very slow needs optimizing (i think)
-        mesh = depth_map_tools.get_mesh_from_depth_map(depth, cam_matrix, color_frame)
+        mesh_ret = depth_map_tools.get_mesh_from_depth_map(depth, cam_matrix, color_frame, mesh, remove_edges = args.remove_edges)
         
+        if mesh is None:
+            if not args.render:
+                vis.add_geometry(mesh_ret)
+        mesh = mesh_ret
+        
+        if transformations is not None:
+            transform_to_zero = np.array(transformations[frame_n-1])
+            mesh.transform(transform_to_zero)
         
         if args.draw_frame == frame_n:
             depth_map_tools.draw([mesh])
             exit(0)
         
-        if org_mesh is None:
-            org_mesh = mesh
-            if not args.render:
-                vis.add_geometry(org_mesh)
+        #if org_mesh is None:
+        #    org_mesh = mesh
+        #    if not args.render:
+        #        vis.add_geometry(org_mesh)
         
         if not args.render:
-            org_mesh.vertices = mesh.vertices
-            org_mesh.vertex_colors = mesh.vertex_colors
-            vis.update_geometry(org_mesh)
+            vis.update_geometry(mesh)
         
         
         # Set Camera position
@@ -152,7 +183,7 @@ if __name__ == '__main__':
                 vis.poll_events()
                 vis.update_renderer()
         else:
-            image = (depth_map_tools.render(mesh, cam_matrix, extrinsic_matric = ext)*255).astype(np.uint8)
+            image = (depth_map_tools.render(mesh, cam_matrix, extrinsic_matric = ext, bg_color = np.array([1.0,1.0,1.0]))*255).astype(np.uint8)
             out.write(cv2.cvtColor(image, cv2.COLOR_RGB2BGR))
         
         if args.max_frames < frame_n and args.max_frames != -1:

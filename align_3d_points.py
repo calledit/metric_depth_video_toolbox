@@ -4,21 +4,35 @@ import cv2
 import json
 import argparse
 import depth_map_tools
+from itertools import islice
 
     
     
-def find_best_matching_frame(selected_frame, frames, used_frames):
+def find_best_matching_frame(selected_frame_id, frames, used_frames):
+    selected_frame = frames[selected_frame_id]
     # Extract point IDs from the selected frame
-    point_ids_in_selected_frame = {point[0] for point in selected_frame}  # Use a set for fast lookup
+    if len(selected_frame) == 0:
+        print(selected_frame_id, "has zero registerd points")
+        return
+    point_ids_in_selected_frame = set(selected_frame[:, 0])  # Use a set for fast lookup
     
     frame_common_counts = []  # Store (frame_id, common points)
+    
+    
+    
+    start_index = max(0, selected_frame_id - 60)
+    end_index = min(selected_frame_id + 60, len(frames))
 
-    for frame_id, frame in enumerate(frames):
+    #for frame_id, frame in enumerate(frames):
+    for frame_id, frame in enumerate(islice(frames, start_index, end_index), start=start_index):
         if frame_id in used_frames:  # Ignore already used frames
             continue
-
+            
+        if len(frame) == 0:
+            continue
+            
         # Extract point IDs from the current frame
-        points_in_frame = {point[0] for point in frame}  
+        points_in_frame = set(frame[:, 0])
         
         # Find common points
         common_elements = list(point_ids_in_selected_frame & points_in_frame)  # Set intersection
@@ -35,6 +49,13 @@ def find_best_matching_frame(selected_frame, frames, used_frames):
         best_frame_id, best_common_points = None, []
 
     return best_frame_id, best_common_points
+    
+    
+class NumpyEncoder(json.JSONEncoder):
+    def default(self, obj):
+        if isinstance(obj, np.ndarray) or isinstance(obj, torch.Tensor):
+            return obj.tolist()
+        return super().default(obj)
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Align 3D video based on depth video and a point tracking file')
@@ -47,6 +68,8 @@ if __name__ == '__main__':
     parser.add_argument('--depth_video', type=str, help='depth video', required=True)
     parser.add_argument('--max_depth', default=20, type=int, help='the max depth that the video uses', required=False)
     parser.add_argument('--color_video', type=str, help='video file to use as color input only used when debuging', required=False)
+    parser.add_argument('--assume_stationary_camera', action='store_true', help='Makes the algorithm assume the camera a stationary_camera, leads to better tracking.', required=False)
+    
 
     args = parser.parse_args()
     
@@ -65,6 +88,9 @@ if __name__ == '__main__':
     
     with open(args.track_file) as json_track_file_handle:
         frames = json.load(json_track_file_handle)
+    
+    
+    out_file = args.depth_video + "_transformations.json"
     
     MODEL_maxOUTPUT_depth = args.max_depth
         
@@ -89,10 +115,25 @@ if __name__ == '__main__':
     for i, frame in enumerate(frames):
         frames[i] = np.array(frames[i])
     
+    
+    used_frames = []
+    
+    #1. Pick the first frame
+    frame_n = 0
+    used_frames.append(frame_n)
+    
+    
+    transformations = []
+    to_ref_zero = np.eye(4)
+    transformations.append(to_ref_zero.tolist())
+    
+    # Load frames
     depth_frames = []
     rgb_frames = []
     fr_n = 0
     while raw_video.isOpened():
+        
+        print("--- frame ", fr_n + 1, " ---")
         ret, raw_frame = raw_video.read()
         if not ret:
             break
@@ -108,28 +149,31 @@ if __name__ == '__main__':
             
         if mask_video is not None:
             ret, mask = mask_video.read()
-            mask = cv2.cvtColor(mask, cv2.COLOR_BGR2GRAY)
+            if ret:
+                mask = cv2.cvtColor(mask, cv2.COLOR_BGR2GRAY)
             
             
-            rem = []
-            rem_global = []
-            for i, point in enumerate(frames[fr_n]):
-                if mask[point[2], point[1]] > 0:
-                    rem.append(i)
-                    rem_global.append(point[0])
+                rem = []
+                rem_global = []
+                for i, point in enumerate(frames[fr_n]):
+                    if mask[point[2], point[1]] > 0:
+                        rem.append(i)
+                        rem_global.append(point[0])
             
-            if len(rem) > 0:    
-                frames[fr_n] = np.delete(frames[fr_n], rem, axis=0)
+                if len(rem) > 0:
+                    frames[fr_n] = np.delete(frames[fr_n], rem, axis=0)
             
-            if args.strict_mask:
-                for global_id in rem_global:
-                    for frame_id, frame in enumerate(frames):
-                        rem = []
-                        for i, point in enumerate(frames[fr_n]):
-                            if global_id == point[0]:
-                                rem.append(i)
-                        if len(rem) > 0:
-                            frames[frame_id] = np.delete(frames[frame_id], rem, axis=0)
+                if args.strict_mask:
+                    for global_id in rem_global:
+                        for frame_id, frame in enumerate(frames):
+                            rem = []
+                            for i, point in enumerate(frames[fr_n]):
+                                if global_id == point[0]:
+                                    rem.append(i)
+                            if len(rem) > 0:
+                                frames[frame_id] = np.delete(frames[frame_id], rem, axis=0)
+            else:
+                print("WARNING: mask video ended before other videos")
         
         
         depth = np.zeros((frame_height, frame_width), dtype=np.uint32)
@@ -140,86 +184,59 @@ if __name__ == '__main__':
         depth_frames.append(depth)
         
         #DEBUG: Only looking at 25 frames dont want to load entire video when DEBUGING
-        if fr_n > 210:
-            break
+        #if fr_n > 210:
+        #    break
+        
+        #Add online analyzing so we dont have to load everything in to memory
+        if len(depth_frames) > 1:
+            ref_frame_no = fr_n - 1
+            this_frame_no = fr_n
+            best_common_points = list(set(frames[ref_frame_no][:, 0]) & set(frames[this_frame_no][:, 0]))
+            
+            #Current frame points
+            point_ids_in_frame = frames[this_frame_no][:,0]
+            cur_mask = np.isin(point_ids_in_frame, best_common_points)
+            points_2d = frames[this_frame_no][cur_mask][:, 1:3]
+            points_3d = depth_map_tools.project_2d_points_to_3d(points_2d, depth_frames[1], cam_matrix)
+    
+    
+            #Ref frame points
+            point_ids_in_frame = frames[ref_frame_no][:,0]
+            cur_mask = np.isin(point_ids_in_frame, best_common_points)
+            ref_points_2d = frames[ref_frame_no][cur_mask][:, 1:3]
+            ref_points_3d = depth_map_tools.project_2d_points_to_3d(ref_points_2d, depth_frames[0], cam_matrix)
+    
+    
+
+    
+            #Use SVD to find transformation from one frame to the next
+            tranformation_to_ref = depth_map_tools.svd(points_3d, ref_points_3d, True)
+            
+            if not args.assume_stationary_camera:
+                transformed_points_3d = depth_map_tools.transform_points(points_3d, tranformation_to_ref)
+                pnpTrans = depth_map_tools.pnpSolve_ransac(transformed_points_3d, ref_points_2d, cam_matrix)
+                tranformation_to_ref @= pnpTrans
+            
+            to_ref_zero @= tranformation_to_ref
+            transformations.append(to_ref_zero.tolist())
+            
+            depth_frames.pop(0)
+            if color_video is not None:
+                rgb_frames.pop(0)
             
         fr_n += 1
+        
     raw_video.release()
     if color_video is not None:
         color_video.release()
     
-    used_frames = []
-    
-    #1. Pick the first frame
-    frame_n = 0
-    
-    used_frames.append(frame_n)
-    
-    #for i in range(20): # DEBUG IF you want to see what happens with the alignment after more than 1 frame
-    #    used_frames.append(i)
     
     #ref_mesh Is used to draw the DEBUG alignment window
-    ref_mesh = depth_map_tools.get_mesh_from_depth_map(depth_frames[frame_n], cam_matrix, rgb_frames[frame_n])
-    ref_mesh.paint_uniform_color([0, 0, 1])
+    #ref_mesh = depth_map_tools.get_mesh_from_depth_map(depth_frames[frame_n], cam_matrix, rgb_frames[frame_n])
+    #ref_mesh.paint_uniform_color([0, 0, 1])
+    #meshes = [ref_mesh]
     
-    meshes = [ref_mesh]
-    to_ref_zero = np.eye(4)
-    while len(used_frames) < len(frames):
-        print("--- frame ", frame_n, " ---")
-        #2. Find most connected frame (tends to be the next frame)
-        best_match_frame_no, best_common_points = find_best_matching_frame(frames[frame_n], frames, used_frames)
-    
-        print("match: ", best_match_frame_no, "nr_matches: ", len(best_common_points))
-        
-        #Current frame points
-        point_ids_in_frame = frames[best_match_frame_no][:,0]
-        cur_mask = np.isin(point_ids_in_frame, best_common_points)
-        points_2d = frames[best_match_frame_no][cur_mask][:, 1:3]
-        points_3d = depth_map_tools.project_2d_points_to_3d(points_2d, depth_frames[best_match_frame_no], cam_matrix)
         
         
-        #Ref frame points
-        point_ids_in_frame = frames[frame_n][:,0]
-        cur_mask = np.isin(point_ids_in_frame, best_common_points)
-        points_2d = frames[frame_n][cur_mask][:, 1:3]
-        ref_points_3d = depth_map_tools.project_2d_points_to_3d(points_2d, depth_frames[frame_n], cam_matrix)
-        
-        
-        ref_pcd = depth_map_tools.pts_2_pcd(ref_points_3d)
-        frame_pcd = depth_map_tools.pts_2_pcd(points_3d)
-        
-        ref_pcd.paint_uniform_color([1, 0, 0])
-        frame_pcd.paint_uniform_color([0, 1, 0])
-        
-        #Use SVD to find transformation from one frame to the next
-        tranformation_to_ref = depth_map_tools.svd(points_3d, ref_points_3d)
-        
-        to_ref_zero @= tranformation_to_ref
-        
-        
-        ref_pcd.transform(to_ref_zero)
-        frame_pcd.transform(to_ref_zero)
-        
-        meshes.append(ref_pcd)
-        meshes.append(frame_pcd)
-        
-        
-        
-        #Transform the mesh so that we can see how well it aligns in the GUI
-        #mesh.transform(tranformation_to_ref)
-        
-        #if frame_n % 25 == 0:
-        
-        if frame_n == 200:
-            mesh = depth_map_tools.get_mesh_from_depth_map(depth_frames[best_match_frame_no], cam_matrix, rgb_frames[best_match_frame_no])
-            mesh.transform(to_ref_zero)
-            meshes.append(mesh)
-        
-        
-            depth_map_tools.draw(meshes)
-        
-        frame_n = best_match_frame_no
-        used_frames.append(frame_n)
-        
-        
-        
+    with open(out_file, "w") as json_file_handle:
+        json_file_handle.write(json.dumps(transformations, cls=NumpyEncoder))
