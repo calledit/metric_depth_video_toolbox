@@ -150,7 +150,7 @@ Uses ML to create a video mask for the main subjects in the video based on rembg
 
 
 #### apply_inpainting.sh
-Uses ML paint over logos, text overlays or other objects from a video, can be usefull to do before runing the depth ML models as they thend to produce prro results when the video has logos over text overlays.
+Uses ML to paint over logos, text overlays or other objects from a video, can be usefull to do before runing the depth ML models as they thend to produce prro results when the video has logos over text overlays.
 ```bash
 example:
 Create a overlay_mask.png that is white where the overlay is.
@@ -158,7 +158,7 @@ Create a overlay_mask.png that is white where the overlay is.
 ```
 
 #### track_points_in_video.py
-Tracks points in the video. Uses ML model cotracker3 to track points in the video. Outputs a _tracking.json_ file that contains tracking points for the entire video.
+Tracks points in the video. Uses the ML model cotracker3 to track points in the video. Outputs a _tracking.json_ file that contains tracking points for the entire video.
 ```bash
 usage: track_points_in_video.py [-h] --color_video COLOR_VIDEO
 
