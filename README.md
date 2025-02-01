@@ -16,7 +16,7 @@ By taking the stability in the videos from [Video-Depth-Anything](https://github
 2. A tool for generating metric 3D depth videos based on [UniDepth](https://github.com/lpiccinelli-eth/UniDepth)
 3. Tools for working with and visualising the metric 3D videos.
 4. Tools for doing things like 3D stereo rendering or viewing a video from above or othervise altering the camera perspective.
-5. (WIP) Tools for using the generated metric 3D videos for camera tracking(camera pose estimation) and (full scene 3D recunstruction).
+5. Tools for using the generated metric 3D videos for camera tracking(camera pose estimation) and (full scene 3D reconstruction).
 
 
 ## Usage 
@@ -33,7 +33,7 @@ python video_metric_convert.py --color_video some_video.mkv
 ```
 
 #### unidepth_video.py (rquires installation with  ./install_mvda.sh -unidepth )
-_Uses ML to create FOV locked metric depth video from any normal video file._ UniDepth is not made for video so the videos it produces are very jittery. However UniDepth has the capability of using FOV as given by the user. Which means it's output tend to be more accurate as a whole. That said UniDepth has been trained wiht less data so it strugles with certain types of scenes. **UniDepth requires Cuda 11.8 and Torch 2.2.0.**
+_Uses ML to create FOV locked metric depth video from any normal video file._ UniDepth is not made for video so the videos it produces are very jittery. However UniDepth has the capability of using FOV as given by the user. Which means it's output tend to be more accurate as a whole. That said UniDepth has been trained with less data so it strugles with certain types of scenes. **UniDepth requires Cuda 11.8 and Torch 2.2.0.**
 ```bash
 # Create a metric depth video from a normal video (Note that the unidepth_video.py script is copied to the UniDepth folder on installation.)
 
@@ -45,7 +45,39 @@ python unidepth_video.py --color_video some_video.mkv -xfov 45
 #### stero_rerender.py
 _Uses a generated depth video together with the source color video to render a new stereo 3D video. To use stero_rerender.py you need to know the camera FOV. If you dont you can estimate it using [PerspectiveFields](https://huggingface.co/spaces/jinlinyi/PerspectiveFields)_
 ```bash
-# Renders a stereo 3D video that can be used on 3d tv's and vr headsets.
+usage: stero_rerender.py [-h] --depth_video DEPTH_VIDEO [--color_video COLOR_VIDEO] [--xfov XFOV] [--yfov YFOV] [--max_depth MAX_DEPTH] [--transformation_file TRANSFORMATION_FILE]
+                         [--transformation_lock_frame TRANSFORMATION_LOCK_FRAME] [--pupillary_distance PUPILLARY_DISTANCE] [--max_frames MAX_FRAMES] [--touchly0] [--touchly1]
+                         [--touchly_max_depth TOUCHLY_MAX_DEPTH] [--compressed] [--infill_mask] [--remove_edges]
+
+Take a rgb encoded depth video and a color video, and render them it as a steroscopic 3D video.that can be used on 3d tvs and vr headsets.
+
+options:
+  -h, --help            show this help message and exit
+  --depth_video DEPTH_VIDEO
+                        video file to use as input
+  --color_video COLOR_VIDEO
+                        video file to use as color input
+  --xfov XFOV           fov in deg in the x-direction, calculated from aspectratio and yfov in not given
+  --yfov YFOV           fov in deg in the y-direction, calculated from aspectratio and xfov in not given
+  --max_depth MAX_DEPTH
+                        the max depth that the input video uses
+  --transformation_file TRANSFORMATION_FILE
+                        file with scene transformations from the aligner
+  --transformation_lock_frame TRANSFORMATION_LOCK_FRAME
+                        the frame that the transfomrmation will use as a base
+  --pupillary_distance PUPILLARY_DISTANCE
+                        pupillary distance in mm
+  --max_frames MAX_FRAMES
+                        quit after max_frames nr of frames
+  --touchly0            Render as touchly0 format. ie. stereo video with 3d
+  --touchly1            Render as touchly1 format. ie. mono video with 3d
+  --touchly_max_depth TOUCHLY_MAX_DEPTH
+                        the max depth that touchly is cliped to
+  --compressed          Render the video in a compressed format. Reduces file size but also quality.
+  --infill_mask         Save infill mask video.
+  --remove_edges        Tries to remove edges that was not visible in image(it is a bit slow)
+
+example:
 python stero_rerender.py --depth_video some_video_depth.mkv --color_video some_video.mkv --xfov 48
 
 ```
@@ -53,44 +85,118 @@ python stero_rerender.py --depth_video some_video_depth.mkv --color_video some_v
 #### 3d_view_depthfile.py
 _Opens a depth video in a 3d viewer, for viewing. To use 3d_view_depthfile.py you need to know the camera FOV. If you dont you can estimate it using [PerspectiveFields](https://huggingface.co/spaces/jinlinyi/PerspectiveFields)_
 ```bash
-# View the depth video in 3D. Requires open3d (pip install open3d)
+usage: 3d_view_depthfile.py [-h] --depth_video DEPTH_VIDEO [--color_video COLOR_VIDEO] [--xfov XFOV] [--yfov YFOV] [--max_depth MAX_DEPTH] [--render] [--remove_edges] [--compressed]
+                            [--draw_frame DRAW_FRAME] [--max_frames MAX_FRAMES] [--transformation_file TRANSFORMATION_FILE] [--transformation_lock_frame TRANSFORMATION_LOCK_FRAME] [--x X] [--y Y]
+                            [--z Z] [--tx TX] [--ty TY] [--tz TZ]
+
+Take a rgb encoded depth video and a color video, and view it/render as 3D
+
+options:
+  -h, --help            show this help message and exit
+  --depth_video DEPTH_VIDEO
+                        video file to use as input
+  --color_video COLOR_VIDEO
+                        video file to use as color input
+  --xfov XFOV           fov in deg in the x-direction, calculated from aspectratio and yfov in not given
+  --yfov YFOV           fov in deg in the y-direction, calculated from aspectratio and xfov in not given
+  --max_depth MAX_DEPTH
+                        the max depth that the video uses
+  --render              Render to video insted of GUI
+  --remove_edges        Tries to remove edges that was not visible in image(it is a bit slow)
+  --compressed          Render the video in a compressed format. Reduces file size but also quality.
+  --draw_frame DRAW_FRAME
+                        open gui with specific frame
+  --max_frames MAX_FRAMES
+                        quit after max_frames nr of frames
+  --transformation_file TRANSFORMATION_FILE
+                        file with scene transformations from the aligner
+  --transformation_lock_frame TRANSFORMATION_LOCK_FRAME
+                        the frame that the transfomrmation will use as a base
+  --x X                 set position of cammera x cordicate in meters
+  --y Y                 set position of cammera y cordicate in meters
+  --z Z                 set position of cammera z cordicate in meters
+  --tx TX               set poistion of camera target x cordinate in meters
+  --ty TY               set poistion of camera target y cordinate in meters
+  --tz TZ               set poistion of camera target z cordinate in meters
 python 3d_view_depthfile.py --depth_video some_video_depth.mkv --color_video some_video.mkv --xfov 48
 
 ```
 
 #### rgb_depth_to_greyscale.py
-_Converts a RGB encoded depth video to a simple greyscale video, a format which certain software likes to work with._
+Converts a RGB encoded depth video to a simple greyscale video, a format which certain software likes to work with. 8 bit greyscale looses allot of details due to low depth resolution. The 16bit format has more details but does not compress well and is not well supported.
 ```bash
-# Convert the output video to grayscale
+usage: rgb_depth_to_greyscale.py [-h] --depth_video DEPTH_VIDEO [--bit16] [--max_depth MAX_DEPTH]
+
+Generate a depth video in greyscale from a rgb encoded depth video
+
+options:
+  -h, --help            show this help message and exit
+  --depth_video DEPTH_VIDEO
+                        video file to use as input
+  --bit16               Store output as 16bit file
+  --max_depth MAX_DEPTH
+                        the max depth that the video uses
+
+example:
 python rgb_depth_to_greyscale.py --depth_video some_video_depth.mkv
 ```
 
 #### create_video_mask.sh
-_Create a vido mask for the videos main subjects uses rembg and ffmpeg._
+Uses ML to create a video mask for the main subjects in the video based on rembg. The masks can be used to filter out moving objects when running alignment.
 ```bash
 #Create a vido mask
 ./create_video_mask.sh some_video.mkv
 ```
 
 #### track_points_in_video.py
-_Tracks points in the video. Used for 3D alignment and camera tracking. Generates a file called some_video_tracking.json what contains tracking points for the entire video._
+Tracks points in the video. Uses ML model cotracker3 to track points in the video. Outputs a _tracking.json_ file that contains tracking points for the entire video.
 ```bash
-#track points
+usage: track_points_in_video.py [-h] --color_video COLOR_VIDEO
+
+Generate a json tracking file from a video
+
+options:
+  -h, --help            show this help message and exit
+  --color_video COLOR_VIDEO
+                        video file to use as input
+
+example:
 python track_points_in_video.py --color_video some_video.mkv
 ```
 
-#### align_3d_points.py (WIP)
-_Uses tracked points in the video and projectes them on to the depth video for 3D alignment and camera tracking._
+#### align_3d_points.py
+Uses tracked points in the video and projectes them on to the depth video for 3D alignment and camera tracking. Outputs a _transformations.json_ file describing the camera movment and rotation.
 ```bash
-#align 3d points
+usage: align_3d_points.py [-h] --track_file TRACK_FILE [--mask_video MASK_VIDEO] [--strict_mask] [--xfov XFOV] [--yfov YFOV] --depth_video DEPTH_VIDEO [--max_depth MAX_DEPTH]
+                          [--color_video COLOR_VIDEO] [--assume_stationary_camera]
+
+Align 3D video based on depth video and a point tracking file
+
+options:
+  -h, --help            show this help message and exit
+  --track_file TRACK_FILE
+                        file with 2d point tracking data
+  --mask_video MASK_VIDEO
+                        black and white mask video for thigns that should not be tracked
+  --strict_mask         Remove any points that has ever been masked out even in frames where they are not masked
+  --xfov XFOV           fov in deg in the x-direction, calculated from aspectratio and yfov in not given
+  --yfov YFOV           fov in deg in the y-direction, calculated from aspectratio and xfov in not given
+  --depth_video DEPTH_VIDEO
+                        depth video
+  --max_depth MAX_DEPTH
+                        the max depth that the video uses
+  --color_video COLOR_VIDEO
+                        video file to use as color input only used when debuging
+  --assume_stationary_camera
+                        Makes the algorithm assume the camera a stationary_camera, leads to better tracking.
+
+example:
 python align_3d_points.py --track_file some_video_tracking.json --color_video some_video.mkv --depth_video some_video_depth.mkv --xfov 45 
 ```
 
-## Output
-The result is a metric depth video file called something like outputs/{filename}_depth.mkv.
-
-The depth file is a normal video file with RGB values where the _red_ and _green_ channels represent the
-upper 8 bits (duplicated to reduce compression artefacts) and the _blue_ channel represent
+## 3D depth video format
+The video depth format is a normal video file with RGB values where the _red_ and _green_ channels represent the
+upper 8 bits of the depth (duplicated to reduce compression artefacts) and the _blue_ channel represent
 the lower 8 bits. The values are scaled to the argument --max_depth, default is 20 meters.
 
 
