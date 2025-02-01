@@ -66,7 +66,7 @@ python rgb_depth_to_greyscale.py --depth_video some_video_depth.mkv
 ```
 
 #### create_video_mask.sh
-_Create a vido mask for the videos main subjects uses rembg and ffmpeg. Install with pip install rembg_
+_Create a vido mask for the videos main subjects uses rembg and ffmpeg._
 ```bash
 #Create a vido mask
 ./create_video_mask.sh some_video.mkv
