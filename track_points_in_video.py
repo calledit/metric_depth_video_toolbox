@@ -3,12 +3,10 @@ import numpy as np
 import os
 import json
 import argparse
+import cv2
 
-import imageio.v3 as iio
 
 DEVICE = 'cuda'
-
-#pip install 'imageio[ffmpeg]'
 
 cotracker = None
 
@@ -60,35 +58,46 @@ if __name__ == '__main__':
 
     out_file = args.color_video + "_tracking.json"
 
-    frames = iio.imread(args.color_video, plugin="FFMPEG")  # plugin="pyav"
-    nr_of_tracking_frames = 60
+    raw_video = cv2.VideoCapture(args.color_video)
+
+    nr_of_tracking_frames = 60#Has to be even #250 works to
     clip1 = []
     clip2 = []
     clip_tracking_points = []
     frame_n = 0
-    for frame in frames:
+    while raw_video.isOpened():
+        ret, raw_frame = raw_video.read()
+        if not ret:
+            break
+        frame = cv2.cvtColor(raw_frame, cv2.COLOR_BGR2RGB)
         print("--- frame ",frame_n+1," ----")
         clip1.append(frame)
-        if frame_n >= (nr_of_tracking_frames/2):
+        if frame_n >= int(nr_of_tracking_frames/2):
             clip2.append(frame)
 
         if len(clip1) == nr_of_tracking_frames:
             print("process clip 1")
-            clip_tracking_points.append(process_clip(np.array(clip1)))
+            clip_tracking_points.append(process_clip(np.array(clip1, dtype=np.int32)))
             clip1 = []
         if len(clip2) == nr_of_tracking_frames:
             print("process clip 2")
-            clip_tracking_points.append(process_clip(np.array(clip2)))
+            clip_tracking_points.append(process_clip(np.array(clip2, dtype=np.int32)))
             clip2 = []
 
         frame_n += 1
 
 
-    if len(clip1) != 0:
-        clip_tracking_points.append(process_clip(np.array(clip1)))
-    if len(clip2) < (nr_of_tracking_frames/2):
-        clip_tracking_points.append(process_clip(np.array(clip2))
-        
+    first_order = clip2
+    second_order = clip1
+    if len(clip1) > len(clip2):
+        first_order = clip1
+        second_order = clip2
+
+    if len(first_order) != 0:
+        clip_tracking_points.append(process_clip(np.array(first_order, dtype=np.int32)))
+    if len(second_order) != 0:
+        clip_tracking_points.append(process_clip(np.array(second_order, dtype=np.int32)))
+
     track_frames = []
     clip_start = 0
     global_point_id_start = 0
@@ -100,10 +109,9 @@ if __name__ == '__main__':
                     track_frames.append([])
                 if frame_point is not None:
                     track_frames[frame_no].append([global_point_id_start+point_id, frame_point[0], frame_point[1]])
-        
-        global_point_id_start += len(clip)
-        clip_start += nr_of_tracking_frames/2
 
-    fp = open(out_file, "w")
-    fp.write(json.dumps(track_frames))
-    fp.close()
+        global_point_id_start += len(clip)
+        clip_start += int(nr_of_tracking_frames/2)
+
+    with open(out_file, "w") as fp:
+        fp.write(json.dumps(track_frames))
