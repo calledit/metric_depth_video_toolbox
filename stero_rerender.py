@@ -23,7 +23,8 @@ np.set_printoptions(suppress=True, precision=4)
 if __name__ == '__main__':
     
     # Setup arguments
-    parser = argparse.ArgumentParser(description='Take a rgb encoded depth video and a color video, and render them it as a steroscopic 3D video')
+    parser = argparse.ArgumentParser(description='Take a rgb encoded depth video and a color video, and render them it as a steroscopic 3D video.'+
+        'that can be used on 3d tvs and vr headsets.')
     
     parser.add_argument('--depth_video', type=str, help='video file to use as input', required=True)
     parser.add_argument('--color_video', type=str, help='video file to use as color input', required=False)

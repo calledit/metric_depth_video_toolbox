@@ -176,11 +176,11 @@ def project_2d_points_to_3d(points, depth, camera_matrix, distCoeffs = None):
     return np.array(points_3d)
 
 
-def get_mesh_from_depth_map(depth_map, cam_mat, color_frame = None, inp_mesh = None, remove_edges = False):
+def get_mesh_from_depth_map(depth_map, cam_mat, color_frame = None, inp_mesh = None, remove_edges = False, mask_depth = None):
     points, height, width = create_point_cloud_from_depth(depth_map, cam_mat, True)
 
     # Create mesh from point cloud
-    mesh = create_mesh_from_point_cloud(points, height, width, color_frame, inp_mesh, remove_edges)
+    mesh = create_mesh_from_point_cloud(points, height, width, color_frame, inp_mesh, remove_edges, mask_depth)
     return mesh
 
 def create_point_cloud_from_depth(depth_image, intrinsics, of_by_one = False):
@@ -208,29 +208,9 @@ def create_point_cloud_from_depth(depth_image, intrinsics, of_by_one = False):
 
 
 
-def is_triangle_valid(v1, v2, v3, depth_threshold_scale):
-    """
-    Checks if the triangle defined by vertices v1, v2, and v3 is valid.
-    Instead of a fixed threshold, the maximum allowed depth difference is 
-    computed as depth_threshold_scale * average_depth of the triangle.
-    
-    Parameters:
-      - v1, v2, v3: Each is a numpy array [x, y, z] representing a vertex.
-      - depth_threshold_scale: A scaling factor applied to the triangle's 
-                               average depth to determine the threshold.
-    
-    Returns:
-      - True if the depth difference is within the computed threshold; False otherwise.
-    """
-    depths = np.array([v1[2], v2[2], v3[2]])
-    avg_depth = depths.mean()
-    # Compute the threshold as a linear function of the average depth.
-    threshold = depth_threshold_scale * avg_depth
-    return (depths.max() - depths.min()) <= threshold
-
 zero_identity_matrix = np.identity(4)
 def create_mesh_from_point_cloud(points, height, width,
-                                 image_frame=None, inp_mesh=None, remove_edges=False):
+                                 image_frame=None, inp_mesh=None, remove_edges=False, mask_depth = None):
     """
     Creates (or updates) an Open3D TriangleMesh from a grid-organized point cloud.
     If no input mesh is provided or if remove_edges is True, the triangles are computed.
@@ -295,6 +275,9 @@ def create_mesh_from_point_cloud(points, height, width,
             depth_ranges = depths.max(axis=1) - depths.min(axis=1)
             # Only keep triangles where the depth range is within the allowed threshold.
             valid_mask = depth_ranges <= allowed_thresholds
+            if mask_depth is not None:
+                depth_mask = avg_depth >= mask_depth
+                valid_mask = valid_mask & depth_mask
             triangles_all = triangles_all[valid_mask]
         
         # Set the computed triangles and vertices on the mesh.
@@ -312,72 +295,6 @@ def create_mesh_from_point_cloud(points, height, width,
         colors = np.array(image_frame).reshape(-1, 3) / 255.0
         mesh.vertex_colors = o3d.utility.Vector3dVector(colors)
     
-    #mesh.compute_vertex_normals()
-    return mesh
-
-def create_mesh_from_point_cloud2(points, height, width,
-                                 image_frame=None, inp_mesh=None, remove_edges=False):
-    """
-    Creates an Open3D TriangleMesh from a grid-organized point cloud while
-    filtering out triangles that span large depth gaps. The allowable depth gap 
-    scales linearly with the triangle's average depth.
-    
-    Returns:
-      - mesh: the Open3D TriangleMesh with only the valid triangles.
-    """
-    
-    if remove_edges:
-        depth_threshold_scale = 0.04
-                                 
-    # Reshape the points into a list of vertices.
-    vertices = points.reshape(-1, 3)
-
-    # Create or update the Open3D mesh. (This is very sow so we only do it when we need to)
-    if remove_edges or inp_mesh is None:
-        if inp_mesh is None:
-            mesh = o3d.geometry.TriangleMesh()
-        else:
-            mesh = inp_mesh
-            mesh.transform(zero_identity_matrix)
-        # Build triangles by connecting grid-adjacent points,
-        # and only keep triangles that pass the depth continuity check.
-        triangles = []
-        for i in range(height - 1):
-            for j in range(width - 1):
-                # Indices for the four corners of the current grid cell.
-                idx1 = i * width + j
-                idx2 = (i + 1) * width + j
-                idx3 = (i + 1) * width + (j + 1)
-                idx4 = i * width + (j + 1)
-
-                # Define two candidate triangles for the cell.
-                tri1 = [idx1, idx2, idx3]
-                tri2 = [idx1, idx3, idx4]
-
-                if remove_edges:
-                    # Check each triangle with a depth threshold that scales linearly with depth.
-                    if is_triangle_valid(vertices[idx1], vertices[idx2], vertices[idx3], depth_threshold_scale):
-                        triangles.append(tri1)
-                    if is_triangle_valid(vertices[idx1], vertices[idx3], vertices[idx4], depth_threshold_scale):
-                        triangles.append(tri2)
-                else:
-                    triangles.append(tri1)
-                    triangles.append(tri2)
-
-        
-        mesh.triangles = o3d.utility.Vector3iVector(np.array(triangles))
-    else:
-        mesh = inp_mesh
-        # Assume zero_identity_matrix is defined elsewhere if needed.
-        mesh.transform(zero_identity_matrix)
-    
-    mesh.vertices = o3d.utility.Vector3dVector(vertices)
-
-    # Optionally, assign vertex colors from an image frame.
-    if image_frame is not None:
-        colors = np.array(image_frame).reshape(-1, 3) / 255.0
-        mesh.vertex_colors = o3d.utility.Vector3dVector(colors)
-
     #mesh.compute_vertex_normals()
     return mesh
 

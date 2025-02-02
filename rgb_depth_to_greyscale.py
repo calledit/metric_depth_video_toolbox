@@ -31,7 +31,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Generate a depth video in greyscale from a rgb encoded depth video')
     
     parser.add_argument('--depth_video', type=str, help='video file to use as input', required=True)
-    parser.add_argument('--bit16', action='store_true', help='Store outut as 16bit file', required=False)
+    parser.add_argument('--bit16', action='store_true', help='Store output as 16bit file', required=False)
     parser.add_argument('--max_depth', default=6, type=int, help='the max depth that the video uses', required=False)
     
     

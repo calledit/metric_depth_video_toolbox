@@ -5,6 +5,7 @@ import os
 import json
 import sys
 import time
+import copy
 
 import open3d as o3d
 import depth_map_tools
@@ -23,18 +24,21 @@ if __name__ == '__main__':
     parser.add_argument('--max_depth', default=20, type=int, help='the max depth that the video uses', required=False)
     parser.add_argument('--render', action='store_true', help='Render to video insted of GUI', required=False)
     parser.add_argument('--remove_edges', action='store_true', help='Tries to remove edges that was not visible in image(it is a bit slow)', required=False)
+    parser.add_argument('--mask_depth', type=float, default=None,  help='Only keeps parts further away than specifid depth', required=False)
+    
+    
     parser.add_argument('--compressed', action='store_true', help='Render the video in a compressed format. Reduces file size but also quality.', required=False)
     parser.add_argument('--draw_frame', default=-1, type=int, help='open gui with specific frame', required=False)
     parser.add_argument('--max_frames', default=-1, type=int, help='quit after max_frames nr of frames', required=False)
     parser.add_argument('--transformation_file', type=str, help='file with scene transformations from the aligner', required=False)
     parser.add_argument('--transformation_lock_frame', default=0, type=int, help='the frame that the transfomrmation will use as a base', required=False)
     
-    parser.add_argument('--x', default=2.0, type=float, help='cam x in meters', required=False)
-    parser.add_argument('--y', default=2.0, type=float, help='cam y in meters', required=False)
-    parser.add_argument('--z', default=-4.0, type=float, help='cam z in meters', required=False)
-    parser.add_argument('--tx', default=-99.0, type=float, help='target x in meters', required=False)
-    parser.add_argument('--ty', default=-99.0, type=float, help='target y in meters', required=False)
-    parser.add_argument('--tz', default=-99.0, type=float, help='target z in meters', required=False)
+    parser.add_argument('--x', default=2.0, type=float, help='set position of cammera x cordicate in meters', required=False)
+    parser.add_argument('--y', default=2.0, type=float, help='set position of cammera y cordicate in meters', required=False)
+    parser.add_argument('--z', default=-4.0, type=float, help='set position of cammera z cordicate in meters', required=False)
+    parser.add_argument('--tx', default=-99.0, type=float, help='set poistion of camera target x cordinate in meters', required=False)
+    parser.add_argument('--ty', default=-99.0, type=float, help='set poistion of camera target y cordinate in meters', required=False)
+    parser.add_argument('--tz', default=-99.0, type=float, help='set poistion of camera target z cordinate in meters', required=False)
     
     
     
@@ -105,6 +109,9 @@ if __name__ == '__main__':
                 codec = cv2.VideoWriter_fourcc(*"FFV1")
             out = cv2.VideoWriter(output_file, codec, frame_rate, (frame_width, frame_height))
     mesh = None
+    
+    meshes = []
+    bg_mesh = None
 
     frame_n = 0
     while raw_video.isOpened():
@@ -126,8 +133,8 @@ if __name__ == '__main__':
         else:
             color_frame = rgb
             
-        if args.draw_frame != -1 and args.draw_frame != frame_n:
-            continue
+        #if args.draw_frame != -1 and args.draw_frame != frame_n:
+        #    continue
 
         # Decode video depth
         depth = np.zeros((frame_height, frame_width), dtype=np.uint32)
@@ -137,10 +144,10 @@ if __name__ == '__main__':
         depth = depth.astype(np.float32)/((255**4)/MODEL_maxOUTPUT_depth)
         
         #This is very slow needs optimizing (i think)
-        mesh_ret = depth_map_tools.get_mesh_from_depth_map(depth, cam_matrix, color_frame, mesh, remove_edges = args.remove_edges)
+        mesh_ret = depth_map_tools.get_mesh_from_depth_map(depth, cam_matrix, color_frame, mesh, remove_edges = args.remove_edges, mask_depth = args.mask_depth)
         
         if mesh is None:
-            if not args.render:
+            if not args.render and args.draw_frame == -1:
                 vis.add_geometry(mesh_ret)
         mesh = mesh_ret
         
@@ -148,8 +155,14 @@ if __name__ == '__main__':
             transform_to_zero = np.array(transformations[frame_n-1])
             mesh.transform(transform_to_zero)
         
+        if bg_mesh is None:
+            bg_mesh = copy.deepcopy(mesh)
+        else:
+            bg_mesh += copy.deepcopy(mesh)
+            
         if args.draw_frame == frame_n:
-            depth_map_tools.draw([mesh])
+            depth_map_tools.draw([bg_mesh])
+            #depth_map_tools.draw([mesh])
             exit(0)
         
         #if org_mesh is None:
@@ -157,7 +170,7 @@ if __name__ == '__main__':
         #    if not args.render:
         #        vis.add_geometry(org_mesh)
         
-        if not args.render:
+        if not args.render and args.draw_frame == -1:
             vis.update_geometry(mesh)
         
         
@@ -174,14 +187,15 @@ if __name__ == '__main__':
         ext = depth_map_tools.cam_look_at(cam_pos, lookat)
         
         if not args.render:
-            params.extrinsic = ext
-            params.intrinsic.intrinsic_matrix = cam_matrix
-            ctr.convert_from_pinhole_camera_parameters(params, allow_arbitrary=True)
+            if  args.draw_frame == -1:
+                params.extrinsic = ext
+                params.intrinsic.intrinsic_matrix = cam_matrix
+                ctr.convert_from_pinhole_camera_parameters(params, allow_arbitrary=True)
         
-            start_time = time.time()
-            while time.time() - start_time < 0.1: #should be (1/frame_rate) but we dont rach that speed anyway
-                vis.poll_events()
-                vis.update_renderer()
+                start_time = time.time()
+                while time.time() - start_time < 0.1: #should be (1/frame_rate) but we dont rach that speed anyway
+                    vis.poll_events()
+                    vis.update_renderer()
         else:
             image = (depth_map_tools.render(mesh, cam_matrix, extrinsic_matric = ext, bg_color = np.array([1.0,1.0,1.0]))*255).astype(np.uint8)
             out.write(cv2.cvtColor(image, cv2.COLOR_RGB2BGR))
