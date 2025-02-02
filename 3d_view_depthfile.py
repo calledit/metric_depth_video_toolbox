@@ -109,9 +109,6 @@ if __name__ == '__main__':
                 codec = cv2.VideoWriter_fourcc(*"FFV1")
             out = cv2.VideoWriter(output_file, codec, frame_rate, (frame_width, frame_height))
     mesh = None
-    
-    meshes = []
-    bg_mesh = None
 
     frame_n = 0
     while raw_video.isOpened():
@@ -133,8 +130,8 @@ if __name__ == '__main__':
         else:
             color_frame = rgb
             
-        #if args.draw_frame != -1 and args.draw_frame != frame_n:
-        #    continue
+        if args.draw_frame != -1 and args.draw_frame != frame_n:
+            continue
 
         # Decode video depth
         depth = np.zeros((frame_height, frame_width), dtype=np.uint32)
@@ -155,20 +152,10 @@ if __name__ == '__main__':
             transform_to_zero = np.array(transformations[frame_n-1])
             mesh.transform(transform_to_zero)
         
-        if bg_mesh is None:
-            bg_mesh = copy.deepcopy(mesh)
-        else:
-            bg_mesh += copy.deepcopy(mesh)
-            
         if args.draw_frame == frame_n:
-            depth_map_tools.draw([bg_mesh])
-            #depth_map_tools.draw([mesh])
+            depth_map_tools.draw([mesh])
             exit(0)
         
-        #if org_mesh is None:
-        #    org_mesh = mesh
-        #    if not args.render:
-        #        vis.add_geometry(org_mesh)
         
         if not args.render and args.draw_frame == -1:
             vis.update_geometry(mesh)
