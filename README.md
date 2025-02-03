@@ -271,7 +271,7 @@ export DISPLAY=:2
 # First setup any required venv (open3d requires python3.11 on OSX (as of 2025)))
 pip3.11 install open3d numpy opencv-python
 
-#On Windows (Not tested or "offically" supported, but anecdotally working)
+#On Windows (Not tested or "officially" supported, but anecdotally working)
 See https://github.com/calledit/metric_video_depth_anything/issues/1#issuecomment-2632040738
 
 ```
