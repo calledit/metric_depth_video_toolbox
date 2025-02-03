@@ -62,7 +62,7 @@ python video_metric_convert.py --color_video some_video.mkv
 ```
 
 #### unidepth_video.py (rquires installation with  ./install_mvda.sh -unidepth )
-_Uses ML to create FOV locked metric depth video from any normal video file._ UniDepth is not made for video so the videos it produces are very jittery. However UniDepth has the capability of using FOV as given by the user. Which means it's output tend to be more accurate as a whole. That said UniDepth has been trained with less data so it strugles with certain types of scenes. **UniDepth requires Cuda 11.8 and Torch 2.2.0.**
+_Uses ML to create FOV locked metric depth video from any normal video file._ UniDepth is not made for video so the videos it produces are very jittery. However UniDepth has the capability of using FOV as given by the user. Which means it's output tend to be more accurate as a whole. That said UniDepth has been trained with less data so it struggles with certain types of scenes. **UniDepth requires Cuda 11.8 and Torch 2.2.0.**
 ```bash
 # Create a metric depth video from a normal video (Note that the unidepth_video.py script is copied to the UniDepth folder on installation.)
 
@@ -186,7 +186,7 @@ Uses ML to create a video mask for the main subjects in the video based on rembg
 
 
 #### apply_inpainting.sh
-Uses ML to paint over logos, text overlays or other objects from a video, can be usefull to do before runing the depth ML models as they thend to produce less acurate results when the video has logos or text overlays.
+Uses ML to paint over logos, text overlays or other objects from a video, can be useful to do before running the depth ML models as they tend to produce less accurate results when the video has logos or text overlays.
 ```bash
 example:
 Create a overlay_mask.png that is white where the overlay is.
@@ -257,7 +257,7 @@ sudo apt-get install -y libgl1
 ./install_mvda.sh
 pip install open3d numpy
 
-# Follow this if you want to save videos with the avc1 codec which is required if you want to watch the exported videos on a Quest device (i think)
+# If you want to export directly to the avc1 codec using the --compress argument
 echo https://swiftlane.com/blog/generating-mp4s-using-opencv-python-with-the-avc1-codec/
 
 # if using headless linux
