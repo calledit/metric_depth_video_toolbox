@@ -21,6 +21,35 @@ By taking the stability in the videos from [Video-Depth-Anything](https://github
 
 ## Usage 
 
+
+#### pipline.py
+Takes a color image and a mask. Splits it in to clips and does all the required steps required to create stabilized stereoscopic 3d videos from the clips.
+
+```
+usage: pipline.py [-h] --color_video COLOR_VIDEO --mask_video MASK_VIDEO --xfov XFOV --mask_depth MASK_DEPTH --clip_name CLIP_NAME --clip_starttime CLIP_STARTTIME --clip_len CLIP_LEN
+
+Take a clip from a color video and make it in to a stereo 3D video
+
+options:
+  -h, --help            show this help message and exit
+  --color_video COLOR_VIDEO
+                        video file to use as color input
+  --mask_video MASK_VIDEO
+                        Mask video file
+  --xfov XFOV           camera field of view in x direction
+  --mask_depth MASK_DEPTH
+                        The depth in meters that is considerd background. (used for infill)
+  --clip_name CLIP_NAME
+                        A name to give the clip
+  --clip_starttime CLIP_STARTTIME
+                        Clip start time given as mm:ss
+  --clip_len CLIP_LEN   Clip length time given as mm:ss
+  				
+example:
+create_video_mask.sh some_video.mkv #generate mask
+python pipline.py --color_video some_video.mkv --mask_video mask.mp4 --xfov 55 --mask_depth 2.0 --clip_name clip_nr_1 --clip_starttime 02:11 --clip_len 01:25
+```
+
 #### video_metric_convert.py
 _Uses ML to create stable metric depth video from any normal video file_
 ```bash
