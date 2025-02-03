@@ -41,7 +41,9 @@ if __name__ == '__main__':
     parser.add_argument('--compressed', action='store_true', help='Render the video in a compressed format. Reduces file size but also quality.', required=False)
     parser.add_argument('--infill_mask', action='store_true', help='Save infill mask video.', required=False)
     parser.add_argument('--remove_edges', action='store_true', help='Tries to remove edges that was not visible in image(it is a bit slow)', required=False)
-    
+    parser.add_argument('--mask_depth', type=float, default=None,  help='Saves a compound backfround version of the mesh that can be used as infill. Set to background distance in meter. (only works for non moving cameras)', required=False)
+    parser.add_argument('--save_background', action='store_true', help='Save the compound background as a file. To be ussed as infill.', required=False)
+    parser.add_argument('--load_background', help='Load the compound background as a file. To be used as infill.', required=False)
     
     
     args = parser.parse_args()
@@ -110,6 +112,22 @@ if __name__ == '__main__':
     if args.infill_mask:
         infill_mask_video = cv2.VideoWriter(output_file+"_infillmask.mkv", cv2.VideoWriter_fourcc(*"FFV1"), frame_rate, out_size)
     
+    if args.mask_depth is not None:
+        # Create background "sphere"
+        bg_sphere = depth_map_tools.create_partial_sphere_patch(args.max_depth+2)
+        vertices = np.asarray(bg_sphere.vertices)  # shape: (N,3)
+        new_vertices = vertices.copy()          # will hold the morphed positions
+        # Prepare an array for vertex colors.
+        num_vertices = vertices.shape[0]
+        
+        #The color of non seen areas
+        vertex_colors = np.tile(np.array([[1.0, 1.0, 1.0]]), (num_vertices, 1))
+        
+        if args.load_background:
+            loaded_bg = np.load(args.load_background)
+            new_vertices = loaded_bg[0]
+            vertex_colors = loaded_bg[1]
+    
     
     left_shift = -(args.pupillary_distance/1000)/2
     right_shift = +(args.pupillary_distance/1000)/2
@@ -154,15 +172,41 @@ if __name__ == '__main__':
             if infill_mask_video is not None:
                 bg_color = np.array([0.0, 1.0, 0.0])
                 bg_color_infill_detect = np.array([0, 255, 0], dtype=np.uint8)
+                
             
-            #This is very slow needs optimizing (i think)
+            
+            if transformations is not None:
+                transform_to_zero = np.array(transformations[frame_n-1])
+            else:
+                transform_to_zero = np.eye(4)
+                
+            
+            if args.mask_depth is not None:
+                mask_img = np.array(depth < args.mask_depth, dtype=np.uint8)
+                kernel = np.ones((3, 3), np.uint8)
+                dilated_mask_uint8 = cv2.dilate(mask_img, kernel, iterations=2)
+                mask_img = (dilated_mask_uint8 == 0).astype(bool)
+
+                depth_map_tools.add_tobackground(vertex_colors, vertices, new_vertices, depth, mask_img, color_frame, transform_to_zero, cam_matrix)
+                
+                if not args.save_background:
+                    bg_sphere.vertices = o3d.utility.Vector3dVector(new_vertices)
+                    bg_sphere.vertex_colors = o3d.utility.Vector3dVector(vertex_colors)
+                
+                
+            if args.save_background:
+                if args.max_frames < frame_n and args.max_frames != -1: #We ceed to check this here so that the continue dont skip the check
+                    break
+                continue
+                
             mesh = depth_map_tools.get_mesh_from_depth_map(depth, cam_matrix, color_frame, last_mesh, remove_edges = (args.infill_mask | args.remove_edges))
             last_mesh = mesh
             
             if transformations is not None:
-                transform_to_zero = np.array(transformations[frame_n-1])
-                
                 mesh.transform(transform_to_zero)
+                
+            if args.mask_depth is not None:
+                mesh = mesh + bg_sphere
                 
             if args.touchly1:
                 color_transformed, touchly_depth = depth_map_tools.render(mesh, cam_matrix, -2, bg_color = bg_color)
@@ -241,6 +285,9 @@ if __name__ == '__main__':
         if args.max_frames < frame_n and args.max_frames != -1:
             break
         
+    if args.save_background:
+        np.save(args.depth_video + '_background.npy', np.array([new_vertices, vertex_colors]))
+    
     raw_video.release()
     out.release()
     

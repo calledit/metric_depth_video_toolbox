@@ -207,6 +207,142 @@ def create_point_cloud_from_depth(depth_image, intrinsics, of_by_one = False):
 
 
 
+def create_partial_sphere_patch(sphere_radius=22.0,
+                                     phi_extent=120,
+                                     theta_extent=100,
+                                     num_phi=800,
+                                     num_theta=800):
+    """
+    Creates a partial sphere (sphere patch) mesh using vectorized operations.
+    
+    Parameters:
+      - sphere_radius: Physical radius of the sphere.
+      - phi_extent: Angular extent in the azimuth direction in degrees.
+      - theta_extent: Angular extent in the polar direction in degrees.
+      - num_phi: Number of subdivisions along the phi direction.
+      - num_theta: Number of subdivisions along the theta direction.
+    
+    Returns:
+      An open3d.geometry.TriangleMesh representing the sphere patch.
+    """
+    # Calculate offsets so that the patch is centered in the full sphere.
+    phi_offset = (180 - phi_extent) / 2.0
+    theta_offset = (180 - theta_extent) / 2.0
+
+    # Convert the angular ranges from degrees to radians.
+    phi_min = np.deg2rad(phi_offset)
+    phi_max = np.deg2rad(phi_offset + phi_extent)
+    theta_min = np.deg2rad(theta_offset)
+    theta_max = np.deg2rad(theta_offset + theta_extent)
+    
+    # Generate linearly spaced angles.
+    phi = np.linspace(phi_min, phi_max, num_phi, endpoint=True)
+    theta = np.linspace(theta_min, theta_max, num_theta, endpoint=True)
+    
+    # Create a 2D grid of angles.
+    phi_grid, theta_grid = np.meshgrid(phi, theta)
+    
+    # Compute Cartesian coordinates using the spherical parameterization.
+    # Here we use: x = r*sin(theta)*cos(phi), z = r*sin(theta)*sin(phi), y = r*cos(theta)
+    x = sphere_radius * np.sin(theta_grid) * np.cos(phi_grid)
+    z = sphere_radius * np.sin(theta_grid) * np.sin(phi_grid)
+    y = sphere_radius * np.cos(theta_grid)
+    
+    # Flatten the grid into a list of vertices.
+    vertices = np.stack((x, y, z), axis=-1).reshape(-1, 3)
+    
+    # -------------------------------
+    # Vectorized Triangle Creation
+    # -------------------------------
+    # Create a grid of indices corresponding to each vertex.
+    grid = np.arange(num_theta * num_phi).reshape(num_theta, num_phi)
+    
+    # For each quad in the grid (there are (num_theta-1) x (num_phi-1) quads),
+    # form two triangles.
+    #
+    # Triangle 1 uses the vertices: top-left, bottom-left, top-right.
+    tri1 = np.stack([
+        grid[:-1, :-1],  # top-left
+        grid[1: , :-1],  # bottom-left
+        grid[:-1, 1: ]   # top-right
+    ], axis=-1)
+    
+    # Triangle 2 uses the vertices: top-right, bottom-left, bottom-right.
+    tri2 = np.stack([
+        grid[:-1, 1: ],  # top-right
+        grid[1: , :-1],  # bottom-left
+        grid[1: , 1: ]   # bottom-right
+    ], axis=-1)
+    
+    # Combine and reshape to get a (num_triangles, 3) array.
+    triangles = np.concatenate([tri1.reshape(-1, 3), tri2.reshape(-1, 3)], axis=0)
+    
+    # -------------------------------
+    # Build the Open3D Mesh
+    # -------------------------------
+    mesh = o3d.geometry.TriangleMesh()
+    mesh.vertices = o3d.utility.Vector3dVector(vertices)
+    mesh.triangles = o3d.utility.Vector3iVector(triangles)
+    #mesh.compute_vertex_normals()
+    
+    return mesh
+    
+    
+def add_tobackground(vertex_colors, vertices, new_vertices, depth, mask_img, color_frame, transform_to_zero, cam_matrix):
+    # Projects depth points on to a sphere
+    
+    R = transform_to_zero[:3, :3].T
+    color_img = color_frame/255
+    
+    fx = cam_matrix[0, 0]
+    fy = cam_matrix[1, 1]
+    cx = cam_matrix[0, 2]
+    cy = cam_matrix[1, 2]
+    
+
+    # Normalize vertices to obtain unit directions (avoid division by zero)
+    norms = np.linalg.norm(vertices, axis=1, keepdims=True)
+    norms[norms == 0] = 1e-8  # safeguard against division by zero
+    v_dirs = vertices / norms
+
+    # Transform vertex directions into the camera coordinate system.
+    # (Equivalent to: for each vertex, v_cam = R @ (v/||v||))
+    v_cam = (R @ v_dirs.T).T  # shape (N,3)
+
+    # Only consider vertices that are in front of the camera (positive z)
+    valid = v_cam[:, 2] > 0
+
+    # Project onto image plane using perspective projection.
+    # u = fx * (x/z) + cx and v = fy * (y/z) + cy
+    u = fx * (v_cam[:, 0] / v_cam[:, 2]) + cx
+    v_pixel = fy * (v_cam[:, 1] / v_cam[:, 2]) + cy
+
+    # Check whether the projected pixels fall within image bounds.
+    valid &= (u >= 0) & (u < int(cx*2)) & (v_pixel >= 0) & (v_pixel < int(cy*2))
+
+    # Use nearest-neighbor sampling: round u,v to the nearest integer indices.
+    u_int = np.clip(np.round(u).astype(np.int32), 0, int(cx*2) - 1)
+    v_int = np.clip(np.round(v_pixel).astype(np.int32), 0, int(cy*2) - 1)
+
+    # Further filter out vertices if the corresponding pixel fails the mask or has invalid depth.
+    valid &= mask_img[v_int, u_int] & (depth[v_int, u_int] > 0)
+
+    # For valid vertices, optionally unproject the pixel to get a 3D point in camera coordinates.
+    d = depth[v_int[valid], u_int[valid]]  # depth at valid pixels
+    # Unproject to get p_cam:
+    #   (u - cx)/fx = x / z  and (v - cy)/fy = y / z, and we set z = 1 then scale by d.
+    p_cam = np.stack([
+        (u[valid] - cx) / fx,
+        (v_pixel[valid] - cy) / fy,
+        np.ones_like(d)
+    ], axis=1) * d[:, np.newaxis]
+    # Convert from camera to world coordinates.
+    p_world = (R.T @ p_cam.T).T  # shape (M,3), where M is the number of valid vertices
+
+    # Prepare the vertex colors.
+    vertex_colors[valid] = color_img[v_int[valid], u_int[valid], :]
+    new_vertices[valid] = p_world
+
 
 zero_identity_matrix = np.identity(4)
 def create_mesh_from_point_cloud(points, height, width,
@@ -270,7 +406,7 @@ def create_mesh_from_point_cloud(points, height, width,
             # Compute the average depth for each triangle.
             avg_depth = depths.mean(axis=1)
             # Allowed depth gap is linear with average depth.
-            allowed_thresholds = depth_threshold_scale * avg_depth
+            allowed_thresholds = depth_threshold_scale * (avg_depth+1.3)
             # Compute the actual depth range for each triangle.
             depth_ranges = depths.max(axis=1) - depths.min(axis=1)
             # Only keep triangles where the depth range is within the allowed threshold.

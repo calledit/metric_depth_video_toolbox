@@ -43,11 +43,11 @@ python unidepth_video.py --color_video some_video.mkv -xfov 45
 ```
 
 #### stero_rerender.py
-_Uses a generated depth video together with the source color video to render a new stereo 3D video. To use stero_rerender.py you need to know the camera FOV. If you dont you can estimate it using [PerspectiveFields](https://huggingface.co/spaces/jinlinyi/PerspectiveFields)_
+Uses a generated depth video together with the source color video to render a new stereo 3D video. To use stero_rerender.py you need to know the camera FOV. If you dont you can estimate it using [PerspectiveFields](https://huggingface.co/spaces/jinlinyi/PerspectiveFields)
 ```bash
 usage: stero_rerender.py [-h] --depth_video DEPTH_VIDEO [--color_video COLOR_VIDEO] [--xfov XFOV] [--yfov YFOV] [--max_depth MAX_DEPTH] [--transformation_file TRANSFORMATION_FILE]
                          [--transformation_lock_frame TRANSFORMATION_LOCK_FRAME] [--pupillary_distance PUPILLARY_DISTANCE] [--max_frames MAX_FRAMES] [--touchly0] [--touchly1]
-                         [--touchly_max_depth TOUCHLY_MAX_DEPTH] [--compressed] [--infill_mask] [--remove_edges]
+                         [--touchly_max_depth TOUCHLY_MAX_DEPTH] [--compressed] [--infill_mask] [--remove_edges] [--mask_depth MASK_DEPTH] [--save_background] [--load_background LOAD_BACKGROUND]
 
 Take a rgb encoded depth video and a color video, and render them it as a steroscopic 3D video.that can be used on 3d tvs and vr headsets.
 
@@ -76,6 +76,11 @@ options:
   --compressed          Render the video in a compressed format. Reduces file size but also quality.
   --infill_mask         Save infill mask video.
   --remove_edges        Tries to remove edges that was not visible in image(it is a bit slow)
+  --mask_depth MASK_DEPTH
+                        Saves a compound backfround version of the mesh that can be used as infill. Set to background distance in meter. (only works for non moving cameras)
+  --save_background     Save the compound background as a file. To be ussed as infill.
+  --load_background LOAD_BACKGROUND
+                        Load the compound background as a file. To be used as infill.
 
 example:
 python stero_rerender.py --depth_video some_video_depth.mkv --color_video some_video.mkv --xfov 48
@@ -83,11 +88,11 @@ python stero_rerender.py --depth_video some_video_depth.mkv --color_video some_v
 ```
 
 #### 3d_view_depthfile.py
-_Opens a depth video in a 3d viewer, for viewing. To use 3d_view_depthfile.py you need to know the camera FOV. If you dont you can estimate it using [PerspectiveFields](https://huggingface.co/spaces/jinlinyi/PerspectiveFields)_
+Opens a depth video in a 3d viewer, for viewing. To use 3d_view_depthfile.py you need to know the camera FOV. If you dont you can estimate it using [PerspectiveFields](https://huggingface.co/spaces/jinlinyi/PerspectiveFields)
 ```bash
-usage: 3d_view_depthfile.py [-h] --depth_video DEPTH_VIDEO [--color_video COLOR_VIDEO] [--xfov XFOV] [--yfov YFOV] [--max_depth MAX_DEPTH] [--render] [--remove_edges] [--compressed]
-                            [--draw_frame DRAW_FRAME] [--max_frames MAX_FRAMES] [--transformation_file TRANSFORMATION_FILE] [--transformation_lock_frame TRANSFORMATION_LOCK_FRAME] [--x X] [--y Y]
-                            [--z Z] [--tx TX] [--ty TY] [--tz TZ]
+usage: 3d_view_depthfile.py [-h] --depth_video DEPTH_VIDEO [--color_video COLOR_VIDEO] [--xfov XFOV] [--yfov YFOV] [--max_depth MAX_DEPTH] [--render] [--remove_edges] [--mask_depth MASK_DEPTH]
+                            [--compressed] [--draw_frame DRAW_FRAME] [--max_frames MAX_FRAMES] [--transformation_file TRANSFORMATION_FILE] [--transformation_lock_frame TRANSFORMATION_LOCK_FRAME]
+                            [--x X] [--y Y] [--z Z] [--tx TX] [--ty TY] [--tz TZ]
 
 Take a rgb encoded depth video and a color video, and view it/render as 3D
 
@@ -103,6 +108,8 @@ options:
                         the max depth that the video uses
   --render              Render to video insted of GUI
   --remove_edges        Tries to remove edges that was not visible in image(it is a bit slow)
+  --mask_depth MASK_DEPTH
+                        Only keeps parts further away than specifid depth
   --compressed          Render the video in a compressed format. Reduces file size but also quality.
   --draw_frame DRAW_FRAME
                         open gui with specific frame
@@ -150,7 +157,7 @@ Uses ML to create a video mask for the main subjects in the video based on rembg
 
 
 #### apply_inpainting.sh
-Uses ML to paint over logos, text overlays or other objects from a video, can be usefull to do before runing the depth ML models as they thend to produce prro results when the video has logos over text overlays.
+Uses ML to paint over logos, text overlays or other objects from a video, can be usefull to do before runing the depth ML models as they thend to produce less acurate results when the video has logos or text overlays.
 ```bash
 example:
 Create a overlay_mask.png that is white where the overlay is.
