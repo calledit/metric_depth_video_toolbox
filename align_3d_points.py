@@ -156,7 +156,7 @@ if __name__ == '__main__':
                 rem = []
                 rem_global = []
                 for i, point in enumerate(frames[fr_n]):
-                    if mask[point[2], point[1]] > 0:
+                    if point[1] >= frame_width or point[2] >= frame_height or mask[point[2], point[1]] > 0:
                         rem.append(i)
                         rem_global.append(point[0])
             

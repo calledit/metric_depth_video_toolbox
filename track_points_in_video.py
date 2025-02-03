@@ -59,6 +59,7 @@ if __name__ == '__main__':
     out_file = args.color_video + "_tracking.json"
 
     raw_video = cv2.VideoCapture(args.color_video)
+    frame_width, frame_height = int(raw_video.get(cv2.CAP_PROP_FRAME_WIDTH)), int(raw_video.get(cv2.CAP_PROP_FRAME_HEIGHT))
 
     nr_of_tracking_frames = 60#Has to be even #250 works to
     clip1 = []
@@ -107,7 +108,7 @@ if __name__ == '__main__':
                 frame_no = clip_start + frame_id
                 if frame_no >= len(track_frames):
                     track_frames.append([])
-                if frame_point is not None:
+                if frame_point is not None and frame_point[0] < frame_width and frame_point[1] < frame_height and frame_point[1] >= 0 and frame_point[0] >= 0:
                     track_frames[frame_no].append([global_point_id_start+point_id, frame_point[0], frame_point[1]])
 
         global_point_id_start += len(clip)
