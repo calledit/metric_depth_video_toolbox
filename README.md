@@ -255,7 +255,11 @@ cd metric_video_depth_anything
 # on linux
 sudo apt-get install -y libgl1
 ./install_mvda.sh
-pip install open3d numpy
+pip install open3d numpy opencv-python
+
+#if you want do do paralax ML infill
+./install_mvda.sh -stereocrafter
+
 
 # If you want to export directly to the avc1 codec using the --compress argument
 echo https://swiftlane.com/blog/generating-mp4s-using-opencv-python-with-the-avc1-codec/

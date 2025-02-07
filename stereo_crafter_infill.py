@@ -7,7 +7,7 @@ import cv2
 from transformers import CLIPVisionModelWithProjection
 from diffusers import AutoencoderKLTemporalDecoder, UNetSpatioTemporalConditionModel
 
-from pipelines.stereo_video_inpainting import StableVideoDiffusionInpaintingPipeline, tensor2vid
+from StereoCrafter.pipelines.stereo_video_inpainting import StableVideoDiffusionInpaintingPipeline, tensor2vid
 
 import cv2
 
@@ -46,7 +46,7 @@ def generate_infilled_frames(input_frames, input_masks):
 
     return (video_frames*255).astype(np.uint8)
 
-def deal_with_frame_chunk(keep_first_three, chunk, out):
+def deal_with_frame_chunk(keep_first_three, chunk, out, keep_last_three):
 
     ##where the side by side picture ends
     pic_width = int(frame_width//2)
@@ -56,7 +56,8 @@ def deal_with_frame_chunk(keep_first_three, chunk, out):
 
     #some issues but looks ok (a bit faster is good)
     new_width = 1024
-    new_height = 768
+    new_height = 576
+    #new_height = 768
 
 
 
@@ -76,7 +77,11 @@ def deal_with_frame_chunk(keep_first_three, chunk, out):
     if not keep_first_three:
         sttart = 3
 
-    for j in range(sttart, len(left_frames)):
+    eend = len(left_frames)
+    if not keep_last_three:
+        eend -= 3
+
+    for j in range(sttart, eend):
         left_img = cv2.resize(np.fliplr(left_frames[j]), (pic_width, frame_height))
         right_img = cv2.resize(right_frames[j], (pic_width, frame_height))
 
@@ -100,14 +105,13 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Video Crafter infill script')
     parser.add_argument('--sbs_color_video', type=str, required=True, help='side by side stereo video')
     parser.add_argument('--sbs_mask_video', type=str, required=True, help='side by side stereo video mask')
-    parser.add_argument('--output_dir', type=str, default='./outputs')
+    parser.add_argument('--max_frames', default=-1, type=int, help='quit after max_frames nr of frames', required=False)
 
     args = parser.parse_args()
 
     DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
 
-    frames_chunk=23
-    overlap=3
+    frames_chunk=25
 
 
     if not os.path.isfile(args.sbs_color_video):
@@ -123,16 +127,13 @@ if __name__ == '__main__':
 
     mask_video = cv2.VideoCapture(args.sbs_mask_video)
 
-    if not os.path.exists(args.output_dir):
-        os.makedirs(args.output_dir)
-
     output_video_file = args.sbs_color_video+"_infilled.mp4"
 
     codec = cv2.VideoWriter_fourcc(*"mp4v")#FFV1 mkv
     out = cv2.VideoWriter(output_video_file, codec, frame_rate, (frame_width, frame_height))
 
     img2vid_path = 'weights/stable-video-diffusion-img2vid-xt-1-1'
-    unet_path = 'weights/StereoCrafter'
+    unet_path = 'StereoCrafter/weights/StereoCrafter'
 
     image_encoder = CLIPVisionModelWithProjection.from_pretrained(
         img2vid_path,
@@ -171,14 +172,13 @@ if __name__ == '__main__':
 
     frame_buffer = []
     first_chunk = True
+    last_chunk = False
     frame_n = 0
     while raw_video.isOpened():
         print(f"Frame: {frame_n} {frame_n/frame_rate}s")
         frame_n += 1
         ret, raw_frame = raw_video.read()
         if not ret:
-            break
-        if frame_n == 230:
             break
 
         rgb = cv2.cvtColor(raw_frame, cv2.COLOR_BGR2RGB)
@@ -194,14 +194,18 @@ if __name__ == '__main__':
         frame_buffer.append([rgb, mask_frame])
 
         if len(frame_buffer) >= frames_chunk:
-            deal_with_frame_chunk(first_chunk, frame_buffer, out)
+            deal_with_frame_chunk(first_chunk, frame_buffer, out, last_chunk)
             if first_chunk:
                 #keep overlap
                 first_chunk = False
-            frame_buffer = [frame_buffer[-3], frame_buffer[-2], frame_buffer[-1]]#reset but keep overlapp
+            frame_buffer = [frame_buffer[-6], frame_buffer[-5], frame_buffer[-4], frame_buffer[-3], frame_buffer[-2], frame_buffer[-1]]#reset but keep overlapp
+        
+        if frame_n == args.max_frames:
+            break
 
-    if len(frame_buffer) > 3 or first_chunk:
-        deal_with_frame_chunk(first_chunk, frame_buffer, out)
+    last_chunk = True
+    #Append final three frames or whatever is left
+    deal_with_frame_chunk(first_chunk, frame_buffer, out, last_chunk)
 
     raw_video.release()
     mask_video.release()

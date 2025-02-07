@@ -1,26 +1,23 @@
 #!/bin/bash
 
+pip install open3d numpy opencv-python
 
-#stereocrafter for ML based infill
+#install support for stereocrafter for ML based infill
 if [[ " $@ " =~ " -stereocrafter " ]]; then
 	git clone --recursive https://github.com/TencentARC/StereoCrafter
 
 	cd StereoCrafter
-
-	echo this should be its own venv as it mofifies with loots of dependencys
 	
-	# Install dependencies
-	pip install -r requirements.txt
+	pip install transformers diffusers accelerate
 
 	# in StereoCrafter project root directory
 	mkdir weights
 	cd ./weights
 	
 	sudo apt-get install git-lfs
-	
-	git clone https://huggingface.co/stabilityai/stable-video-diffusion-img2vid-xt-1-1
-	
 	git clone https://huggingface.co/TencentARC/StereoCrafter
+	
+	#git clone https://huggingface.co/stabilityai/stable-video-diffusion-img2vid-xt-1-1 #Not needed, is automaticly downloaded 
 	
 	
 	
@@ -29,7 +26,7 @@ if [[ " $@ " =~ " -stereocrafter " ]]; then
 fi
 
 
-#to install with support for unidepth (requires cuda 11.8 and torch 2.2.0)
+#install support for unidepth (requires cuda 11.8 and torch 2.2.0)
 if [[ " $@ " =~ " -unidepth " ]]; then
 	git clone https://github.com/lpiccinelli-eth/UniDepth
 
@@ -51,6 +48,8 @@ if [[ " $@ " =~ " -unidepth " ]]; then
 	cd ..
 	
 	cp -a src/unidepth_video.py UniDepth/.
+	
+	exit
 fi
 
 
