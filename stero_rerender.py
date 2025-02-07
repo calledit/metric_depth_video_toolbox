@@ -162,7 +162,7 @@ if __name__ == '__main__':
         
         
         if transformations is None and args.touchly1: #Fast path we can skip the full render pass
-            depth8bit = np.rint(np.minimum(touchly_depth, args.touchly_max_depth)*(255/args.touchly_max_depth)).astype(np.uint8)
+            depth8bit = np.rint(np.minimum(depth, args.touchly_max_depth)*(255/args.touchly_max_depth)).astype(np.uint8)
             touchly_depth = np.repeat(depth8bit[..., np.newaxis], 3, axis=-1)
             touchly_depth = 255 - touchly_depth #Touchly uses reverse depth
             out_image = cv2.vconcat([color_frame, touchly_depth])
