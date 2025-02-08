@@ -26,7 +26,6 @@ if __name__ == '__main__':
     parser.add_argument('--max_depth', default=20, type=int, help='the max depth that the video uses', required=False)
     parser.add_argument('--render', action='store_true', help='Render to video insted of GUI', required=False)
     parser.add_argument('--remove_edges', action='store_true', help='Tries to remove edges that was not visible in image(it is a bit slow)', required=False)
-    parser.add_argument('--mask_depth', type=float, default=None,  help='Only keeps parts further away than specifid depth', required=False)
     
     parser.add_argument('--compressed', action='store_true', help='Render the video in a compressed format. Reduces file size but also quality.', required=False)
     parser.add_argument('--draw_frame', default=-1, type=int, help='open gui with specific frame', required=False)
@@ -111,13 +110,6 @@ if __name__ == '__main__':
             out = cv2.VideoWriter(output_file, codec, frame_rate, (frame_width, frame_height))
     mesh = None
     
-    if args.mask_depth is not None:
-        # Create background "sphere"
-        bg_sphere = depth_map_tools.create_partial_sphere_patch(args.max_depth+2)
-        vertices = np.asarray(bg_sphere.vertices)  # shape: (N,3)
-        new_vertices = vertices.copy()
-        num_vertices = vertices.shape[0]
-        vertex_colors = np.tile(np.array([[1.0, 1.0, 1.0]]), (num_vertices, 1))
 
     frame_n = 0
     while raw_video.isOpened():
@@ -152,19 +144,10 @@ if __name__ == '__main__':
         
         if transformations is not None:
             transform_to_zero = np.array(transformations[frame_n-1])
-        
-        if args.mask_depth is not None:
-            mask_img = np.array(depth < args.mask_depth, dtype=np.uint8)
-            kernel = np.ones((3, 3), np.uint8)
-            dilated_mask_uint8 = cv2.dilate(mask_img, kernel, iterations=2)
-            mask_img = (dilated_mask_uint8 == 0).astype(bool)
-
-            depth_map_tools.add_tobackground(vertex_colors, vertices, new_vertices, depth, mask_img, color_frame, transform_to_zero, cam_matrix)
-        
             
         
         #This is very slow needs optimizing (i think)
-        mesh_ret = depth_map_tools.get_mesh_from_depth_map(depth, cam_matrix, color_frame, mesh, remove_edges = args.remove_edges, mask_depth = args.mask_depth)
+        mesh_ret, _ = depth_map_tools.get_mesh_from_depth_map(depth, cam_matrix, color_frame, mesh, remove_edges = args.remove_edges)
         
         if mesh is None:
             if not args.render and args.draw_frame == -1:
@@ -177,10 +160,6 @@ if __name__ == '__main__':
         
         if args.draw_frame == frame_n:
             to_draw = [mesh]
-            if args.mask_depth is not None:
-                bg_sphere.vertices = o3d.utility.Vector3dVector(new_vertices)
-                bg_sphere.vertex_colors = o3d.utility.Vector3dVector(vertex_colors)
-                to_draw.append(bg_sphere)
 
             depth_map_tools.draw(to_draw)
             exit(0)

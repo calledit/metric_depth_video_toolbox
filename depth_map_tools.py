@@ -146,9 +146,11 @@ def pnpSolve_ransac(t3d_points_new_frame, mkpts2, cam_mat, distCoeffs = None, re
     print("solvePnP FAIL")
     return None
 
-def pts_2_pcd(points):
+def pts_2_pcd(points, colors = None):
     pcd = o3d.geometry.PointCloud()
     pcd.points = o3d.utility.Vector3dVector(points)
+    if colors is not None:
+        pcd.colors = o3d.utility.Vector3dVector(colors)
     return pcd
 
 def project_2d_points_to_3d(points, depth, camera_matrix, distCoeffs = None):
@@ -176,12 +178,12 @@ def project_2d_points_to_3d(points, depth, camera_matrix, distCoeffs = None):
     return np.array(points_3d)
 
 
-def get_mesh_from_depth_map(depth_map, cam_mat, color_frame = None, inp_mesh = None, remove_edges = False, mask_depth = None):
+def get_mesh_from_depth_map(depth_map, cam_mat, color_frame = None, inp_mesh = None, remove_edges = False):
     points, height, width = create_point_cloud_from_depth(depth_map, cam_mat, True)
 
     # Create mesh from point cloud
-    mesh = create_mesh_from_point_cloud(points, height, width, color_frame, inp_mesh, remove_edges, mask_depth)
-    return mesh
+    mesh, used_indices = create_mesh_from_point_cloud(points, height, width, color_frame, inp_mesh, remove_edges)
+    return mesh, used_indices
 
 def create_point_cloud_from_depth(depth_image, intrinsics, of_by_one = False):
     height, width = depth_image.shape
@@ -206,185 +208,101 @@ def create_point_cloud_from_depth(depth_image, intrinsics, of_by_one = False):
     return points, height, width
 
 
-
-def create_partial_sphere_patch(sphere_radius=22.0,
-                                     phi_extent=120,
-                                     theta_extent=100,
-                                     num_phi=800,
-                                     num_theta=800):
+def perspective_aware_down_sample(pcd, voxel_size_norm):
     """
-    Creates a partial sphere (sphere patch) mesh using vectorized operations.
+    Downsamples a point cloud in a perspective-aware manner.
     
-    Parameters:
-      - sphere_radius: Physical radius of the sphere.
-      - phi_extent: Angular extent in the azimuth direction in degrees.
-      - theta_extent: Angular extent in the polar direction in degrees.
-      - num_phi: Number of subdivisions along the phi direction.
-      - num_theta: Number of subdivisions along the theta direction.
+    The function assumes that the input points are in camera coordinates,
+    for example as produced by create_point_cloud_from_depth:
+    
+        x = (u - cx)*z/fx,   y = (v - cy)*z/fy,   z = depth.
+    
+    It transforms the points into a warped space where lateral coordinates
+    do not depend on depth (i.e. x_norm = x/z, y_norm = y/z), performs voxel
+    downsampling in that space, and then transforms the points back.
+    
+    Args:
+        points (np.ndarray): Nx3 array of points in camera space.
+        voxel_size_norm (float): Voxel size to use in the warped (normalized)
+                                 space. Its units are in “normalized” coordinates.
+                                 (For example, if you wish to merge points within
+                                 0.005 units in normalized space, set voxel_size_norm=0.005.)
     
     Returns:
-      An open3d.geometry.TriangleMesh representing the sphere patch.
+        np.ndarray: Downsampled Nx3 array of points in camera space.
     """
-    # Calculate offsets so that the patch is centered in the full sphere.
-    phi_offset = (180 - phi_extent) / 2.0
-    theta_offset = (180 - theta_extent) / 2.0
-
-    # Convert the angular ranges from degrees to radians.
-    phi_min = np.deg2rad(phi_offset)
-    phi_max = np.deg2rad(phi_offset + phi_extent)
-    theta_min = np.deg2rad(theta_offset)
-    theta_max = np.deg2rad(theta_offset + theta_extent)
     
-    # Generate linearly spaced angles.
-    phi = np.linspace(phi_min, phi_max, num_phi, endpoint=True)
-    theta = np.linspace(theta_min, theta_max, num_theta, endpoint=True)
+    points = np.asarray(pcd.points)
+    # --- Warp points to remove perspective scaling ---
+    # (x, y, z) -> (x/z, y/z, z)
+    # (Note: since x = (u-cx)*z/fx, x/z = (u-cx)/fx, and similarly for y.)
+    x_norm = points[:, 0] / points[:, 2]
+    y_norm = points[:, 1] / points[:, 2]
+    warped = np.stack([x_norm, y_norm, points[:, 2]], axis=1)
     
-    # Create a 2D grid of angles.
-    phi_grid, theta_grid = np.meshgrid(phi, theta)
+    # --- Create a temporary Open3D point cloud in warped space and downsample ---
+    pcd.points = o3d.utility.Vector3dVector(warped)
+    pcd_down_warped = pcd.voxel_down_sample(voxel_size_norm)
+    warped_down = np.asarray(pcd_down_warped.points)
     
-    # Compute Cartesian coordinates using the spherical parameterization.
-    # Here we use: x = r*sin(theta)*cos(phi), z = r*sin(theta)*sin(phi), y = r*cos(theta)
-    x = sphere_radius * np.sin(theta_grid) * np.cos(phi_grid)
-    z = sphere_radius * np.sin(theta_grid) * np.sin(phi_grid)
-    y = sphere_radius * np.cos(theta_grid)
+    # --- Unwarp: transform back to original camera coordinates ---
+    # For each point, x = (x/z)*z, y = (y/z)*z, and z remains the same.
+    x_down = warped_down[:, 0] * warped_down[:, 2]
+    y_down = warped_down[:, 1] * warped_down[:, 2]
+    z_down = warped_down[:, 2]
+    points_down = np.stack([x_down, y_down, z_down], axis=1)
     
-    # Flatten the grid into a list of vertices.
-    vertices = np.stack((x, y, z), axis=-1).reshape(-1, 3)
+    pcd_down_warped.points = o3d.utility.Vector3dVector(points_down)
     
-    # -------------------------------
-    # Vectorized Triangle Creation
-    # -------------------------------
-    # Create a grid of indices corresponding to each vertex.
-    grid = np.arange(num_theta * num_phi).reshape(num_theta, num_phi)
-    
-    # For each quad in the grid (there are (num_theta-1) x (num_phi-1) quads),
-    # form two triangles.
-    #
-    # Triangle 1 uses the vertices: top-left, bottom-left, top-right.
-    tri1 = np.stack([
-        grid[:-1, :-1],  # top-left
-        grid[1: , :-1],  # bottom-left
-        grid[:-1, 1: ]   # top-right
-    ], axis=-1)
-    
-    # Triangle 2 uses the vertices: top-right, bottom-left, bottom-right.
-    tri2 = np.stack([
-        grid[:-1, 1: ],  # top-right
-        grid[1: , :-1],  # bottom-left
-        grid[1: , 1: ]   # bottom-right
-    ], axis=-1)
-    
-    # Combine and reshape to get a (num_triangles, 3) array.
-    triangles = np.concatenate([tri1.reshape(-1, 3), tri2.reshape(-1, 3)], axis=0)
-    
-    # -------------------------------
-    # Build the Open3D Mesh
-    # -------------------------------
-    mesh = o3d.geometry.TriangleMesh()
-    mesh.vertices = o3d.utility.Vector3dVector(vertices)
-    mesh.triangles = o3d.utility.Vector3iVector(triangles)
-    #mesh.compute_vertex_normals()
-    
-    return mesh
-    
-    
-def add_tobackground(vertex_colors, vertices, new_vertices, depth, mask_img, color_frame, transform_to_zero, cam_matrix):
-    # Projects depth points on to a sphere
-    
-    R = transform_to_zero[:3, :3].T
-    color_img = color_frame/255
-    
-    fx = cam_matrix[0, 0]
-    fy = cam_matrix[1, 1]
-    cx = cam_matrix[0, 2]
-    cy = cam_matrix[1, 2]
-    
-
-    # Normalize vertices to obtain unit directions (avoid division by zero)
-    norms = np.linalg.norm(vertices, axis=1, keepdims=True)
-    norms[norms == 0] = 1e-8  # safeguard against division by zero
-    v_dirs = vertices / norms
-
-    # Transform vertex directions into the camera coordinate system.
-    # (Equivalent to: for each vertex, v_cam = R @ (v/||v||))
-    v_cam = (R @ v_dirs.T).T  # shape (N,3)
-
-    # Only consider vertices that are in front of the camera (positive z)
-    valid = v_cam[:, 2] > 0
-
-    # Project onto image plane using perspective projection.
-    # u = fx * (x/z) + cx and v = fy * (y/z) + cy
-    u = fx * (v_cam[:, 0] / v_cam[:, 2]) + cx
-    v_pixel = fy * (v_cam[:, 1] / v_cam[:, 2]) + cy
-
-    # Check whether the projected pixels fall within image bounds.
-    valid &= (u >= 0) & (u < int(cx*2)) & (v_pixel >= 0) & (v_pixel < int(cy*2))
-
-    # Use nearest-neighbor sampling: round u,v to the nearest integer indices.
-    u_int = np.clip(np.round(u).astype(np.int32), 0, int(cx*2) - 1)
-    v_int = np.clip(np.round(v_pixel).astype(np.int32), 0, int(cy*2) - 1)
-
-    # Further filter out vertices if the corresponding pixel fails the mask or has invalid depth.
-    valid &= mask_img[v_int, u_int] & (depth[v_int, u_int] > 0)
-
-    # For valid vertices, optionally unproject the pixel to get a 3D point in camera coordinates.
-    d = depth[v_int[valid], u_int[valid]]  # depth at valid pixels
-    # Unproject to get p_cam:
-    #   (u - cx)/fx = x / z  and (v - cy)/fy = y / z, and we set z = 1 then scale by d.
-    p_cam = np.stack([
-        (u[valid] - cx) / fx,
-        (v_pixel[valid] - cy) / fy,
-        np.ones_like(d)
-    ], axis=1) * d[:, np.newaxis]
-    # Convert from camera to world coordinates.
-    p_world = (R.T @ p_cam.T).T  # shape (M,3), where M is the number of valid vertices
-
-    # Prepare the vertex colors.
-    vertex_colors[valid] = color_img[v_int[valid], u_int[valid], :]
-    new_vertices[valid] = p_world
+    return pcd_down_warped
 
 
 zero_identity_matrix = np.identity(4)
 def create_mesh_from_point_cloud(points, height, width,
-                                 image_frame=None, inp_mesh=None, remove_edges=False, mask_depth = None):
+                                 image_frame=None,
+                                 inp_mesh=None,
+                                 remove_edges=False,
+                                 angle_threshold_deg=85):
     """
-    Creates (or updates) an Open3D TriangleMesh from a grid-organized point cloud.
-    If no input mesh is provided or if remove_edges is True, the triangles are computed.
-    Otherwise (when inp_mesh is provided and remove_edges is False), the function
-    simply updates the vertices (and optionally the vertex colors).
-
-    Parameters:
-      - points: a numpy array that can be reshaped to (-1, 3) containing the 3D points.
-      - height: number of rows in the grid.
-      - width: number of columns in the grid.
-      - image_frame: (optional) image whose colors are mapped to the mesh vertices.
-      - inp_mesh: (optional) an existing mesh to update.
-      - remove_edges: if True, triangles with large depth gaps are filtered out.
-
-    Returns:
-      - mesh: an Open3D TriangleMesh with updated vertices (and triangles if computed).
-    """
+    Creates an Open3D TriangleMesh from a grid-organized point cloud while
+    filtering out triangles whose orientation relative to the camera is too oblique.
     
-    # Reshape the points into a (N, 3) array of vertices.
+    The function assumes the 3D points are in camera coordinates (i.e. the camera is at the origin).
+    
+    Parameters:
+      - points: A numpy array that can be reshaped to (-1, 3) containing the 3D points.
+      - height: The number of rows in the grid.
+      - width: The number of columns in the grid.
+      - image_frame: (Optional) An image whose colors will be mapped to the mesh vertices.
+      - camera_intrinsic_matrix: (Not used here; points are assumed to be already projected.)
+      - inp_mesh: (Optional) An existing mesh to update.
+      - remove_edges: If True, triangles with normals that deviate too far from the view vector are removed.
+      - angle_threshold_deg: The maximum allowed angle (in degrees) between a triangle’s normal and 
+                             the view vector. Triangles with an angle larger than this threshold are discarded.
+    
+    Returns:
+      - mesh: The resulting Open3D TriangleMesh.
+    """
+    # Reshape points into a (N, 3) array of vertices.
     vertices = points.reshape(-1, 3)
     
-    # Case 1: We need to compute triangles (either no input mesh exists, or we need to remove edges).
+    used_indices = []
+    
+    # If no mesh exists or if we need to remove edges, compute the triangles.
     if inp_mesh is None or remove_edges:
-        # If there's no input mesh, create a new one; otherwise, update the provided mesh.
         if inp_mesh is None:
             mesh = o3d.geometry.TriangleMesh()
         else:
             mesh = inp_mesh
             mesh.transform(zero_identity_matrix)
         
-        # Generate grid-based triangle indices using vectorized operations.
-        # For each cell at (i, j) with i in [0, height-2] and j in [0, width-2]:
-        #   - The four corner indices of the cell are computed.
-        #   - Two triangles are formed:
-        #         tri1: (i, j), (i+1, j), (i+1, j+1)
-        #         tri2: (i, j), (i+1, j+1), (i, j+1)
+        # --- Generate candidate triangles via the grid layout ---
+        # For each grid cell at (i, j) with i in [0, height-2] and j in [0, width-2],
+        # we define two triangles:
+        #    tri1: (i, j), (i+1, j), (i+1, j+1)
+        #    tri2: (i, j), (i+1, j+1), (i, j+1)
         grid_i, grid_j = np.meshgrid(np.arange(height - 1), np.arange(width - 1), indexing='ij')
-        grid_i = grid_i.ravel()
+        grid_i = grid_i.ravel()  # Flatten to 1D arrays (num_cells,)
         grid_j = grid_j.ravel()
         
         idx1 = grid_i * width + grid_j
@@ -396,43 +314,61 @@ def create_mesh_from_point_cloud(points, height, width,
         tri2 = np.stack([idx1, idx3, idx4], axis=1)
         triangles_all = np.vstack([tri1, tri2])
         
-        # If remove_edges is True, filter triangles based on a depth gap that scales with average depth.
+        # --- Filter triangles based on the triangle angle relative to the camera ---
         if remove_edges:
-            depth_threshold_scale = 0.04
-            # Gather vertices for each triangle; shape: (N_tri, 3, 3)
+            # Retrieve the vertices for each triangle: shape (N_tri, 3, 3)
             tri_vertices = vertices[triangles_all]
-            # Extract the z-values (depth) for each vertex.
-            depths = tri_vertices[:, :, 2]
-            # Compute the average depth for each triangle.
-            avg_depth = depths.mean(axis=1)
-            # Allowed depth gap is linear with average depth.
-            allowed_thresholds = depth_threshold_scale * (avg_depth+1.3)
-            # Compute the actual depth range for each triangle.
-            depth_ranges = depths.max(axis=1) - depths.min(axis=1)
-            # Only keep triangles where the depth range is within the allowed threshold.
-            valid_mask = depth_ranges <= allowed_thresholds
-            if mask_depth is not None:
-                depth_mask = avg_depth >= mask_depth
-                valid_mask = valid_mask & depth_mask
+            # Compute the centroid (average position) for each triangle.
+            centers = tri_vertices.mean(axis=1)  # shape (N_tri, 3)
+            
+            # The view vector is the direction from the triangle centroid to the camera (assumed at origin).
+            # Thus, view_vector = -centers. Normalize it:
+            view_vectors = -centers
+            view_norm = np.linalg.norm(view_vectors, axis=1, keepdims=True)
+            # Avoid division by zero.
+            view_norm[view_norm == 0] = 1
+            view_vectors_normalized = view_vectors / view_norm
+            
+            # Compute triangle normals.
+            edge1 = tri_vertices[:, 1] - tri_vertices[:, 0]
+            edge2 = tri_vertices[:, 2] - tri_vertices[:, 0]
+            normals = np.cross(edge1, edge2)
+            norm_norm = np.linalg.norm(normals, axis=1, keepdims=True)
+            norm_norm[norm_norm == 0] = 1
+            normals_normalized = normals / norm_norm
+            
+            # Compute the cosine of the angle between the normal and the view vector.
+            # For a triangle facing the camera, this dot product should be close to 1.
+            dot_products = np.sum(normals_normalized * view_vectors_normalized, axis=1)
+            
+            # Compute the cosine of the allowed maximum angle.
+            cos_threshold = np.cos(np.radians(angle_threshold_deg))
+            # Create a mask for triangles whose normal is within the allowed angle.
+            valid_mask = dot_products >= cos_threshold
+            
+            # Filter the candidate triangles.
             triangles_all = triangles_all[valid_mask]
+            
+            used_indices = np.unique(triangles_all)
+            #all_indices = np.arange(len(vertices))
+            #unused_indices = np.setdiff1d(all_indices, used_indices)
         
-        # Set the computed triangles and vertices on the mesh.
+        # Set the computed (and filtered) triangles on the mesh.
         mesh.triangles = o3d.utility.Vector3iVector(triangles_all)
         mesh.vertices = o3d.utility.Vector3dVector(vertices)
     
-    # Case 2: We already have an input mesh and we are not removing edges.
-    # In this case, simply update the vertices (and leave the triangles unchanged).
+    # If we already have an input mesh and we are not removing edges, simply update vertices.
     else:
         mesh = inp_mesh
         mesh.vertices = o3d.utility.Vector3dVector(vertices)
     
-    # Optionally, assign vertex colors if an image frame is provided.
+    # Optionally, set vertex colors.
     if image_frame is not None:
         colors = np.array(image_frame).reshape(-1, 3) / 255.0
         mesh.vertex_colors = o3d.utility.Vector3dVector(colors)
     
-    #mesh.compute_vertex_normals()
-    return mesh
+    
+    return mesh, used_indices
 
 vis = None
 v_h = None
@@ -474,11 +410,14 @@ def render(pcd, cam_mat, depth = False, w = None, h = None, extrinsic_matric = n
 
         rend_opt = vis.get_render_option()
         rend_opt.background_color = bg_color
+        rend_opt.point_size = 1.0
+        
         ctr = vis.get_view_control()
         ctr.set_lookat([0, 0, 1])
         ctr.set_up([0, -1, 0])
         ctr.set_front([0, 0, -1])
         ctr.set_zoom(1)
+        
 
 
         params = ctr.convert_to_pinhole_camera_parameters()
@@ -492,7 +431,10 @@ def render(pcd, cam_mat, depth = False, w = None, h = None, extrinsic_matric = n
         #Bug workaround where we scale the geometry insted of the viewport
         scale_up_factor = cam_mat[1][1]/cam_mat[0][0]
         pcd = copy.deepcopy(pcd)
-        pcd.vertices = o3d.utility.Vector3dVector(np.asarray(pcd.vertices)*np.array([1.0, scale_up_factor, 1.0]))#scale
+        if isinstance(pcd, o3d.geometry.PointCloud):
+            pcd.points = o3d.utility.Vector3dVector(np.asarray(pcd.points)*np.array([1.0, scale_up_factor, 1.0]))
+        else:
+            pcd.vertices = o3d.utility.Vector3dVector(np.asarray(pcd.vertices)*np.array([1.0, scale_up_factor, 1.0]))
 
 
         vis.add_geometry(pcd)

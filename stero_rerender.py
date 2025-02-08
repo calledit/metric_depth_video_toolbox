@@ -2,6 +2,7 @@ import argparse
 import cv2
 import numpy as np
 import os
+import copy
 import sys
 import time
 import json
@@ -41,7 +42,7 @@ if __name__ == '__main__':
     parser.add_argument('--compressed', action='store_true', help='Render the video in a compressed format. Reduces file size but also quality.', required=False)
     parser.add_argument('--infill_mask', action='store_true', help='Save infill mask video.', required=False)
     parser.add_argument('--remove_edges', action='store_true', help='Tries to remove edges that was not visible in image(it is a bit slow)', required=False)
-    parser.add_argument('--mask_depth', type=float, default=None,  help='Saves a compound backfround version of the mesh that can be used as infill. Set to background distance in meter. (only works for non moving cameras)', required=False)
+    parser.add_argument('--mask_video', type=str, help='video file to use as mask input to filter out the forground and generate a background version of the mesh that can be used as infill. Requires non moving camera or very good tracking.', required=False)
     parser.add_argument('--save_background', action='store_true', help='Save the compound background as a file. To be ussed as infill.', required=False)
     parser.add_argument('--load_background', help='Load the compound background as a file. To be used as infill.', required=False)
     
@@ -65,6 +66,12 @@ if __name__ == '__main__':
         if not os.path.isfile(args.color_video):
             raise Exception("input color_video does not exist")
         color_video = cv2.VideoCapture(args.color_video)
+        
+    mask_video = None
+    if args.mask_video is not None:
+        if not os.path.isfile(args.mask_video):
+            raise Exception("input mask_video does not exist")
+        mask_video = cv2.VideoCapture(args.mask_video)
     
     transformations = None
     if args.transformation_file is not None:
@@ -112,21 +119,16 @@ if __name__ == '__main__':
     if args.infill_mask:
         infill_mask_video = cv2.VideoWriter(output_file+"_infillmask.mkv", cv2.VideoWriter_fourcc(*"FFV1"), frame_rate, out_size)
     
-    if args.mask_depth is not None:
+    if mask_video is not None:
         # Create background "sphere"
-        bg_sphere = depth_map_tools.create_partial_sphere_patch(args.max_depth+2)
-        vertices = np.asarray(bg_sphere.vertices)  # shape: (N,3)
-        new_vertices = vertices.copy()          # will hold the morphed positions
-        # Prepare an array for vertex colors.
-        num_vertices = vertices.shape[0]
-        
-        #The color of non seen areas
-        vertex_colors = np.tile(np.array([[1.0, 1.0, 1.0]]), (num_vertices, 1))
+        bg_cloud = o3d.geometry.PointCloud()
+        bg_points = np.asarray(bg_cloud.points)
+        bg_point_colors = np.asarray(bg_cloud.colors)
         
         if args.load_background:
             loaded_bg = np.load(args.load_background)
-            new_vertices = loaded_bg[0]
-            vertex_colors = loaded_bg[1]
+            bg_points = loaded_bg[0]
+            bg_point_colors = loaded_bg[1]
     
     
     left_shift = -(args.pupillary_distance/1000)/2
@@ -180,18 +182,45 @@ if __name__ == '__main__':
             else:
                 transform_to_zero = np.eye(4)
                 
+            mesh, used_indices = depth_map_tools.get_mesh_from_depth_map(depth, cam_matrix, color_frame, last_mesh, remove_edges = (args.infill_mask | args.remove_edges))
+            last_mesh = mesh
             
-            if args.mask_depth is not None:
-                mask_img = np.array(depth < args.mask_depth, dtype=np.uint8)
-                kernel = np.ones((3, 3), np.uint8)
-                dilated_mask_uint8 = cv2.dilate(mask_img, kernel, iterations=2)
-                mask_img = (dilated_mask_uint8 == 0).astype(bool)
-
-                depth_map_tools.add_tobackground(vertex_colors, vertices, new_vertices, depth, mask_img, color_frame, transform_to_zero, cam_matrix)
+            
+            if transformations is not None:
+                mesh.transform(transform_to_zero)
+            
+            if mask_video is not None:
                 
-                if not args.save_background:
-                    bg_sphere.vertices = o3d.utility.Vector3dVector(new_vertices)
-                    bg_sphere.vertex_colors = o3d.utility.Vector3dVector(vertex_colors)
+                ret, mask_frame = mask_video.read()
+                mask_img = np.array(cv2.cvtColor(mask_frame, cv2.COLOR_BGR2GRAY))
+                
+                #find all black pixels 
+                mask_img1d = mask_img.reshape(-1)
+                bg_mask = np.where(mask_img1d < 128)[0]
+                
+                # intersect the mask pixels with the pizels that are not edges
+                points_2_keep = np.intersect1d(used_indices, bg_mask)
+                
+                new_points = np.asarray(mesh.vertices)[points_2_keep]
+                new_colors = np.asarray(mesh.vertex_colors)[points_2_keep]
+                
+                
+                bg_points  = np.concatenate((bg_points, new_points), axis=0)
+                bg_point_colors  = np.concatenate((bg_point_colors, new_colors), axis=0)
+                
+                bg_cloud = depth_map_tools.pts_2_pcd(bg_points, bg_point_colors)
+                
+                #clear up the point clouds every so often
+                if frame_n % 10 == 0:
+                    print("clearing up pointcloud")
+                    
+                    # perspective_aware_down_sample makes sense when you are looking in the same direction, techically a normal down_sample function would be better. But it is to slow.
+                    bg_cloud = depth_map_tools.perspective_aware_down_sample(bg_cloud, 0.003)#1 cubic cm
+                
+                    bg_points  = np.asarray(bg_cloud.points)
+                    bg_point_colors = np.asarray(bg_cloud.colors)
+                    bg_cloud = copy.deepcopy(bg_cloud)
+                    
                 
                 
             if args.save_background:
@@ -199,14 +228,11 @@ if __name__ == '__main__':
                     break
                 continue
                 
-            mesh = depth_map_tools.get_mesh_from_depth_map(depth, cam_matrix, color_frame, last_mesh, remove_edges = (args.infill_mask | args.remove_edges))
-            last_mesh = mesh
             
-            if transformations is not None:
-                mesh.transform(transform_to_zero)
-                
-            if args.mask_depth is not None:
-                mesh = mesh + bg_sphere
+            
+            #Only render the background
+            if args.mask_video is not None:
+                mesh = bg_cloud
                 
             if args.touchly1:
                 color_transformed, touchly_depth = depth_map_tools.render(mesh, cam_matrix, -2, bg_color = bg_color)
@@ -286,10 +312,13 @@ if __name__ == '__main__':
             break
         
     if args.save_background:
-        np.save(args.depth_video + '_background.npy', np.array([new_vertices, vertex_colors]))
+        np.save(args.depth_video + '_background.npy', np.array([bg_points, bg_point_colors]))
     
     raw_video.release()
     out.release()
+    
+    if mask_video is not None:
+        mask_video.release()
     
     if infill_mask_video is not None:
         infill_mask_video.release()
