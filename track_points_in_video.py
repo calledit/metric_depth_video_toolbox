@@ -31,26 +31,93 @@ def convert_to_point_list(point_list, point_visibility):
                 nr_none += 1
         #print(len(points), "missing:", nr_none)
     return points
+    
+def create_keypoint_mask(image, keypoints, radius=2):
+    """
+    Creates a binary mask from the given image and keypoints.
+    All pixels within a circle of given radius around each keypoint are set to white (255),
+    and all other pixels are black (0).
+    
+    Args:
+        image (numpy.ndarray): The original image (used only to determine the shape).
+        keypoints (list): List of keypoints (each with a .pt attribute).
+        radius (int): Radius (in pixels) around each keypoint to set as white.
+        
+    Returns:
+        mask (numpy.ndarray): A binary mask image.
+    """
+    # Create a black mask with the same height and width as the input image
+    mask = np.zeros(image.shape[:2], dtype=np.uint8)
+    
+    # For each keypoint, draw a filled circle (white) on the mask.
+    for kp in keypoints:
+        # Extract the keypoint coordinates and round them to the nearest integer.
+        x, y = int(round(kp.pt[0])), int(round(kp.pt[1]))
+        cv2.circle(mask, (x, y), radius, color=255, thickness=-1)
+    
+    return mask
 
+def mask_from_orb_features(image, mask=None):
+    """
+    Detects ORB features and creates a image mask from that
+    """
+    # Create an ORB detector instance
+    orb = cv2.ORB_create(nfeatures=9000000, edgeThreshold=2, patchSize=2, fastThreshold=2)
+
+    # Detect keypoints and compute descriptors using the mask if provided
+    keypoints, descriptors = orb.detectAndCompute(image, mask=mask)
+
+    keypoint_mask = create_keypoint_mask(image, keypoints, radius=5)
+    
+    blurred_mask = cv2.GaussianBlur(keypoint_mask, (9, 9), 0)
+    
+    ret, keypoint_mask = cv2.threshold(blurred_mask, 15, 255, cv2.THRESH_BINARY)
+    
+    return keypoint_mask
 
 def process_clip(frames):
     global cotracker
-    grid_size = 20
-    video = torch.tensor(frames).to(DEVICE).permute(0, 3, 1, 2)[None].float()  # B T C H W
+    grid_size = 30
+    video = torch.tensor(frames).to(DEVICE).permute(0, 3, 1, 2)[None].float() # B T C H W
+    
+    #First we set up a grid of points to track
+    grid_egde = 2
+    width = frames.shape[2]
+    height = frames.shape[1]
+    
+    width_step = (width - (grid_egde*2)) // grid_size
+    height_step = (height - (grid_egde*2)) // grid_size
+    
+    x, y = np.meshgrid(np.arange(grid_egde, width-grid_egde, width_step), np.arange(grid_egde, height-grid_egde, height_step))
+    track_frame = np.zeros(x.shape)
+    
+    track_2d_points = np.stack((track_frame, x, y), axis=-1).reshape(-1, 3)
+    
+    #Then we filter away points that probably cant be accuratly tracked (like large flat single colord surfaces or the sky)
+    first_frame = frames[0].astype(np.uint8)
+    mask = mask_from_orb_features(first_frame)
+    
+    track_points_x = track_2d_points[:, 1].astype(np.int32)
+    track_points_y = track_2d_points[:, 2].astype(np.int32)
+
+    # Check for each point: keep the point if the mask at that (y, x) location is white (>0)
+    valid = mask[track_points_y, track_points_x] > 0
+    filtered_points = track_2d_points[valid]
 
     if cotracker is None:
         print("load cotracker")
         cotracker = torch.hub.load("facebookresearch/co-tracker", "cotracker3_offline").to(DEVICE)
+        
+    queries = torch.tensor(filtered_points, dtype=torch.float32).cuda()
 
-    pred_tracks, pred_visibility = cotracker(video, grid_size=grid_size, backward_tracking=True) # B T N 2,  B T N 1
+    pred_tracks, pred_visibility = cotracker(video, queries=queries[None]) # B T N 2,  B T N 1
     return convert_to_point_list(pred_tracks, pred_visibility)
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Generate a json tracking file from a video')
 
     parser.add_argument('--color_video', type=str, help='video file to use as input', required=True)
-
-
+    
     args = parser.parse_args()
 
     if not os.path.isfile(args.color_video):
