@@ -66,6 +66,7 @@ if __name__ == '__main__':
     parser.add_argument('--xfov', type=int, help='fov in deg in the x-direction, calculated from aspectratio and yfov in not given', required=False)
     parser.add_argument('--yfov', type=int, help='fov in deg in the y-direction, calculated from aspectratio and xfov in not given', required=False)
     parser.add_argument('--depth_video', type=str, help='depth video', required=True)
+    parser.add_argument('--max_frames', default=-1, type=int, help='quit after max_frames nr of frames', required=False)
     parser.add_argument('--max_depth', default=20, type=int, help='the max depth that the video uses', required=False)
     parser.add_argument('--color_video', type=str, help='video file to use as color input only used when debuging', required=False)
     parser.add_argument('--assume_stationary_camera', action='store_true', help='Makes the algorithm assume the camera a stationary_camera, leads to better tracking.', required=False)
@@ -101,10 +102,12 @@ if __name__ == '__main__':
     cam_matrix = depth_map_tools.compute_camera_matrix(args.xfov, args.yfov, frame_width, frame_height)
     
     color_video = None
+    debug_video = None
     if args.color_video is not None:
         if not os.path.isfile(args.color_video):
             raise Exception("input color_video does not exist")
         color_video = cv2.VideoCapture(args.color_video)
+        debug_video = cv2.VideoWriter(args.color_video+"_track_debug.mp4", cv2.VideoWriter_fourcc(*"avc1"), frame_rate, (frame_width, frame_height))
     
     mask_video = None
     if args.mask_video is not None:
@@ -198,6 +201,14 @@ if __name__ == '__main__':
             cur_mask = np.isin(point_ids_in_frame, best_common_points)
             points_2d = frames[this_frame_no][cur_mask][:, 1:3]
             points_3d = depth_map_tools.project_2d_points_to_3d(points_2d, depth_frames[1], cam_matrix)
+            
+            #depth in the distance is often wrong we incresse that to a value that is bascially infinity
+            #points_to_keep = points_3d[:, 2] > 4.8
+            
+            #Move distant points
+            #points_3d[points_to_keep][:, 2] = 40.0
+            #points_2d = points_2d[points_to_keep]
+            
     
     
             #Ref frame points
@@ -206,7 +217,24 @@ if __name__ == '__main__':
             ref_points_2d = frames[ref_frame_no][cur_mask][:, 1:3]
             ref_points_3d = depth_map_tools.project_2d_points_to_3d(ref_points_2d, depth_frames[0], cam_matrix)
     
-    
+            #ref_points_3d = ref_points_3d[points_to_keep]
+            
+            #Move distant points
+            #ref_points_3d[points_to_keep][:, 2] = 40.0
+            
+            #ref_points_2d = ref_points_2d[points_to_keep]
+            
+            #Reject points that dont move like the others this should probably be done on a larger time scale instead of frame 2 frame
+            movments = np.mean(np.abs(points_3d-ref_points_3d), axis=-1)
+            mov = depth_map_tools.reject_outliers(movments, 2)
+            
+            
+            points_3d = points_3d[mov]
+            points_2d = points_2d[mov]
+            
+            ref_points_3d = ref_points_3d[mov]
+            ref_points_2d = ref_points_2d[mov]
+            #print(mov)
 
     
             #Use SVD to find transformation from one frame to the next
@@ -214,11 +242,36 @@ if __name__ == '__main__':
             
             if not args.assume_stationary_camera:
                 transformed_points_3d = depth_map_tools.transform_points(points_3d, tranformation_to_ref)
-                pnpTrans = depth_map_tools.pnpSolve_ransac(transformed_points_3d, ref_points_2d, cam_matrix)
+                pnpTrans = depth_map_tools.pnpSolve_ransac(transformed_points_3d, ref_points_2d, cam_matrix, refine = True)
                 tranformation_to_ref @= pnpTrans
             
             to_ref_zero @= tranformation_to_ref
             transformations.append(to_ref_zero.tolist())
+            
+            
+            if debug_video is not None:
+                
+                max_nr = np.max(depth_frames[1])
+                
+                #print("max_nr: ", max_nr)
+                
+                debug_image = rgb_frames[1]
+                
+                x = points_2d[:,0]
+                y = points_2d[:,1]
+                debug_image[y, x] = np.array([255,0,0])
+                debug_image[y, x+1] = np.array([255,0,0])
+                debug_image[y, x-1] = np.array([255,0,0])
+                
+                debug_image[y-1, x] = np.array([255,0,0])
+                debug_image[y-1, x+1] = np.array([255,0,0])
+                debug_image[y-1, x-1] = np.array([255,0,0])
+                
+                debug_image[y+1, x] = np.array([255,0,0])
+                debug_image[y+1, x+1] = np.array([255,0,0])
+                debug_image[y+1, x-1] = np.array([255,0,0])
+                
+                debug_video.write(cv2.cvtColor(debug_image, cv2.COLOR_RGB2BGR))
             
             depth_frames.pop(0)
             if color_video is not None:
@@ -226,9 +279,16 @@ if __name__ == '__main__':
             
         fr_n += 1
         
+        if args.max_frames < fr_n and args.max_frames != -1:
+            break
+        
     raw_video.release()
     if color_video is not None:
         color_video.release()
+        
+    if debug_video is not None:
+        debug_video.release()
+        
     
     
     #ref_mesh Is used to draw the DEBUG alignment window

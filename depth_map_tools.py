@@ -146,6 +146,9 @@ def pnpSolve_ransac(t3d_points_new_frame, mkpts2, cam_mat, distCoeffs = None, re
     print("solvePnP FAIL")
     return None
 
+def reject_outliers(data, m=1):
+    return abs(data - np.mean(data)) < m * np.std(data)
+
 def pts_2_pcd(points, colors = None):
     pcd = o3d.geometry.PointCloud()
     pcd.points = o3d.utility.Vector3dVector(points)
