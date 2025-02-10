@@ -7,11 +7,10 @@ echo Downloading, please wait...
 python -c "import urllib.request; urllib.request.urlretrieve('https://github.com/cisco/openh264/releases/download/v1.8.0/openh264-1.8.0-win64.dll.bz2', 'openh264-1.8.0-win64.dll.bz2')"
 python -c "import bz2, shutil; shutil.copyfileobj(bz2.BZ2File('openh264-1.8.0-win64.dll.bz2'), open('openh264-1.8.0-win64.dll', 'wb'))"
 
-pip install -r requirements.txt
 pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu124
 pip install xformers
 pip install https://github.com/woct0rdho/triton-windows/releases/download/v3.2.0-windows.post9/triton-3.2.0-cp310-cp310-win_amd64.whl
-pip install open3d
+pip install open3d numpy opencv-python
 
 git clone https://github.com/DepthAnything/Video-Depth-Anything
 cd Video-Depth-Anything
