@@ -21,7 +21,7 @@ def convert_to_point_list(point_list, point_visibility):
                     points.append([])
                 pt = None
                 if visibility_mask[point_id]:
-                    pt = [int(point[0]), int(point[1])]
+                    pt = [int(round(point[0])), int(round(point[1]))]
                 points[point_id].append(pt)
 
     for point in points:
