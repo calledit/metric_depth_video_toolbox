@@ -151,7 +151,7 @@ if __name__ == '__main__':
         est_config = madpose.EstimatorConfig()
         est_config.min_depth_constraint = False# we use metric models so we dont want shift
         est_config.use_shift = False # we use metric models so we dont want shift
-        est_config.ceres_num_threads = 32
+        est_config.ceres_num_threads = 2
     
 
     # Load frames

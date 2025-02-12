@@ -56,19 +56,16 @@ if __name__ == '__main__':
         subprocess.run("ffmpeg -i "+color_file+" -ss "+clip[1]+" -t "+clip[2]+" "+audio_wav_file, shell=True)
         
         #Generate clip tracking data
-        subprocess.run("python metric_video_depth_anything/track_points_in_video.py --color_video "+color_clip_file, shell=True)
+        subprocess.run("python track_points_in_video.py --color_video "+color_clip_file, shell=True)
         
         #Generate clip depth file
-        subprocess.run("cd metric_video_depth_anything/Video-Depth-Anything;python video_metric_convert.py --output_dir "+output_dir+" --color_video "+color_clip_file, shell=True)
+        subprocess.run("cd Video-Depth-Anything;python video_metric_convert.py --output_dir "+output_dir+" --color_video "+color_clip_file, shell=True)
         
         #Align 3d points to generate a transformation file
         subprocess.run("python align_3d_points.py --depth_video "+args.depth_clip_file+"  --track_file "+args.tracking_file+" --xfov "+args.xfov+" --assume_stationary_camera --mask_video "+mask_clip_file, shell=True)
         
-        #Generate background file for infill
-        subprocess.run("python stero_rerender.py --color_video "+color_clip_file+" --xfov "+args.xfov+" --depth_video "+args.depth_clip_file+" --remove_edges --transformation_file "+transformation_file+" --mask_depth "+args.mask_depth+" --max_frames 1000 --save_background", shell=True)
-        
         #Generate stereo 3d video
-        subprocess.run("python stero_rerender.py --color_video "+color_clip_file+" --xfov "+args.xfov+" --depth_video "+args.depth_clip_file+" --remove_edges --transformation_file "+transformation_file+" --mask_depth "+args.mask_depth+" --load_background "+background_file, shell=True)
+        subprocess.run("python stereo_rerender.py --color_video "+color_clip_file+" --xfov "+args.xfov+" --depth_video "+args.depth_clip_file+" --remove_edges --transformation_file "+transformation_file+" --mask_depth "+args.mask_depth+" --load_background "+background_file, shell=True)
         
         #Finnal result in to a video player compatible format with audio
         subprocess.run("ffmpeg -i "+stereo3d_video+" -i "+audio_wav_file+" -c:v libx265 -crf 18 -tag:v hvc1 -pix_fmt yuv420p -c:a aac -map 0:v:0 -map 1:a:0 "+stereo3d_audio_video)

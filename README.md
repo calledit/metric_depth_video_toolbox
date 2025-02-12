@@ -1,4 +1,4 @@
-# Metric video depth anything
+# Depth video toolbox
 
 Tools for Generating and working with monocular-depth-estimation ML and metric 3D videos.
 
@@ -7,8 +7,8 @@ Tools for Generating and working with monocular-depth-estimation ML and metric 3
 ## Video showcase
 https://youtu.be/nEiUloZ591Q
 
-Stero video clip samples can be found here:
-https://github.com/calledit/metric_video_depth_anything/releases/tag/Showcase
+Stereo video clip samples can be found here:
+https://github.com/calledit/depth_video_toolbox/releases/tag/Showcase
 
 ## This Repo consists of:
 1. A tool for generating metric 3D depth videos based on the Depth-Anything series of machine learning models.
@@ -71,14 +71,14 @@ python unidepth_video.py --color_video some_video.mkv -xfov 45
 
 ```
 
-#### stero_rerender.py
-Uses a generated depth video together with the source color video to render a new stereo 3D video. To use stero_rerender.py you need to know the camera FOV. If you dont you can estimate it using [PerspectiveFields](https://huggingface.co/spaces/jinlinyi/PerspectiveFields)
+#### stereo_rerender.py
+Uses a generated depth video together with the source color video to render a new stereo 3D video. To use stereo_rerender.py you need to know the camera FOV. If you dont you can estimate it using [PerspectiveFields](https://huggingface.co/spaces/jinlinyi/PerspectiveFields)
 ```bash
-usage: stero_rerender.py [-h] --depth_video DEPTH_VIDEO [--color_video COLOR_VIDEO] [--xfov XFOV] [--yfov YFOV] [--max_depth MAX_DEPTH] [--transformation_file TRANSFORMATION_FILE]
+usage: stereo_rerender.py [-h] --depth_video DEPTH_VIDEO [--color_video COLOR_VIDEO] [--xfov XFOV] [--yfov YFOV] [--max_depth MAX_DEPTH] [--transformation_file TRANSFORMATION_FILE]
                          [--transformation_lock_frame TRANSFORMATION_LOCK_FRAME] [--pupillary_distance PUPILLARY_DISTANCE] [--max_frames MAX_FRAMES] [--touchly0] [--touchly1]
                          [--touchly_max_depth TOUCHLY_MAX_DEPTH] [--compressed] [--infill_mask] [--remove_edges] [--mask_depth MASK_DEPTH] [--save_background] [--load_background LOAD_BACKGROUND]
 
-Take a rgb encoded depth video and a color video, and render them it as a steroscopic 3D video.that can be used on 3d tvs and vr headsets.
+Take a rgb encoded depth video and a color video, and render them it as a stereoscopic 3D video.that can be used on 3d tvs and vr headsets.
 
 options:
   -h, --help            show this help message and exit
@@ -112,7 +112,7 @@ options:
                         Load the compound background as a file. To be used as infill.
 
 example:
-python stero_rerender.py --depth_video some_video_depth.mkv --color_video some_video.mkv --xfov 48
+python stereo_rerender.py --depth_video some_video_depth.mkv --color_video some_video.mkv --xfov 48
 
 ```
 
@@ -249,8 +249,8 @@ the lower 8 bits. The values are scaled to the argument --max_depth, default is 
 ```bash
 
 
-git clone https://github.com/calledit/metric_video_depth_anything
-cd metric_video_depth_anything
+git clone https://github.com/calledit/depth_video_toolbox
+cd depth_video_toolbox
 
 # on linux
 sudo apt-get install -y libgl1
@@ -279,7 +279,7 @@ export DISPLAY=:2
 pip3.11 install open3d numpy opencv-python
 
 #On Windows (Not tested or "officially" supported, but anecdotally working)
-See https://github.com/calledit/metric_video_depth_anything/issues/1#issuecomment-2632040738
+See https://github.com/calledit/depth_video_toolbox/issues/1#issuecomment-2632040738
 
 ```
 

@@ -106,7 +106,3 @@ cd ..
 cp -a src/metric_dpt_func.py Video-Depth-Anything/Depth-Anything-V2/metric_depth/.
 cp -a src/video_metric_convert.py Video-Depth-Anything/.
 
-
-
-
-pip install -r requirements.txt
