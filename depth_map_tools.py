@@ -51,8 +51,9 @@ def compute_camera_matrix(fov_horizontal_deg, fov_vertical_deg, image_width, ima
 def svd(source_points, target_points, ZeroCentroid = False):
     # Compute the centroid of each set of points
     if ZeroCentroid: #If we only care about rotation. ie the camera is locked in place
-        centroid_source = np.array([0.0,0.0,0.0])
-        centroid_target = np.array([0.0,0.0,0.0])
+        z = np.array([0.0,0.0,0.0])
+        centroid_source = z
+        centroid_target = z
     else:
         centroid_source = np.mean(source_points, axis=0)
         centroid_target = np.mean(target_points, axis=0)
@@ -76,14 +77,14 @@ def svd(source_points, target_points, ZeroCentroid = False):
         Vt[2, :] *= -1
         Rot = np.dot(Vt.T, U.T)
 
-    # Compute the translation vector
-    t = centroid_target - np.dot(Rot, centroid_source)#original function
+    
 
 
     # Form the transformation matrix
     transformation_matrix = np.eye(4)
     transformation_matrix[:3, :3] = Rot
-    transformation_matrix[:3, 3] = t
+    # Compute the translation vector
+    transformation_matrix[:3, 3] = centroid_target - np.dot(Rot, centroid_source)#original function
 
     return transformation_matrix
 
@@ -128,7 +129,7 @@ def pnpSolve_ransac(t3d_points_new_frame, mkpts2, cam_mat, distCoeffs = None, re
     #if you set the reprojectionError to low the algorithm goes to shit
     reperr = 6
     if refine:
-        reperr = 1
+        reperr = 6
     success, rvec, tvec, inliers = cv2.solvePnPRansac(t3d_points_new_frame, np.array(mkpts2,dtype=np.float64), cam_mat, distCoeffs, reprojectionError=reperr, iterationsCount=100000)
     matrix = np.eye(4)
     if success:
@@ -136,7 +137,8 @@ def pnpSolve_ransac(t3d_points_new_frame, mkpts2, cam_mat, distCoeffs = None, re
         mat, jac = cv2.Rodrigues(rvec)
 
         if refine:
-            rvec2, tvec2 = cv2.solvePnPRefineLM(np.array(t3d_points_new_frame[inliers],dtype=np.float64), np.array(mkpts2[inliers],dtype=np.float64), cam_mat, distCoeffs, rvec, tvec)
+            criteria = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 20000, 1e-32) 
+            rvec2, tvec2 = cv2.solvePnPRefineVVS(np.array(t3d_points_new_frame[inliers],dtype=np.float64), np.array(mkpts2[inliers],dtype=np.float64), cam_mat, distCoeffs, rvec, tvec)
             tv = np.array([tvec2[0][0], tvec2[1][0], tvec2[2][0]])
             mat, jac = cv2.Rodrigues(rvec2)
 
@@ -155,6 +157,11 @@ def pts_2_pcd(points, colors = None):
     if colors is not None:
         pcd.colors = o3d.utility.Vector3dVector(colors)
     return pcd
+
+def project_3d_points_to_2d(t3d_points, cam_mat, distCoeffs = np.array([0,0,0,0])):
+    mkpts, jacobian = cv2.projectPoints(t3d_points.reshape(1, -1, 3), np.array([[[0., 0., 0.]]]), np.array([[[0., 0., 0.]]]), cam_mat.astype(np.float32), distCoeffs.astype(np.float32))
+    mkpts = mkpts.squeeze()
+    return mkpts
 
 def project_2d_points_to_3d(points, depth, camera_matrix, distCoeffs = None):
     

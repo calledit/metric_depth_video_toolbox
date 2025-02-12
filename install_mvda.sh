@@ -2,6 +2,30 @@
 
 pip install open3d numpy opencv-python
 
+
+#install support for madpose for accurate camera tracking
+if [[ " $@ " =~ " -madpose " ]]; then
+	
+	sudo apt-get install -y libeigen3-dev libceres-dev libopencv-dev
+	
+	git clone https://github.com/MarkYu98/madpose
+
+	cd madpose/ext/
+	
+	git clone --recursive https://github.com/pybind/pybind11
+	git clone --recursive https://github.com/tsattler/RansacLib
+	
+	cd ..
+	
+	pip install .
+	
+	cd ..
+	
+	exit
+	
+fi
+
+
 #install support for stereocrafter for ML based infill
 if [[ " $@ " =~ " -stereocrafter " ]]; then
 	git clone --recursive https://github.com/TencentARC/StereoCrafter
@@ -14,7 +38,7 @@ if [[ " $@ " =~ " -stereocrafter " ]]; then
 	mkdir weights
 	cd ./weights
 	
-	sudo apt-get install git-lfs
+	sudo apt-get install -y git-lfs
 	git clone https://huggingface.co/TencentARC/StereoCrafter
 	
 	#git clone https://huggingface.co/stabilityai/stable-video-diffusion-img2vid-xt-1-1 #Not needed, is automaticly downloaded 
