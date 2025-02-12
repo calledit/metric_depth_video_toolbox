@@ -1,6 +1,8 @@
 #!/bin/bash
 
 if [[ " $@ " =~ " -install " ]]; then
+	
+	apt-get -y install ffmpeg
 	pip install rembg[gpu] filetype watchdog aiohttp asyncer
 
 	#rembg[gpu] needs cudnn
@@ -14,6 +16,8 @@ if [[ " $@ " =~ " -install " ]]; then
 fi
 
 COLOR_VIDEO=$1
+
+MASK_VIDEO="${COLOR_VIDEO}_mask.mp4"
 
 # Extract width:
 VIDEO_WIDTH=$(ffprobe -v error \
@@ -35,5 +39,6 @@ FPS_FRACTION=$(ffprobe -v error \
   -show_entries stream=avg_frame_rate \
   -of csv=p=0 \
   "$COLOR_VIDEO")
+	  
 
 ffmpeg -i ${COLOR_VIDEO} -an -f rawvideo -pix_fmt rgb24 pipe:1 | rembg b -om ${VIDEO_WIDTH} ${VIDEO_HEIGHT} | ffmpeg -y -f image2pipe -framerate ${FPS_FRACTION} -vcodec png -i pipe:0 -c:v libx265 -crf 23 -pix_fmt yuv420p mask.mp4
