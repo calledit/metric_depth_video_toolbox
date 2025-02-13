@@ -157,6 +157,7 @@ if __name__ == '__main__':
     frame_rate = raw_video.get(cv2.CAP_PROP_FPS)
         
     cam_matrix = depth_map_tools.compute_camera_matrix(args.xfov, args.yfov, frame_width, frame_height)
+    fovx, fovy = depth_map_tools.fov_from_camera_matrix(cam_matrix)
     render_cam_matrix = cam_matrix
     out_width , out_height = frame_width, frame_height
     
@@ -165,7 +166,7 @@ if __name__ == '__main__':
         
     if args.vr180:
         out_width , out_height = 1920, 1920
-        max_fov = max(args.xfov, args.yfov)
+        max_fov = max(fovx, fovy)
         if max_fov >= 180:
             raise ValueError("fov cant be 180 or over, the tool is not built to handle fisheye distorted input video")
         render_fov = max(75, max_fov)
