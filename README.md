@@ -12,11 +12,11 @@ https://github.com/calledit/depth_video_toolbox/releases/tag/Showcase
 
 ## This Repo consists of:
 1. A tool for generating metric 3D depth videos based on the Depth-Anything series of machine learning models.
-By taking the stability in the videos from [Video-Depth-Anything](https://github.com/DepthAnything/Video-Depth-Anything) and combining it with the  metric version of [Depth-Anything-V2](https://github.com/DepthAnything/Depth-Anything-V2) it is possible to generate stable metric depth videos.
 2. A tool for generating metric 3D depth videos based on [UniDepth](https://github.com/lpiccinelli-eth/UniDepth)
-3. Tools for working with and visualising the metric 3D videos.
-4. Tools for doing things like 3D stereo rendering or viewing a video from above or othervise altering the camera perspective.
-5. Tools for using the generated metric 3D videos for camera tracking(camera pose estimation) and (full scene 3D reconstruction).
+3. A tool for adding parallax infill to generated stero video based on [StereoCrafter](https://github.com/TencentARC/StereoCrafter).
+4. A tool for working with and visualising or viewing a metric 3D video from above or othervise altering the camera perspective.
+5. A tool for doing things like 3D stereo rendering.
+6. Tools for using the generated metric 3D videos for camera tracking(camera pose estimation) and (full scene 3D reconstruction).
 
 
 ## Usage 
@@ -52,6 +52,7 @@ python pipline.py --color_video some_video.mkv --mask_video mask.mp4 --xfov 55 -
 
 #### video_metric_convert.py
 _Uses ML to create stable metric depth video from any normal video file_
+By taking the stability in the videos from [Video-Depth-Anything](https://github.com/DepthAnything/Video-Depth-Anything) and combining it with the  metric version of [Depth-Anything-V2](https://github.com/DepthAnything/Depth-Anything-V2) it is possible to generate stable metric depth videos. That is waht this tool does.
 ```bash
 # Create a metric depth video from a normal video (Note that the video_metric_convert.py script is copied to the Video-Depth-Anything folder on installation.)
 
@@ -119,9 +120,9 @@ python stereo_rerender.py --depth_video some_video_depth.mkv --color_video some_
 #### 3d_view_depthfile.py
 Opens a depth video in a 3d viewer, for viewing. To use 3d_view_depthfile.py you need to know the camera FOV. If you dont you can estimate it using [PerspectiveFields](https://huggingface.co/spaces/jinlinyi/PerspectiveFields)
 ```bash
-usage: 3d_view_depthfile.py [-h] --depth_video DEPTH_VIDEO [--color_video COLOR_VIDEO] [--xfov XFOV] [--yfov YFOV] [--max_depth MAX_DEPTH] [--render] [--remove_edges] [--mask_depth MASK_DEPTH]
-                            [--compressed] [--draw_frame DRAW_FRAME] [--max_frames MAX_FRAMES] [--transformation_file TRANSFORMATION_FILE] [--transformation_lock_frame TRANSFORMATION_LOCK_FRAME]
-                            [--x X] [--y Y] [--z Z] [--tx TX] [--ty TY] [--tz TZ]
+usage: 3d_view_depthfile.py [-h] --depth_video DEPTH_VIDEO [--color_video COLOR_VIDEO] [--xfov XFOV] [--yfov YFOV] [--max_depth MAX_DEPTH] [--render] [--remove_edges]
+                            [--show_camera] [--compressed] [--draw_frame DRAW_FRAME] [--max_frames MAX_FRAMES] [--transformation_file TRANSFORMATION_FILE]
+                            [--transformation_lock_frame TRANSFORMATION_LOCK_FRAME] [--x X] [--y Y] [--z Z] [--tx TX] [--ty TY] [--tz TZ]
 
 Take a rgb encoded depth video and a color video, and view it/render as 3D
 
@@ -136,9 +137,8 @@ options:
   --max_depth MAX_DEPTH
                         the max depth that the video uses
   --render              Render to video insted of GUI
-  --remove_edges        Tries to remove edges that was not visible in image(it is a bit slow)
-  --mask_depth MASK_DEPTH
-                        Only keeps parts further away than specifid depth
+  --remove_edges        Tries to remove edges that was not visible in image
+  --show_camera         Shows lines representing the camera frustrum
   --compressed          Render the video in a compressed format. Reduces file size but also quality.
   --draw_frame DRAW_FRAME
                         open gui with specific frame
@@ -154,6 +154,8 @@ options:
   --tx TX               set poistion of camera target x cordinate in meters
   --ty TY               set poistion of camera target y cordinate in meters
   --tz TZ               set poistion of camera target z cordinate in meters
+
+example:
 python 3d_view_depthfile.py --depth_video some_video_depth.mkv --color_video some_video.mkv --xfov 48
 
 ```
