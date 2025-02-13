@@ -25,7 +25,7 @@ if __name__ == '__main__':
     parser.add_argument('--yfov', type=int, help='fov in deg in the y-direction, calculated from aspectratio and xfov in not given', required=False)
     parser.add_argument('--max_depth', default=20, type=int, help='the max depth that the video uses', required=False)
     parser.add_argument('--render', action='store_true', help='Render to video insted of GUI', required=False)
-    parser.add_argument('--remove_edges', action='store_true', help='Tries to remove edges that was not visible in image(it is a bit slow)', required=False)
+    parser.add_argument('--remove_edges', action='store_true', help='Tries to remove edges that was not visible in image', required=False)
     parser.add_argument('--show_camera', action='store_true', help='Shows lines representing the camera frustrum', required=False)
     
     parser.add_argument('--compressed', action='store_true', help='Render the video in a compressed format. Reduces file size but also quality.', required=False)
