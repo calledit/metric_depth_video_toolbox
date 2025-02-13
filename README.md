@@ -1,6 +1,6 @@
 # Depth video toolbox
 
-Tools for Generating and working with monocular-depth-estimation ML and metric 3D videos.
+Tools for Generating and working with metric 3D depth videos.
 
 ![gif_banner](https://github.com/user-attachments/assets/4d737bb3-6fb6-4135-b01e-b35528371d22)
 
