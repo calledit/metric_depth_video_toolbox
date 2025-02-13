@@ -26,6 +26,7 @@ if __name__ == '__main__':
     parser.add_argument('--max_depth', default=20, type=int, help='the max depth that the video uses', required=False)
     parser.add_argument('--render', action='store_true', help='Render to video insted of GUI', required=False)
     parser.add_argument('--remove_edges', action='store_true', help='Tries to remove edges that was not visible in image(it is a bit slow)', required=False)
+    parser.add_argument('--show_camera', action='store_true', help='Shows lines representing the camera frustrum', required=False)
     
     parser.add_argument('--compressed', action='store_true', help='Render the video in a compressed format. Reduces file size but also quality.', required=False)
     parser.add_argument('--draw_frame', default=-1, type=int, help='open gui with specific frame', required=False)
@@ -110,8 +111,9 @@ if __name__ == '__main__':
             out = cv2.VideoWriter(output_file, codec, frame_rate, (frame_width, frame_height))
     mesh = None
     
-
+    cameraLines, LastcameraLines = None, None
     frame_n = 0
+    last30_max_depth = []
     while raw_video.isOpened():
         
         print(f"Frame: {frame_n} {frame_n/frame_rate}s")
@@ -144,7 +146,14 @@ if __name__ == '__main__':
         
         if transformations is not None:
             transform_to_zero = np.array(transformations[frame_n-1])
-            
+        
+        if args.show_camera:
+            last30_max_depth.append(depth.max())
+            roll_depth = sum(last30_max_depth)/len(last30_max_depth)
+            if len(last30_max_depth) > 30:
+                last30_max_depth.pop(0)
+            cameraLines = o3d.geometry.LineSet.create_camera_visualization(view_width_px=frame_width, view_height_px=frame_height, intrinsic=cam_matrix, extrinsic=np.eye(4), scale=roll_depth)
+            cameraLines.transform(transform_to_zero)
         
         #This is very slow needs optimizing (i think)
         mesh_ret, _ = depth_map_tools.get_mesh_from_depth_map(depth, cam_matrix, color_frame, mesh, remove_edges = args.remove_edges)
@@ -154,18 +163,30 @@ if __name__ == '__main__':
                 vis.add_geometry(mesh_ret)
         mesh = mesh_ret
         
+        transform_to_zero = np.eye(4)
         if transformations is not None:
             transform_to_zero = np.array(transformations[frame_n-1])
             mesh.transform(transform_to_zero)
         
+        to_draw = [mesh]
+        if cameraLines is not None:
+            to_draw.append(cameraLines)
+        
         if args.draw_frame == frame_n:
-            to_draw = [mesh]
-
+            
+            
+            
+            
             depth_map_tools.draw(to_draw)
             exit(0)
         
         
         if not args.render and args.draw_frame == -1:
+            if cameraLines is not None:
+                if LastcameraLines is not None:
+                    vis.remove_geometry(LastcameraLines)
+                vis.add_geometry(cameraLines)
+                LastcameraLines = cameraLines
             vis.update_geometry(mesh)
         
         
@@ -192,7 +213,7 @@ if __name__ == '__main__':
                     vis.poll_events()
                     vis.update_renderer()
         else:
-            image = (depth_map_tools.render(mesh, cam_matrix, extrinsic_matric = ext, bg_color = np.array([1.0,1.0,1.0]))*255).astype(np.uint8)
+            image = (depth_map_tools.render(to_draw, cam_matrix, extrinsic_matric = ext, bg_color = np.array([1.0,1.0,1.0]))*255).astype(np.uint8)
             out.write(cv2.cvtColor(image, cv2.COLOR_RGB2BGR))
         
         if args.max_frames < frame_n and args.max_frames != -1:

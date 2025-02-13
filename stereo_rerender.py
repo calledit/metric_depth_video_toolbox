@@ -235,7 +235,7 @@ if __name__ == '__main__':
                 mesh = bg_cloud
                 
             if args.touchly1:
-                color_transformed, touchly_depth = depth_map_tools.render(mesh, cam_matrix, -2, bg_color = bg_color)
+                color_transformed, touchly_depth = depth_map_tools.render([mesh], cam_matrix, -2, bg_color = bg_color)
                 color_transformed = (color_transformed*255).astype(np.uint8)
                 
                 
@@ -260,7 +260,7 @@ if __name__ == '__main__':
             
                 #move mesh for left eye render
                 mesh.translate([-left_shift, 0.0, 0.0])
-                left_image = (depth_map_tools.render(mesh, cam_matrix, bg_color = bg_color)*255).astype(np.uint8)
+                left_image = (depth_map_tools.render([mesh], cam_matrix, bg_color = bg_color)*255).astype(np.uint8)
                 
                 if infill_mask_video is not None:
                     bg_mask = np.all(left_image == bg_color_infill_detect, axis=-1)
@@ -271,7 +271,7 @@ if __name__ == '__main__':
                 touchly_left_depth = None
                 #Touchly1 requires a left eye depthmap XXX use dual rendering here to speed things upp
                 if args.touchly0:
-                    left_depth = depth_map_tools.render(mesh, cam_matrix, True)
+                    left_depth = depth_map_tools.render([mesh], cam_matrix, True)
                     left_depth8bit = np.rint(np.minimum(left_depth, args.touchly_max_depth)*(255/args.touchly_max_depth)).astype(np.uint8)
                     left_depth8bit[left_depth8bit == 0] = 255 # Any pixel at zero depth needs to move back is is non rendered depth buffer(ie things on the side of the mesh)
                     left_depth8bit = 255 - left_depth8bit #Touchly uses reverse depth
@@ -282,7 +282,7 @@ if __name__ == '__main__':
         
                 #move mesh for right eye render
                 mesh.translate([-right_shift, 0.0, 0.0])
-                right_image = (depth_map_tools.render(mesh, cam_matrix, bg_color = bg_color)*255).astype(np.uint8)
+                right_image = (depth_map_tools.render([mesh], cam_matrix, bg_color = bg_color)*255).astype(np.uint8)
                 
                 if infill_mask_video is not None:
                     bg_mask = np.all(right_image == bg_color_infill_detect, axis=-1)

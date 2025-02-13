@@ -2,7 +2,7 @@
 
 Tools for Generating and working with monocular-depth-estimation ML and metric 3D videos.
 
-![3D GIF](https://github.com/user-attachments/assets/7b78d85c-40c0-45c8-91c4-41bf779f6f50)
+![gif_banner](https://github.com/user-attachments/assets/4d737bb3-6fb6-4135-b01e-b35528371d22)
 
 ## Video showcase
 https://youtu.be/nEiUloZ591Q

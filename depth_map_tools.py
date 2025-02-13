@@ -314,63 +314,61 @@ def create_mesh_from_point_cloud(points, height, width,
         grid_i, grid_j = np.meshgrid(np.arange(height - 1), np.arange(width - 1), indexing='ij')
         grid_i = grid_i.ravel()  # Flatten to 1D arrays (num_cells,)
         grid_j = grid_j.ravel()
-        
+    
         idx1 = grid_i * width + grid_j
         idx2 = (grid_i + 1) * width + grid_j
         idx3 = (grid_i + 1) * width + (grid_j + 1)
         idx4 = grid_i * width + (grid_j + 1)
-        
+    
         tri1 = np.stack([idx1, idx2, idx3], axis=1)
         tri2 = np.stack([idx1, idx3, idx4], axis=1)
         triangles_all = np.vstack([tri1, tri2])
         
+        if inp_mesh is None:
+            mesh.triangles = o3d.utility.Vector3iVector(triangles_all)
+            mesh.vertices = o3d.utility.Vector3dVector(vertices)
+        
+        ref_to_all_tri = np.asarray(mesh.triangles)
+        ref_to_all_vert = np.asarray(mesh.vertices)
+        if inp_mesh is not None:
+            ref_to_all_tri[:] = triangles_all[:]
+            ref_to_all_vert[:] = vertices[:]
+        
         # --- Filter triangles based on the triangle angle relative to the camera ---
         if remove_edges:
-            # Retrieve the vertices for each triangle: shape (N_tri, 3, 3)
-            tri_vertices = vertices[triangles_all]
-            # Compute the centroid (average position) for each triangle.
-            centers = tri_vertices.mean(axis=1)  # shape (N_tri, 3)
-            
-            # The view vector is the direction from the triangle centroid to the camera (assumed at origin).
-            # Thus, view_vector = -centers. Normalize it:
-            view_vectors = -centers
-            view_norm = np.linalg.norm(view_vectors, axis=1, keepdims=True)
-            # Avoid division by zero.
-            view_norm[view_norm == 0] = 1
-            view_vectors_normalized = view_vectors / view_norm
-            
-            # Compute triangle normals.
-            edge1 = tri_vertices[:, 1] - tri_vertices[:, 0]
-            edge2 = tri_vertices[:, 2] - tri_vertices[:, 0]
-            normals = np.cross(edge1, edge2)
-            norm_norm = np.linalg.norm(normals, axis=1, keepdims=True)
-            norm_norm[norm_norm == 0] = 1
-            normals_normalized = normals / norm_norm
-            
-            # Compute the cosine of the angle between the normal and the view vector.
-            # For a triangle facing the camera, this dot product should be close to 1.
-            dot_products = np.sum(normals_normalized * view_vectors_normalized, axis=1)
-            
-            # Compute the cosine of the allowed maximum angle.
+            v1 = vertices[triangles_all[:, 0]]
+            v2 = vertices[triangles_all[:, 1]]
+            v3 = vertices[triangles_all[:, 2]]
             cos_threshold = np.cos(np.radians(angle_threshold_deg))
-            # Create a mask for triangles whose normal is within the allowed angle.
-            valid_mask = dot_products >= cos_threshold
             
-            # Filter the candidate triangles.
-            triangles_all = triangles_all[valid_mask]
+            normals = np.cross(v2 - v1, v3 - v1)            # shape (N, 3)
+            view    = - (v1 + v2 + v3)/3.0                  # same shape (N, 3) as centers
+            dot     = np.einsum('ij,ij->i', normals, view)  # dot products
+            len_n   = np.sqrt(np.einsum('ij,ij->i', normals, normals))
+            len_v   = np.sqrt(np.einsum('ij,ij->i', view, view))
+            cosines = dot / (len_n * len_v + 1e-15)         # +1e-15 to avoid div-by-zero
+
+            invalid_mask = (cosines < cos_threshold)
+            ref_to_all_tri[invalid_mask] = np.array([0,0,0])
             
-            used_indices = np.unique(triangles_all)
-            #all_indices = np.arange(len(vertices))
-            #unused_indices = np.setdiff1d(all_indices, used_indices)
-        
-        # Set the computed (and filtered) triangles on the mesh.
-        mesh.triangles = o3d.utility.Vector3iVector(triangles_all)
-        mesh.vertices = o3d.utility.Vector3dVector(vertices)
+            # 1) Identify which rows are *not* all zero:
+            valid_mask = np.logical_not(invalid_mask)
+
+            # 2) Boolean mask to track used vertices
+            num_vertices = ref_to_all_vert.shape[0]  # or known from your logic
+            is_used = np.zeros(num_vertices, dtype=bool)
+
+            # 3) Mark vertices in valid triangles
+            is_used[ ref_to_all_tri[valid_mask].ravel() ] = True
+
+            # 4) Extract the used indices
+            used_indices = np.where(is_used)[0]
     
     # If we already have an input mesh and we are not removing edges, simply update vertices.
     else:
         mesh = inp_mesh
-        mesh.vertices = o3d.utility.Vector3dVector(vertices)
+        ref_to_all_vert = np.asarray(mesh.vertices)
+        ref_to_all_vert[:] = vertices[:]
     
     # Optionally, set vertex colors.
     if image_frame is not None:
@@ -385,7 +383,7 @@ v_h = None
 use_ofscreen = True
 v_w = None
 rend = None
-def render(pcd, cam_mat, depth = False, w = None, h = None, extrinsic_matric = np.eye(4), bg_color = np.array([0, 0, 0])):
+def render(objects, cam_mat, depth = False, w = None, h = None, extrinsic_matric = np.eye(4), bg_color = np.array([0, 0, 0])):
     global vis, v_h, v_w, use_ofscreen, rend
 
     if w is None:
@@ -440,15 +438,16 @@ def render(pcd, cam_mat, depth = False, w = None, h = None, extrinsic_matric = n
 
         #Bug workaround where we scale the geometry insted of the viewport
         scale_up_factor = cam_mat[1][1]/cam_mat[0][0]
-        pcd = copy.deepcopy(pcd)
-        if isinstance(pcd, o3d.geometry.PointCloud):
-            pcd.points = o3d.utility.Vector3dVector(np.asarray(pcd.points)*np.array([1.0, scale_up_factor, 1.0]))
-        else:
-            pcd.vertices = o3d.utility.Vector3dVector(np.asarray(pcd.vertices)*np.array([1.0, scale_up_factor, 1.0]))
+        
+        for obj in objects:
+            obj2 = copy.deepcopy(obj)
+            if hasattr(obj2, 'points'):
+                np.asarray(obj2.points)[:,1] *= scale_up_factor
+            else:
+                np.asarray(obj2.vertices)[:,1] *= scale_up_factor
 
-
-        vis.add_geometry(pcd)
-        vis.update_geometry(pcd)
+            vis.add_geometry(obj2)
+            vis.update_geometry(obj2)
 
 
         intrinsic.intrinsic_matrix = np.array([
@@ -486,8 +485,9 @@ def render(pcd, cam_mat, depth = False, w = None, h = None, extrinsic_matric = n
 
         mat = o3d.visualization.rendering.MaterialRecord()
         mat.shader = 'defaultLit'
-
-        scene.add_geometry("mesh", pcd, mat)
+        
+        for obj in objects:
+            scene.add_geometry("mesh", obj, mat)
 
         if depth:
             image = rend.render_to_depth_image()

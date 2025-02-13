@@ -241,6 +241,14 @@ if __name__ == '__main__':
                 
                 points_3d = depth_map_tools.project_2d_points_to_3d(points_2d, depth_frames[-1], cam_matrix)
                 ref_points_3d = depth_map_tools.project_2d_points_to_3d(ref_points_2d, depth_frames[-2], cam_matrix)
+                
+                #Filter awya points close away to mitigare shity mask
+                no_near_points = points_3d[:, 2] > 1.8
+                points_3d = points_3d[no_near_points]
+                ref_points_3d = ref_points_3d[no_near_points]
+                points_2d = points_2d[no_near_points]
+                ref_points_2d = ref_points_2d[no_near_points]
+                
                 mean_depth = np.mean(points_3d[:, 2])
                 std_depth = np.std(points_3d[:, 2])
                 distant_points = points_3d[:, 2] > mean_depth+std_depth
