@@ -1,4 +1,4 @@
-# Depth video toolbox
+# Metric depth video toolbox
 
 Tools for Generating and working with metric 3D depth videos.
 
@@ -8,7 +8,7 @@ Tools for Generating and working with metric 3D depth videos.
 https://youtu.be/nEiUloZ591Q
 
 Stereo video clip samples can be found here:
-https://github.com/calledit/depth_video_toolbox/releases/tag/Showcase
+https://github.com/calledit/metric_depth_video_toolbox/releases/tag/Showcase
 
 ## This Repo consists of:
 1. A tool for generating metric 3D depth videos based on the Depth-Anything series of machine learning models.
@@ -251,8 +251,8 @@ the lower 8 bits. The values are scaled to the argument --max_depth, default is 
 ```bash
 
 
-git clone https://github.com/calledit/depth_video_toolbox
-cd depth_video_toolbox
+git clone https://github.com/calledit/metric_depth_video_toolbox
+cd metric_depth_video_toolbox
 
 # on linux
 sudo apt-get install -y libgl1
@@ -281,7 +281,9 @@ export DISPLAY=:2
 pip3.11 install open3d numpy opencv-python
 
 #On Windows (Not tested or "officially" supported, but anecdotally working)
-See https://github.com/calledit/depth_video_toolbox/issues/1#issuecomment-2632040738
+WindowsInstall.bat
+See https://github.com/calledit/metric_depth_video_toolbox/issues/1#issuecomment-2632040738
+
 
 ```
 
