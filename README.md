@@ -52,7 +52,7 @@ python pipline.py --color_video some_video.mkv --mask_video mask.mp4 --xfov 55 -
 
 #### video_metric_convert.py
 _Uses ML to create stable metric depth video from any normal video file_
-By taking the stability in the videos from [Video-Depth-Anything](https://github.com/DepthAnything/Video-Depth-Anything) and combining it with the  metric version of [Depth-Anything-V2](https://github.com/DepthAnything/Depth-Anything-V2) it is possible to generate stable metric depth videos. That is waht this tool does.
+By taking the stability in the videos from [Video-Depth-Anything](https://github.com/DepthAnything/Video-Depth-Anything) and combining it with the  metric version of [Depth-Anything-V2](https://github.com/DepthAnything/Depth-Anything-V2) it is possible to generate stable metric depth videos. That is what this tool does.
 ```bash
 # Create a metric depth video from a normal video (Note that the video_metric_convert.py script is copied to the Video-Depth-Anything folder on installation.)
 
@@ -161,8 +161,9 @@ python 3d_view_depthfile.py --depth_video some_video_depth.mkv --color_video som
 ```
 
 #### convert_depth_video_to_other_format.py
-Converts a RGB encoded depth video to other formats. Either 3d formats like .ply (point cloud files) or .obj (3d mesh) to a simple greyscale video. 8 bit greyscale looses allot of details due to low depth resolution. The 16bit format has more details but does not compress well and is not well supported.
-```usage: convert_depth_video_to_other_format.py [-h] --depth_video DEPTH_VIDEO [--bit16] [--bit8] [--max_depth MAX_DEPTH] [--save_ply SAVE_PLY] [--save_obj SAVE_OBJ]
+Converts a RGB encoded depth video to other formats. Either 3d formats like .ply (point cloud files) or .obj (3d mesh) or to a simple greyscale video. The 8 bit greyscale format loses lots of details due to low depth resolution of only 8 bits. The 16bit format has more details but does not compress well and is not well supported.
+```
+usage: convert_depth_video_to_other_format.py [-h] --depth_video DEPTH_VIDEO [--bit16] [--bit8] [--max_depth MAX_DEPTH] [--save_ply SAVE_PLY] [--save_obj SAVE_OBJ]
                                               [--color_video COLOR_VIDEO] [--xfov XFOV] [--yfov YFOV] [--max_frames MAX_FRAMES] [--transformation_file TRANSFORMATION_FILE]
                                               [--transformation_lock_frame TRANSFORMATION_LOCK_FRAME] [--remove_edges]
 
@@ -204,7 +205,7 @@ Uses ML to create a video mask for the main subjects in the video based on rembg
 Uses ML to paint over logos, text overlays or other objects from a video, can be useful to do before running the depth ML models as they tend to produce less accurate results when the video has logos or text overlays.
 ```bash
 example:
-Create a overlay_mask.png that is white where the overlay is.
+Create a overlay_mask.png that is white where the overlay is located.
 ./create_video_mask.sh some_video.mkv
 ```
 
@@ -293,6 +294,9 @@ export DISPLAY=:2
 # First setup any required venv (open3d requires python3.11 on OSX (as of 2025)))
 pip3.11 install open3d numpy opencv-python
 
+#if you want to use 3d camera tracking and 3d reconstruction
+./install_mvda.sh -madpose
+
 #On Windows (Not tested or "officially" supported, but anecdotally working)
 WindowsInstall.bat
 See https://github.com/calledit/metric_depth_video_toolbox/issues/1#issuecomment-2632040738
@@ -301,7 +305,7 @@ See https://github.com/calledit/metric_depth_video_toolbox/issues/1#issuecomment
 ```
 
 ### Requirements
-Has been tested on machines that support Cuda 12.4 on [vast.ai](https://cloud.vast.ai/?ref_id=148636) "template PyTorch (cuDNN Devel)"
+The ML models (excluding unidepth) have been tested on machines that support Cuda 12.4 on [vast.ai](https://cloud.vast.ai/?ref_id=148636) "template PyTorch (cuDNN Devel)"
 
 ### Limitations
 Depth-Anything-V2 does not take any FOV input and it does not give any FOV outputs. I recommend [PerspectiveFields](https://huggingface.co/spaces/jinlinyi/PerspectiveFields) to estimate the original FOV if you want to project the output in to 3D. But since Depth-Anything-V2 does not take FOV as input the results may look distorted, to thin, to wide or to narrow as the model may have estimated a different FOV internally and used that for its depth estimations. This is especially problematic in dolly zoom shots, where the FOV is very hard to get right.
@@ -310,5 +314,5 @@ Longer shots with loots of camera movement may be problematic, video_metric_conv
 
 
 ### Camera tracking
-align_3d_points.py is a tool to extract camera movment from the video. It is based on the [madpose library](https://github.com/MarkYu98/madpose), madpose offers excellent camera pose estimation and given enogh acurate non moving tracking markers, and somewhat acurate stable metric depth it can give very accurate pose estimations even for scenes where traditional pnpSolve or SVD solutions strugle (like scenes where there is little camera movment or where the depth maps are not perfeecly accurate). 
+align_3d_points.py is a tool to extract camera movment from the video. It is based on the [madpose library](https://github.com/MarkYu98/madpose), madpose offers excellent camera pose estimation and given enogh acurate non moving tracking markers, and somewhat acurate stable metric depth it can give quite accurate pose estimations even for scenes where traditional pnpSolve or SVD solutions strugle (like scenes where there is little camera movment or where the depth maps are not perfeecly accurate). Due to the inaccuracies in the generated depth maps the camera tracking is not perfect but for ceratain task or shorter clips it can be usefull. If the camera is mostly still and only rotates running with --assume_stationary_camera creates tracking results that are good enogh to be usefull in most cases.
 
