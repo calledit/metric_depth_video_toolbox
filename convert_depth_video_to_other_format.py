@@ -163,7 +163,7 @@ if __name__ == '__main__':
                 
             if args.save_obj is not None:
                 file_name = args.save_obj+f"/{frame_n:07d}"+".obj"
-                # TODO Remove the 0,0,0 triangels that represent removed edges If we just remove the vertices
+                # TODO Remove the unused vertices that represent removed edges If we just remove the vertices
                 # the "order" will chnange and the tringles will point to the wrong vertex
                 write_mesh = o3d.geometry.TriangleMesh()
                 triangles = np.asarray(mesh_ret.triangles)
