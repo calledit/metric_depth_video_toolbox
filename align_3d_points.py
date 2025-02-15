@@ -70,6 +70,8 @@ if __name__ == '__main__':
     parser.add_argument('--max_depth', default=20, type=int, help='the max depth that the video uses', required=False)
     parser.add_argument('--color_video', type=str, help='video file to use as color input only used when debuging', required=False)
     parser.add_argument('--assume_stationary_camera', action='store_true', help='Makes the algorithm assume the camera a stationary_camera, leads to better tracking.', required=False)
+    parser.add_argument('--assume_no_depth_movment', action='store_true', help='Makes the algorithm assume the camera only rotates and moves in x and y direction, leads to better tracking.', required=False)
+
 
 
     args = parser.parse_args()
@@ -232,28 +234,67 @@ if __name__ == '__main__':
             ref_points_2d = frames[ref_frame_no][cur_mask][:, 1:3]
             
             
-            
-            if args.assume_stationary_camera:
+            if args.assume_stationary_camera or args.assume_no_depth_movment:
                 # Use SVD to find transformation from one frame to the next
                 # This may produce inacurate results even if the real camera is mounted on a tripod as the 3d camera is pinhole camera
                 # and this solution does not account for potential isses caused by diferances in "real world" focal distance (with lenses)
                 # and the position of the 3d pinhole camera
                 
+                tranformation_to_ref = np.eye(4)
+                
                 points_3d = depth_map_tools.project_2d_points_to_3d(points_2d, depth_frames[-1], cam_matrix)
                 ref_points_3d = depth_map_tools.project_2d_points_to_3d(ref_points_2d, depth_frames[-2], cam_matrix)
                 
-                #Filter awya points close away to mitigare shity mask
-                no_near_points = points_3d[:, 2] > 1.8
-                points_3d = points_3d[no_near_points]
-                ref_points_3d = ref_points_3d[no_near_points]
-                points_2d = points_2d[no_near_points]
-                ref_points_2d = ref_points_2d[no_near_points]
+                #Filter away points close away to mitigate shity mask
+                #no_near_points = points_3d[:, 2] > 1.8
+                #points_3d = points_3d[no_near_points]
+                #ref_points_3d = ref_points_3d[no_near_points]
+                #points_2d = points_2d[no_near_points]
+                #ref_points_2d = ref_points_2d[no_near_points]
                 
                 mean_depth = np.mean(points_3d[:, 2])
                 std_depth = np.std(points_3d[:, 2])
+                std_depth = 0
                 distant_points = points_3d[:, 2] > mean_depth+std_depth
                 
-                tranformation_to_ref = depth_map_tools.svd(points_3d[distant_points], ref_points_3d[distant_points], True)
+                
+                if args.assume_stationary_camera:
+                    tranformation_to_ref = depth_map_tools.svd(points_3d[distant_points], ref_points_3d[distant_points], True)
+                else:
+                    close_points = points_3d[:, 2] < mean_depth-std_depth
+                
+                    for i in range(3):
+                        #Find overall rotation based on distant points
+                        overall_rot = depth_map_tools.svd(points_3d[distant_points], ref_points_3d[distant_points], True)
+                
+                        tranformation_to_ref @= overall_rot
+                
+                        #transform points according to overall rotation
+                        points_3d = depth_map_tools.transform_points(points_3d, overall_rot)
+                
+                
+                        #Find rotation to close points after correction of overall rotation
+                        close_rotation = depth_map_tools.svd(points_3d[close_points], ref_points_3d[close_points], True)
+                        clos_pos_mean = np.mean(points_3d[close_points], axis=0)
+                
+                        #Convert close rotation to up/down, left/right shift
+                        pos_after_transform = depth_map_tools.transform_points(np.array([clos_pos_mean]), close_rotation)[0]
+                        pos_change = pos_after_transform - clos_pos_mean
+                        pos_change[2] = 0.0
+                
+                        transform_chnage = np.eye(4)
+                        transform_chnage[:3, 3] = pos_change
+                
+                
+                        #transform points according to close point movment
+                        points_3d = depth_map_tools.transform_points(points_3d, transform_chnage)
+                
+                        tranformation_to_ref @= transform_chnage
+                
+                    #Apply final overall roation after fixing shift
+                    final_overall_rot = depth_map_tools.svd(points_3d[distant_points], ref_points_3d[distant_points], True)
+                    tranformation_to_ref @= final_overall_rot
+                
             else:# use madpose to esitimate transformation matrix
 
                 pose, stats = madpose.HybridEstimatePoseScaleOffset(
