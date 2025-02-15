@@ -298,6 +298,11 @@ def create_mesh_from_point_cloud(points, height, width,
     
     used_indices = []
     
+    # Optionally, get vertex colors.
+    colors = None
+    if image_frame is not None:
+        colors = np.array(image_frame).reshape(-1, 3) / 255.0
+    
     # If no mesh exists or if we need to remove edges, compute the triangles.
     if inp_mesh is None or remove_edges:
         if inp_mesh is None:
@@ -327,12 +332,17 @@ def create_mesh_from_point_cloud(points, height, width,
         if inp_mesh is None:
             mesh.triangles = o3d.utility.Vector3iVector(triangles_all)
             mesh.vertices = o3d.utility.Vector3dVector(vertices)
+            if colors is not None:
+                mesh.vertex_colors = o3d.utility.Vector3dVector(colors)
         
         ref_to_all_tri = np.asarray(mesh.triangles)
         ref_to_all_vert = np.asarray(mesh.vertices)
+        ref_to_all_col = np.asarray(mesh.vertex_colors)
         if inp_mesh is not None:
             ref_to_all_tri[:] = triangles_all[:]
             ref_to_all_vert[:] = vertices[:]
+            if colors is not None:
+                ref_to_all_col[:] = colors[:]
         
         # --- Filter triangles based on the triangle angle relative to the camera ---
         if remove_edges:
@@ -369,11 +379,9 @@ def create_mesh_from_point_cloud(points, height, width,
         mesh = inp_mesh
         ref_to_all_vert = np.asarray(mesh.vertices)
         ref_to_all_vert[:] = vertices[:]
-    
-    # Optionally, set vertex colors.
-    if image_frame is not None:
-        colors = np.array(image_frame).reshape(-1, 3) / 255.0
-        mesh.vertex_colors = o3d.utility.Vector3dVector(colors)
+        if colors is not None:
+            ref_to_all_col = np.asarray(mesh.vertex_colors)
+            ref_to_all_col[:] = colors[:]
     
     
     return mesh, used_indices

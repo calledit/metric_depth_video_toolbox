@@ -5,8 +5,11 @@ pip install open3d numpy opencv-python
 
 #install support for madpose for accurate camera tracking
 if [[ " $@ " =~ " -madpose " ]]; then
-	
-	sudo apt-get install -y libeigen3-dev libceres-dev libopencv-dev
+	if [ "$(uname)" == "Linux" ]; then
+		sudo apt-get install -y libeigen3-dev libceres-dev libopencv-dev
+	else
+		brew install cmake ninja opencv
+	fi
 	
 	git clone https://github.com/MarkYu98/madpose
 
@@ -17,7 +20,11 @@ if [[ " $@ " =~ " -madpose " ]]; then
 	
 	cd ..
 	
-	pip install .
+	if [ "$(uname)" == "Linux" ]; then
+		pip install .
+	else
+		pip3.11 install .
+	fi
 	
 	cd ..
 	

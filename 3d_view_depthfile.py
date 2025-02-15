@@ -25,7 +25,7 @@ if __name__ == '__main__':
     parser.add_argument('--yfov', type=int, help='fov in deg in the y-direction, calculated from aspectratio and xfov in not given', required=False)
     parser.add_argument('--max_depth', default=20, type=int, help='the max depth that the video uses', required=False)
     parser.add_argument('--render', action='store_true', help='Render to video insted of GUI', required=False)
-    parser.add_argument('--remove_edges', action='store_true', help='Tries to remove edges that was not visible in image', required=False)
+    parser.add_argument('--remove_edges', action='store_true', help='Tries to remove edges that was not visible in image(it is a bit slow)', required=False)
     parser.add_argument('--show_camera', action='store_true', help='Shows lines representing the camera frustrum', required=False)
     
     parser.add_argument('--compressed', action='store_true', help='Render the video in a compressed format. Reduces file size but also quality.', required=False)
@@ -143,7 +143,7 @@ if __name__ == '__main__':
         depth_unit[..., 2] = rgb[..., 2]
         depth = depth.astype(np.float32)/((255**4)/MODEL_maxOUTPUT_depth)
         
-        
+        transform_to_zero = np.eye(4)
         if transformations is not None:
             transform_to_zero = np.array(transformations[frame_n-1])
         
@@ -155,7 +155,6 @@ if __name__ == '__main__':
             cameraLines = o3d.geometry.LineSet.create_camera_visualization(view_width_px=frame_width, view_height_px=frame_height, intrinsic=cam_matrix, extrinsic=np.eye(4), scale=roll_depth)
             cameraLines.transform(transform_to_zero)
         
-        #This is very slow needs optimizing (i think)
         mesh_ret, _ = depth_map_tools.get_mesh_from_depth_map(depth, cam_matrix, color_frame, mesh, remove_edges = args.remove_edges)
         
         if mesh is None:
@@ -163,9 +162,8 @@ if __name__ == '__main__':
                 vis.add_geometry(mesh_ret)
         mesh = mesh_ret
         
-        transform_to_zero = np.eye(4)
+        
         if transformations is not None:
-            transform_to_zero = np.array(transformations[frame_n-1])
             mesh.transform(transform_to_zero)
         
         to_draw = [mesh]
