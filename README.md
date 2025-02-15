@@ -160,23 +160,36 @@ python 3d_view_depthfile.py --depth_video some_video_depth.mkv --color_video som
 
 ```
 
-#### rgb_depth_to_greyscale.py
-Converts a RGB encoded depth video to a simple greyscale video, a format which certain software likes to work with. 8 bit greyscale looses allot of details due to low depth resolution. The 16bit format has more details but does not compress well and is not well supported.
-```bash
-usage: rgb_depth_to_greyscale.py [-h] --depth_video DEPTH_VIDEO [--bit16] [--max_depth MAX_DEPTH]
+#### convert_depth_video_to_other_format.py
+Converts a RGB encoded depth video to other formats. Either 3d formats like .ply (point cloud files) or .obj (3d mesh) to a simple greyscale video. 8 bit greyscale looses allot of details due to low depth resolution. The 16bit format has more details but does not compress well and is not well supported.
+```usage: convert_depth_video_to_other_format.py [-h] --depth_video DEPTH_VIDEO [--bit16] [--bit8] [--max_depth MAX_DEPTH] [--save_ply SAVE_PLY] [--save_obj SAVE_OBJ]
+                                              [--color_video COLOR_VIDEO] [--xfov XFOV] [--yfov YFOV] [--max_frames MAX_FRAMES] [--transformation_file TRANSFORMATION_FILE]
+                                              [--transformation_lock_frame TRANSFORMATION_LOCK_FRAME] [--remove_edges]
 
-Generate a depth video in greyscale from a rgb encoded depth video
+Convert depth video other formats like .obj or .ply or greyscale video
 
 options:
   -h, --help            show this help message and exit
   --depth_video DEPTH_VIDEO
                         video file to use as input
-  --bit16               Store output as 16bit file
+  --bit16               Convert depth video to a 16bit mono grayscale video file
+  --bit8                Convert depth video to a rgb grayscale video file
   --max_depth MAX_DEPTH
                         the max depth that the video uses
-
-example:
-python rgb_depth_to_greyscale.py --depth_video some_video_depth.mkv
+  --save_ply SAVE_PLY   folder to save .ply pointcloud files in
+  --save_obj SAVE_OBJ   folder to save .obj mesh files in
+  --color_video COLOR_VIDEO
+                        video file to use as color input
+  --xfov XFOV           fov in deg in the x-direction, calculated from aspectratio and yfov in not given
+  --yfov YFOV           fov in deg in the y-direction, calculated from aspectratio and xfov in not given
+  --max_frames MAX_FRAMES
+                        quit after max_frames nr of frames
+  --transformation_file TRANSFORMATION_FILE
+                        file with scene transformations from the aligner
+  --transformation_lock_frame TRANSFORMATION_LOCK_FRAME
+                        the frame that the transformation will use as a base
+  --remove_edges        Tries to remove edges that was not visible in image
+python rgb_depth_to_greyscale.py --depth_video some_video_depth.mkv --color_video some_video.mp4 --xfov 55 --save_ply ply_output_folder
 ```
 
 #### create_video_mask.sh

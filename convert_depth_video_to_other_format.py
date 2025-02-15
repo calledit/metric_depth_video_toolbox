@@ -31,7 +31,7 @@ def float_image_to_byte_image(float_image, max_value=10.0, scale=255, log_scale=
 if __name__ == '__main__':
     
     # Setup arguments
-    parser = argparse.ArgumentParser(description='Generate a depth video in greyscale from a rgb encoded depth video')
+    parser = argparse.ArgumentParser(description='Convert depth video other formats like .obj or .ply or greyscale video')
     
     parser.add_argument('--depth_video', type=str, help='video file to use as input', required=True)
     parser.add_argument('--bit16', action='store_true', help='Convert depth video to a 16bit mono grayscale video file', required=False)
@@ -45,8 +45,8 @@ if __name__ == '__main__':
     parser.add_argument('--yfov', type=int, help='fov in deg in the y-direction, calculated from aspectratio and xfov in not given', required=False)
     parser.add_argument('--max_frames', default=-1, type=int, help='quit after max_frames nr of frames', required=False)
     parser.add_argument('--transformation_file', type=str, help='file with scene transformations from the aligner', required=False)
-    parser.add_argument('--transformation_lock_frame', default=0, type=int, help='the frame that the transfomrmation will use as a base', required=False)
-    parser.add_argument('--remove_edges', action='store_true', help='Tries to remove edges that was not visible in image(it is a bit slow)', required=False)
+    parser.add_argument('--transformation_lock_frame', default=0, type=int, help='the frame that the transformation will use as a base', required=False)
+    parser.add_argument('--remove_edges', action='store_true', help='Tries to remove edges that was not visible in image', required=False)
     
     
     
