@@ -22,38 +22,29 @@ https://github.com/calledit/metric_depth_video_toolbox/releases/tag/Showcase
 ## Usage 
 
 
-#### pipline.py
-Takes a color image and a mask. Splits it in to clips and does all the required steps required to create stabilized stereoscopic 3d videos from the clips.
-
-```
-usage: pipline.py [-h] --color_video COLOR_VIDEO --mask_video MASK_VIDEO --xfov XFOV --mask_depth MASK_DEPTH --clip_name CLIP_NAME --clip_starttime CLIP_STARTTIME --clip_len CLIP_LEN
-
-Take a clip from a color video and make it in to a stereo 3D video
-
-options:
-  -h, --help            show this help message and exit
-  --color_video COLOR_VIDEO
-                        video file to use as color input
-  --mask_video MASK_VIDEO
-                        Mask video file
-  --xfov XFOV           camera field of view in x direction
-  --mask_depth MASK_DEPTH
-                        The depth in meters that is considerd background. (used for infill)
-  --clip_name CLIP_NAME
-                        A name to give the clip
-  --clip_starttime CLIP_STARTTIME
-                        Clip start time given as mm:ss
-  --clip_len CLIP_LEN   Clip length time given as mm:ss
-  				
-example:
-create_video_mask.sh some_video.mkv #generate mask
-python pipline.py --color_video some_video.mkv --mask_video mask.mp4 --xfov 55 --mask_depth 2.0 --clip_name clip_nr_1 --clip_starttime 02:11 --clip_len 01:25
-```
 
 #### video_metric_convert.py
 _Uses ML to create stable metric depth video from any normal video file_
 By taking the stability in the videos from [Video-Depth-Anything](https://github.com/DepthAnything/Video-Depth-Anything) and combining it with the  metric version of [Depth-Anything-V2](https://github.com/DepthAnything/Depth-Anything-V2) it is possible to generate stable metric depth videos. That is what this tool does.
 ```bash
+usage: video_metric_convert.py [-h] --color_video COLOR_VIDEO [--input_size INPUT_SIZE] [--max_res MAX_RES] [--max_frames MAX_FRAMES] [--target_fps TARGET_FPS] [--max_depth MAX_DEPTH]
+                               [--no_rolling_average]
+
+Video Depth Anything
+
+options:
+  -h, --help            show this help message and exit
+  --color_video COLOR_VIDEO
+  --input_size INPUT_SIZE
+  --max_res MAX_RES
+  --max_frames MAX_FRAMES
+                        maximum length of the input video, -1 means no limit
+  --target_fps TARGET_FPS
+                        target fps of the input video, -1 means the original fps
+  --max_depth MAX_DEPTH
+                        the max depth that the video uses
+  --no_rolling_average  Makes the algorithm assume the camera only rotates and moves in x and y direction, leads to better tracking.
+
 # Create a metric depth video from a normal video (Note that the video_metric_convert.py script is copied to the Video-Depth-Anything folder on installation.)
 
 # Video-Depth-Anything memory usage scales with aspect ratio. If you are using a 3090 with 24Gb memory and video with 16:9 aspect you need to lower the --input_size to 440 or crop the video down. Aspect ratio of 4:3 works well.

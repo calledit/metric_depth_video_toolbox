@@ -68,13 +68,13 @@ def save_24bit(frames, output_video_path, fps, max_depth_arg):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Video Depth Anything')
-    parser.add_argument('--color_video', type=str, default='./assets/example_videos/davis_rollercoaster.mp4')
-    parser.add_argument('--output_dir', type=str, default='./outputs')
+    parser.add_argument('--color_video', type=str, required=True)
     parser.add_argument('--input_size', type=int, default=518)
     parser.add_argument('--max_res', type=int, default=1440)
-    parser.add_argument('--max_len', type=int, default=-1, help='maximum length of the input video, -1 means no limit')
+    parser.add_argument('--max_frames', type=int, default=-1, help='maximum length of the input video, -1 means no limit')
     parser.add_argument('--target_fps', type=int, default=-1, help='target fps of the input video, -1 means the original fps')
     parser.add_argument('--max_depth', default=20, type=int, help='the max depth that the video uses', required=False)
+    parser.add_argument('--no_rolling_average', action='store_true', help='Makes the algorithm assume the camera only rotates and moves in x and y direction, leads to better tracking.', required=False)
 
     args = parser.parse_args()
 
@@ -89,7 +89,7 @@ if __name__ == '__main__':
     video_depth_anything.load_state_dict(torch.load(f'./checkpoints/video_depth_anything_vitl.pth', map_location='cpu'), strict=True)
     video_depth_anything = video_depth_anything.to(DEVICE).eval()
 
-    frames, target_fps = read_video_frames(args.color_video, args.max_len, args.target_fps, args.max_res)
+    frames, target_fps = read_video_frames(args.color_video, args.max_frames, args.target_fps, args.max_res)
 
     height = frames.shape[1]
     width = frames.shape[2]
@@ -113,41 +113,47 @@ if __name__ == '__main__':
         norm_inv = depths[i]
         norm_inv_std = norm_inv.std()
         norm_inv_mean = norm_inv.mean()
+        pop_values = False
 
-        #We techinally only calculate the metric conversion every so often as it genreally is slow to change
-        if i % often_control_metric_depth == 0 or len(std_std_constants) < 10:
+        if not args.no_rolling_average or len(std_std_constants) < 60/often_control_metric_depth:
+            #We techinally only calculate the metric conversion every so often as it genreally is slow to change
+            if i % often_control_metric_depth == 0 or len(std_std_constants) < 10:
 
-            # get the metric depthmap
-            metric_depth = metric_dpt_func.get_metric_depth(frames[i])
+                # get the metric depthmap
+                metric_depth = metric_dpt_func.get_metric_depth(frames[i])
 
-            metric_min = metric_depth.min()
-            metric_max = metric_depth.max()
-
-
-            inverse_metric_max = 1/metric_min
-            inverse_metric_min = 1/metric_max
-
-            #The inverse_metric_min comes from the unstable depthmap if you use the real one there is brutal jittering so we overide it and just use 0
-            inverse_metric_min = 0
-
-            inv_metric_depth = 1/metric_depth
-
-            inv_metric_std = inv_metric_depth.std()
-            inv_metric_mean = inv_metric_depth.mean()
-
-            #std_std_constant is used convert from rel depth (as given by the model) -> rel depth standard vales -> metric depthnstandard vales -> metric depth
-            #all that it baked in to the var but the intermidate steps cancel out, so are not writen out.
-            std_std_constant = inv_metric_std / norm_inv_std
+                metric_min = metric_depth.min()
+                metric_max = metric_depth.max()
 
 
-            #Debug stuff
-            print("raw inv_metric_std: ", inv_metric_std)
-            print("raw norm_inv_std: ", norm_inv_std)
-            print("raw std_std_constant: ", std_std_constant)
+                inverse_metric_max = 1/metric_min
+                inverse_metric_min = 1/metric_max
 
-            std_std_constants.append(std_std_constant)
-            inv_metric_means.append(inv_metric_mean)
-            norm_inv_means.append(norm_inv_mean)
+                #The inverse_metric_min comes from the unstable depthmap if you use the real one there is brutal jittering so we overide it and just use 0
+                inverse_metric_min = 0
+
+                inv_metric_depth = 1/metric_depth
+
+                inv_metric_std = inv_metric_depth.std()
+                inv_metric_mean = inv_metric_depth.mean()
+
+                #std_std_constant is used convert from rel depth (as given by the model) -> rel depth standard vales -> metric depthnstandard vales -> metric depth
+                #all that it baked in to the var but the intermidate steps cancel out, so are not writen out.
+                std_std_constant = inv_metric_std / norm_inv_std
+
+
+                #Debug stuff
+                print("raw inv_metric_std: ", inv_metric_std)
+                print("raw norm_inv_std: ", norm_inv_std)
+                print("raw std_std_constant: ", std_std_constant)
+
+                std_std_constants.append(std_std_constant)
+                inv_metric_means.append(inv_metric_mean)
+                norm_inv_means.append(norm_inv_mean)
+
+
+                if len(std_std_constants) > 60/often_control_metric_depth:
+                    pop_values = True
 
 
         #When there is less than 10 frames in the rolling average we use the first frame for reference instead the rolling average need to stabilize
@@ -159,7 +165,7 @@ if __name__ == '__main__':
             std_std_constant = np.mean(std_std_constants)
             inv_metric_mean = np.mean(inv_metric_means)
             norm_inv_mean = np.mean(norm_inv_means)
-            
+
         print("norm_inv_mean: ", norm_inv_mean)
         print("inv_metric_mean: ", inv_metric_mean)
         print("std_std_constant: ", std_std_constant)
@@ -177,7 +183,7 @@ if __name__ == '__main__':
 
 
         # clear the rolling average when it has a timespan over 60 frames (which i guess might be about 2 s)
-        if len(std_std_constants) > 60/often_control_metric_depth:
+        if pop_values:
             std_std_constants.pop(0)
             inv_metric_means.pop(0)
             norm_inv_means.pop(0)
@@ -185,10 +191,6 @@ if __name__ == '__main__':
         depths[i] = metric_depth2
 
 
-    video_name = os.path.basename(args.color_video)
-    if not os.path.exists(args.output_dir):
-        os.makedirs(args.output_dir)
 
-    processed_video_path = os.path.join(args.output_dir, os.path.splitext(video_name)[0]+'_src.mp4')
-    output_video_path = os.path.join(args.output_dir, os.path.splitext(video_name)[0]+'_depth.mkv')
+    output_video_path = args.color_video+'_depth.mkv'
     save_24bit(depths, output_video_path, fps, args.max_depth)
