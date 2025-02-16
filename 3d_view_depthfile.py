@@ -182,8 +182,8 @@ if __name__ == '__main__':
         if not args.render and args.draw_frame == -1:
             if cameraLines is not None:
                 if LastcameraLines is not None:
-                    vis.remove_geometry(LastcameraLines)
-                vis.add_geometry(cameraLines)
+                    vis.remove_geometry(LastcameraLines, reset_bounding_box = False)
+                vis.add_geometry(cameraLines, reset_bounding_box = False)
                 LastcameraLines = cameraLines
             vis.update_geometry(mesh)
         
@@ -202,12 +202,13 @@ if __name__ == '__main__':
         
         if not args.render:
             if  args.draw_frame == -1:
-                params.extrinsic = ext
-                params.intrinsic.intrinsic_matrix = cam_matrix
-                ctr.convert_from_pinhole_camera_parameters(params, allow_arbitrary=True)
+                if frame_n <= 1:#We set the camera position the first frame
+                    params.extrinsic = ext
+                    params.intrinsic.intrinsic_matrix = cam_matrix
+                    ctr.convert_from_pinhole_camera_parameters(params, allow_arbitrary=True)
         
                 start_time = time.time()
-                while time.time() - start_time < 0.1: #should be (1/frame_rate) but we dont rach that speed anyway
+                while time.time() - start_time < 1/frame_rate: #should be (1/frame_rate) but we dont rach that speed anyway
                     vis.poll_events()
                     vis.update_renderer()
         else:
