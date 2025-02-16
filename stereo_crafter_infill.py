@@ -127,9 +127,9 @@ if __name__ == '__main__':
 
     mask_video = cv2.VideoCapture(args.sbs_mask_video)
 
-    output_video_file = args.sbs_color_video+"_infilled.mp4"
+    output_video_file = args.sbs_color_video+"_infilled.mkv"
 
-    codec = cv2.VideoWriter_fourcc(*"mp4v")#FFV1 mkv
+    codec = cv2.VideoWriter_fourcc(*"FFV1")
     out = cv2.VideoWriter(output_video_file, codec, frame_rate, (frame_width, frame_height))
 
     img2vid_path = 'weights/stable-video-diffusion-img2vid-xt-1-1'
