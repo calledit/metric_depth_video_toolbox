@@ -74,7 +74,7 @@ if __name__ == '__main__':
     parser.add_argument('--max_frames', type=int, default=-1, help='maximum length of the input video, -1 means no limit')
     parser.add_argument('--target_fps', type=int, default=-1, help='target fps of the input video, -1 means the original fps')
     parser.add_argument('--max_depth', default=20, type=int, help='the max depth that the video uses', required=False)
-    parser.add_argument('--no_rolling_average', action='store_true', help='Makes the algorithm assume the camera only rotates and moves in x and y direction, leads to better tracking.', required=False)
+    parser.add_argument('--no_rolling_average', action='store_true', help='Bases the conversion from affine to metric on the first 60 frames. Good for videos where the camera does not move.', required=False)
 
     args = parser.parse_args()
 

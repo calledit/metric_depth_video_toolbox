@@ -43,8 +43,7 @@ options:
                         target fps of the input video, -1 means the original fps
   --max_depth MAX_DEPTH
                         the max depth that the video uses
-  --no_rolling_average  Makes the algorithm assume the camera only rotates and moves in x and y direction, leads to better tracking.
-
+  --no_rolling_average  Bases the conversion from affine to metric on the first 60 frames. Good for videos where the camera does not move.
 # Create a metric depth video from a normal video (Note that the video_metric_convert.py script is copied to the Video-Depth-Anything folder on installation.)
 
 # Video-Depth-Anything memory usage scales with aspect ratio. If you are using a 3090 with 24Gb memory and video with 16:9 aspect you need to lower the --input_size to 440 or crop the video down. Aspect ratio of 4:3 works well.
