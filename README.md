@@ -44,9 +44,13 @@ options:
   --max_depth MAX_DEPTH
                         the max depth that the video uses
   --no_rolling_average  Bases the conversion from affine to metric on the first 60 frames. Good for videos where the camera does not move.
-# Create a metric depth video from a normal video (Note that the video_metric_convert.py script is copied to the Video-Depth-Anything folder on installation.)
 
+
+# Notes:
+# the video_metric_convert.py script is copied to the Video-Depth-Anything folder on installation.)
 # Video-Depth-Anything memory usage scales with aspect ratio. If you are using a 3090 with 24Gb memory and video with 16:9 aspect you need to lower the --input_size to 440 or crop the video down. Aspect ratio of 4:3 works well.
+
+example:
 cd Video-Depth-Anything
 python video_metric_convert.py --color_video some_video.mkv
 
