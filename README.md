@@ -14,7 +14,7 @@ https://github.com/calledit/metric_depth_video_toolbox/releases/tag/Showcase
 1. A tool for generating metric 3D depth videos based on the Depth-Anything series of machine learning models.
 2. A tool for generating metric 3D depth videos based on [UniDepth](https://github.com/lpiccinelli-eth/UniDepth)
 3. A tool for adding parallax infill to generated stero video based on [StereoCrafter](https://github.com/TencentARC/StereoCrafter).
-4. A tool for working with and visualising or viewing a metric 3D video from above or othervise altering the camera perspective.
+4. A tool for viewing, rendering and visualising metric 3D videos from novel camera perspectives.
 5. A tool for doing things like 3D stereo rendering.
 6. Tools for using the generated metric 3D videos for camera tracking(camera pose estimation) and (full scene 3D reconstruction).
 
