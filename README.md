@@ -112,7 +112,7 @@ python stereo_rerender.py --depth_video some_video_depth.mkv --color_video some_
 ```
 
 #### 3d_view_depthfile.py
-Opens a depth video in a 3d viewer, for viewing. To use 3d_view_depthfile.py you need to know the camera FOV. If you dont you can estimate it using [PerspectiveFields](https://huggingface.co/spaces/jinlinyi/PerspectiveFields)
+Opens a depth video in a 3d viewer, for viewing. Can also render depth videos from novel perspectives ussing --render. To use 3d_view_depthfile.py you need to know the camera FOV. If you dont you can estimate it using [PerspectiveFields](https://huggingface.co/spaces/jinlinyi/PerspectiveFields) or simply experiment with --xfov until things look right.
 ```bash
 usage: 3d_view_depthfile.py [-h] --depth_video DEPTH_VIDEO [--color_video COLOR_VIDEO] [--xfov XFOV] [--yfov YFOV] [--max_depth MAX_DEPTH] [--render] [--remove_edges]
                             [--show_camera] [--compressed] [--draw_frame DRAW_FRAME] [--max_frames MAX_FRAMES] [--transformation_file TRANSFORMATION_FILE]
