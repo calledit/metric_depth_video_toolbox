@@ -154,10 +154,10 @@ python 3d_view_depthfile.py --depth_video some_video_depth.mkv --color_video som
 
 ```
 
-#### convert_depth_video_to_other_format.py
+#### convert_metric_depth_video_to_other_format.py
 Converts a RGB encoded depth video to other formats. Either 3d formats like .ply (point cloud files) or .obj (3d mesh) or to a simple greyscale video. The 8 bit greyscale format loses lots of details due to low depth resolution of only 8 bits. The 16bit format has more details but does not compress well and is not well supported.
 ```
-usage: convert_depth_video_to_other_format.py [-h] --depth_video DEPTH_VIDEO [--bit16] [--bit8] [--max_depth MAX_DEPTH] [--save_ply SAVE_PLY] [--save_obj SAVE_OBJ]
+usage: convert_metric_depth_video_to_other_format.py [-h] --depth_video DEPTH_VIDEO [--bit16] [--bit8] [--max_depth MAX_DEPTH] [--save_ply SAVE_PLY] [--save_obj SAVE_OBJ]
                                               [--color_video COLOR_VIDEO] [--xfov XFOV] [--yfov YFOV] [--max_frames MAX_FRAMES] [--transformation_file TRANSFORMATION_FILE]
                                               [--transformation_lock_frame TRANSFORMATION_LOCK_FRAME] [--remove_edges]
 
@@ -184,7 +184,7 @@ options:
   --transformation_lock_frame TRANSFORMATION_LOCK_FRAME
                         the frame that the transformation will use as a base
   --remove_edges        Tries to remove edges that was not visible in image
-python rgb_depth_to_greyscale.py --depth_video some_video_depth.mkv --color_video some_video.mp4 --xfov 55 --save_ply ply_output_folder
+python convert_metric_depth_video_to_other_format.py --depth_video some_video_depth.mkv --color_video some_video.mp4 --xfov 55 --save_ply ply_output_folder
 ```
 
 #### create_video_mask.sh
