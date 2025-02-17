@@ -251,8 +251,10 @@ python align_3d_points.py --track_file some_video_tracking.json --color_video so
 
 ## 3D depth video format
 The video depth format is a normal video file with RGB values where the _red_ and _green_ channels represent the
-upper 8 bits of the depth (duplicated to reduce compression artefacts) and the _blue_ channel represent
+upper 8 bits of the depth (duplicated to make visualization easy) and the _blue_ channel represent
 the lower 8 bits. The values are scaled to the argument --max_depth, default is 20 meters.
+With the default --max_depth of 20 meters each "ridge" represents a depth of 78mm (=20/256).
+![depth_example](https://github.com/user-attachments/assets/c77ae630-7ccd-4b82-9220-07d6c855d514)
 
 
 ## Install
