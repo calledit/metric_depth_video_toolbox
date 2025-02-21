@@ -43,6 +43,7 @@ if __name__ == '__main__':
     parser.add_argument('--color_video', type=str, help='video file to use as color input', required=False)
     parser.add_argument('--xfov', type=int, help='fov in deg in the x-direction, calculated from aspectratio and yfov in not given', required=False)
     parser.add_argument('--yfov', type=int, help='fov in deg in the y-direction, calculated from aspectratio and xfov in not given', required=False)
+    parser.add_argument('--min_frames', default=-1, type=int, help='start convertion after nr of frames', required=False)
     parser.add_argument('--max_frames', default=-1, type=int, help='quit after max_frames nr of frames', required=False)
     parser.add_argument('--transformation_file', type=str, help='file with scene transformations from the aligner', required=False)
     parser.add_argument('--transformation_lock_frame', default=0, type=int, help='the frame that the transformation will use as a base', required=False)
@@ -141,6 +142,10 @@ if __name__ == '__main__':
             assert color_frame.shape == rgb.shape, "color image and depth image need to have same width and height" #potential BUG here with mono depth videos
         else:
             color_frame = rgb
+            
+        if args.min_frames >= frame_n and args.min_frames != -1:
+            frame_n += 1
+            continue
             
         depth = np.zeros((frame_height, frame_width), dtype=np.uint32)
         
