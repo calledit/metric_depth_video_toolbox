@@ -222,8 +222,8 @@ python track_points_in_video.py --color_video some_video.mkv
 #### align_3d_points.py
 Uses tracked points in the video and projectes them on to the depth video for 3D alignment and camera tracking. Outputs a _transformations.json_ file describing the camera movment and rotation.
 ```bash
-usage: align_3d_points.py [-h] --track_file TRACK_FILE [--mask_video MASK_VIDEO] [--strict_mask] [--xfov XFOV] [--yfov YFOV] --depth_video DEPTH_VIDEO [--max_depth MAX_DEPTH]
-                          [--color_video COLOR_VIDEO] [--assume_stationary_camera]
+usage: align_3d_points.py [-h] --track_file TRACK_FILE [--mask_video MASK_VIDEO] [--strict_mask] [--xfov XFOV] [--yfov YFOV] --depth_video DEPTH_VIDEO [--max_frames MAX_FRAMES]
+                          [--max_depth MAX_DEPTH] [--color_video COLOR_VIDEO] [--assume_stationary_camera] [--use_madpose]
 
 Align 3D video based on depth video and a point tracking file
 
@@ -238,12 +238,15 @@ options:
   --yfov YFOV           fov in deg in the y-direction, calculated from aspectratio and xfov in not given
   --depth_video DEPTH_VIDEO
                         depth video
+  --max_frames MAX_FRAMES
+                        quit after max_frames nr of frames
   --max_depth MAX_DEPTH
                         the max depth that the video uses
   --color_video COLOR_VIDEO
                         video file to use as color input only used when debuging
   --assume_stationary_camera
                         Makes the algorithm assume the camera a stationary_camera, leads to better tracking.
+  --use_madpose         Uses madpose for camera pose estimation.
 
 example:
 python align_3d_points.py --track_file some_video_tracking.json --color_video some_video.mkv --depth_video some_video_depth.mkv --xfov 45 
