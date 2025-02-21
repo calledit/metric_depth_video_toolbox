@@ -70,7 +70,7 @@ if __name__ == '__main__':
     parser.add_argument('--max_depth', default=20, type=int, help='the max depth that the video uses', required=False)
     parser.add_argument('--color_video', type=str, help='video file to use as color input only used when debuging', required=False)
     parser.add_argument('--assume_stationary_camera', action='store_true', help='Makes the algorithm assume the camera a stationary_camera, leads to better tracking.', required=False)
-    parser.add_argument('--assume_no_depth_movment', action='store_true', help='Makes the algorithm assume the camera only rotates and moves in x and y direction, leads to better tracking.', required=False)
+    parser.add_argument('--use_madpose', action='store_true', help='Uses madpose for camera pose estimation.', required=False)
 
 
 
@@ -233,70 +233,14 @@ if __name__ == '__main__':
             cur_mask = np.isin(point_ids_in_frame, best_common_points)
             ref_points_2d = frames[ref_frame_no][cur_mask][:, 1:3]
             
+            tranformation_to_ref = np.eye(4)
             
-            if args.assume_stationary_camera or args.assume_no_depth_movment:
-                # Use SVD to find transformation from one frame to the next
-                # This may produce inacurate results even if the real camera is mounted on a tripod as the 3d camera is pinhole camera
-                # and this solution does not account for potential isses caused by diferances in "real world" focal distance (with lenses)
-                # and the position of the 3d pinhole camera
-                
-                tranformation_to_ref = np.eye(4)
+            if args.use_madpose:
                 
                 points_3d = depth_map_tools.project_2d_points_to_3d(points_2d, depth_frames[-1], cam_matrix)
                 ref_points_3d = depth_map_tools.project_2d_points_to_3d(ref_points_2d, depth_frames[-2], cam_matrix)
                 
-                #Filter away points close away to mitigate shity mask
-                #no_near_points = points_3d[:, 2] > 1.8
-                #points_3d = points_3d[no_near_points]
-                #ref_points_3d = ref_points_3d[no_near_points]
-                #points_2d = points_2d[no_near_points]
-                #ref_points_2d = ref_points_2d[no_near_points]
-                
-                mean_depth = np.mean(points_3d[:, 2])
-                std_depth = np.std(points_3d[:, 2])
-                std_depth = 0
-                distant_points = points_3d[:, 2] > mean_depth+std_depth
-                
-                
-                if args.assume_stationary_camera:
-                    tranformation_to_ref = depth_map_tools.svd(points_3d[distant_points], ref_points_3d[distant_points], True)
-                else:
-                    close_points = points_3d[:, 2] < mean_depth-std_depth
-                
-                    for i in range(3):
-                        #Find overall rotation based on distant points
-                        overall_rot = depth_map_tools.svd(points_3d[distant_points], ref_points_3d[distant_points], True)
-                
-                        tranformation_to_ref @= overall_rot
-                
-                        #transform points according to overall rotation
-                        points_3d = depth_map_tools.transform_points(points_3d, overall_rot)
-                
-                
-                        #Find rotation to close points after correction of overall rotation
-                        close_rotation = depth_map_tools.svd(points_3d[close_points], ref_points_3d[close_points], True)
-                        clos_pos_mean = np.mean(points_3d[close_points], axis=0)
-                
-                        #Convert close rotation to up/down, left/right shift
-                        pos_after_transform = depth_map_tools.transform_points(np.array([clos_pos_mean]), close_rotation)[0]
-                        pos_change = pos_after_transform - clos_pos_mean
-                        pos_change[2] = 0.0
-                
-                        transform_chnage = np.eye(4)
-                        transform_chnage[:3, 3] = pos_change
-                
-                
-                        #transform points according to close point movment
-                        points_3d = depth_map_tools.transform_points(points_3d, transform_chnage)
-                
-                        tranformation_to_ref @= transform_chnage
-                
-                    #Apply final overall roation after fixing shift
-                    final_overall_rot = depth_map_tools.svd(points_3d[distant_points], ref_points_3d[distant_points], True)
-                    tranformation_to_ref @= final_overall_rot
-                
-            else:# use madpose to esitimate transformation matrix
-
+                # use madpose to esitimate transformation matrix
                 pose, stats = madpose.HybridEstimatePoseScaleOffset(
                     points_2d,
                     ref_points_2d,
@@ -311,13 +255,124 @@ if __name__ == '__main__':
 
                 R_est, t_est = pose.R(), pose.t()
                 
-                # scale of the affine corrected depth maps as given by madpose (dont know what to do with this sometimes it deviates from 1.0 dont know what that indicates)
+                # scale of the affine corrected depth maps as given by madpose (if it has deviated to much from 1.0 tracking has probably failed)
                 s_est = pose.scale
                 print("madpose scale estimate:", s_est)
 
                 tranformation_to_ref = np.eye(4)
                 tranformation_to_ref[:3, :3] = R_est
                 tranformation_to_ref[:3, 3] = t_est
+            
+            elif args.assume_stationary_camera:
+                # Use SVD to find transformation from one frame to the next
+                # This may produce inacurate results even if the real camera is mounted on a tripod as the 3d camera is pinhole camera
+                # and this solution does not account for potential isses caused by diferances in "real world" focal distance (with lenses)
+                # and the position of the 3d pinhole camera
+                
+                points_3d = depth_map_tools.project_2d_points_to_3d(points_2d, depth_frames[-1], cam_matrix)
+                ref_points_3d = depth_map_tools.project_2d_points_to_3d(ref_points_2d, depth_frames[-2], cam_matrix)
+                
+                #Filter away points close away to mitigate shity mask
+                #no_near_points = points_3d[:, 2] > 1.8
+                #points_3d = points_3d[no_near_points]
+                #ref_points_3d = ref_points_3d[no_near_points]
+                #points_2d = points_2d[no_near_points]
+                #ref_points_2d = ref_points_2d[no_near_points]
+                
+                mean_depth = np.mean(points_3d[:, 2])
+                distant_points = points_3d[:, 2] > mean_depth
+                
+                tranformation_to_ref = depth_map_tools.svd(points_3d[distant_points], ref_points_3d[distant_points], True)
+            else:
+                #Camera pose algorithm in two step fundamantally based on grouping all points in to distant and close points.
+                #Split in to two parts. 1. Find the rotation and the x and y movment of the camera 2. find the z movment.
+                
+                points_3d = depth_map_tools.project_2d_points_to_3d(points_2d, depth_frames[-1], cam_matrix)
+                ref_points_3d = depth_map_tools.project_2d_points_to_3d(ref_points_2d, depth_frames[-2], cam_matrix)
+                
+                mean_depth = np.mean(points_3d[:, 2])
+                distant_points = points_3d[:, 2] > mean_depth
+                close_points = points_3d[:, 2] < mean_depth
+            
+                #3 iterations works good enogh in test videos
+                for i in range(3):
+                    #Find overall rotation based on distant points
+                    overall_rot = depth_map_tools.svd(points_3d[distant_points], ref_points_3d[distant_points], True)
+            
+                    tranformation_to_ref @= overall_rot
+            
+                    #transform points according to overall rotation
+                    points_3d = depth_map_tools.transform_points(points_3d, overall_rot)
+            
+            
+                    #Find rotation to close points after correction of overall rotation
+                    close_rotation = depth_map_tools.svd(points_3d[close_points], ref_points_3d[close_points], True)
+                    clos_pos_mean = np.mean(points_3d[close_points], axis=0)
+            
+                    #Convert close rotation to up/down, left/right shift
+                    pos_after_transform = depth_map_tools.transform_points(np.array([clos_pos_mean]), close_rotation)[0]
+                    pos_change = pos_after_transform - clos_pos_mean
+                    pos_change[2] = 0.0
+            
+                    transform_chnage = np.eye(4)
+                    transform_chnage[:3, 3] = pos_change
+            
+            
+                    #transform points according to close point movment
+                    points_3d = depth_map_tools.transform_points(points_3d, transform_chnage)
+            
+                    tranformation_to_ref @= transform_chnage
+            
+                #Apply final overall roation after fixing shift
+                final_overall_rot = depth_map_tools.svd(points_3d[distant_points], ref_points_3d[distant_points], True)
+                points_3d = depth_map_tools.transform_points(points_3d, final_overall_rot)
+                tranformation_to_ref @= final_overall_rot
+                
+                #We now assume the camera is aligned in rotation and x and y movment
+                #lets do depth
+                
+                ref_points_2d[:, 0] -= frame_width//2
+                ref_points_2d[:, 1] -= frame_height//2
+                avg_points_2d_ref = np.mean(ref_points_2d, 0)
+                ref_points_2d[:, 0] += frame_width//2
+                ref_points_2d[:, 1] += frame_height//2
+                
+                ref_dist = np.linalg.norm(avg_points_2d_ref)
+                
+                
+                #We iteravly move the camera back and forward in 2mm steps(with a final 1mm step backwards) untill the.
+                #projected 2d points align as well as they can (max nr of steps is arbitrarilly set to 20 to stop runaways)
+                #This could probably be better done using some fast simple mathematical fomula. (but this works)
+                Reverse = 1.0
+                Last_2d_dist = None
+                quit = False
+                for x in range(20):
+                    points_2d = depth_map_tools.project_3d_points_to_2d(points_3d, cam_matrix)
+                    points_2d[:, 0] -= frame_width//2
+                    points_2d[:, 1] -= frame_height//2
+                    avg_points_2d = np.mean(points_2d, 0)
+                    
+                    pos_dist = np.linalg.norm(avg_points_2d)
+                    
+                    if Last_2d_dist is None:
+                        Last_2d_dist = pos_dist
+                    else:
+                        if abs(Last_2d_dist-ref_dist) < abs(pos_dist-ref_dist):
+                            Reverse = -1.0
+                        elif Reverse == -1.0:
+                            quit = True
+                            Reverse = 0.5
+                            
+                            
+                        Last_2d_dist = pos_dist
+                    
+                    transform_chnage = np.eye(4)
+                    transform_chnage[:3, 3] = np.array([0,0,0.002*Reverse])
+                    points_3d = depth_map_tools.transform_points(points_3d, transform_chnage)
+                    tranformation_to_ref @= transform_chnage
+                    
+                    if quit:
+                        break
 
             to_ref_zero @= tranformation_to_ref
             transformations.append(to_ref_zero.tolist())
@@ -330,6 +385,7 @@ if __name__ == '__main__':
                 #print("max_nr: ", max_nr)
 
                 debug_image = rgb_frames[-1]
+                
                 
                 x = np.clip(points_2d[:,0].astype(np.int32), 0, frame_width-2)
                 y = np.clip(points_2d[:,1].astype(np.int32), 0, frame_height-2)
