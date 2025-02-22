@@ -290,6 +290,16 @@ if __name__ == '__main__':
                 points_3d = depth_map_tools.project_2d_points_to_3d(points_2d, depth_frames[-1], cam_matrix)
                 ref_points_3d = depth_map_tools.project_2d_points_to_3d(ref_points_2d, depth_frames[-2], cam_matrix)
                 
+                #Step 0.5 correct the scale, based on point locations
+                ref_dist= np.abs(ref_points_3d - np.mean(ref_points_3d, axis=0))
+                ref_mean_dist = pos_dist = np.linalg.norm(np.mean(ref_dist, axis=0))
+                dist = np.abs(ref_points_3d - np.mean(points_3d, axis=0))
+                mean_dist = pos_dist = np.linalg.norm(np.mean(dist, axis=0))
+                ratio = ref_mean_dist/mean_dist
+                depth_frames[-1] *= ratio
+                #Generate new points based on new scale
+                points_3d = depth_map_tools.project_2d_points_to_3d(points_2d, depth_frames[-1], cam_matrix)
+                
                 mean_depth = np.mean(points_3d[:, 2])
                 distant_points = points_3d[:, 2] > mean_depth
                 close_points = points_3d[:, 2] < mean_depth
@@ -339,42 +349,59 @@ if __name__ == '__main__':
                 
                 ref_dist = np.linalg.norm(avg_points_2d_ref)
                 
-                
-                #We iteravly move the camera back and forward in 2mm steps(with a final 1mm step backwards) untill the.
-                #projected 2d points align as well as they can (max nr of steps is arbitrarilly set to 20 to stop runaways)
-                #This could probably be better done using some fast simple mathematical fomula. (but this works)
-                Reverse = 1.0
-                Last_2d_dist = None
-                quit = False
-                for x in range(20):
+                # Parameters
+                step_size = 0.002      # 2mm step (in meters)
+                min_step  = 0.0001      # final 0.1mm step
+                max_iter  = 20
+                tolerance = 1e-5       # stop if error is smaller than this
+
+                # Precompute the image center offset
+                center_offset = np.array([frame_width // 2, frame_height // 2])
+
+                # Initialize variables
+                direction = 1.0  # positive means moving forward
+                prev_error = None
+
+                for i in range(max_iter):
+                    # Project the 3D points and recenter the result
                     points_2d = depth_map_tools.project_3d_points_to_2d(points_3d, cam_matrix)
-                    points_2d[:, 0] -= frame_width//2
-                    points_2d[:, 1] -= frame_height//2
-                    avg_points_2d = np.mean(points_2d, 0)
-                    
-                    pos_dist = np.linalg.norm(avg_points_2d)
-                    
-                    if Last_2d_dist is None:
-                        Last_2d_dist = pos_dist
-                    else:
-                        if abs(Last_2d_dist-ref_dist) < abs(pos_dist-ref_dist):
-                            Reverse = -1.0
-                        elif Reverse == -1.0:
-                            quit = True
-                            Reverse = 0.5
-                            
-                            
-                        Last_2d_dist = pos_dist
-                    
-                    transform_chnage = np.eye(4)
-                    transform_chnage[:3, 3] = np.array([0,0,0.002*Reverse])
-                    points_3d = depth_map_tools.transform_points(points_3d, transform_chnage)
-                    tranformation_to_ref @= transform_chnage
-                    
-                    if quit:
+                    points_2d -= center_offset
+    
+                    # Compute the average 2D location and its distance from the center
+                    avg_2d = np.mean(points_2d, axis=0)
+                    current_dist = np.linalg.norm(avg_2d)
+    
+                    # Compute error relative to the reference distance
+                    error = abs(current_dist - ref_dist)
+    
+                    # Break if within tolerance
+                    if error < tolerance:
                         break
+    
+                    # Reverse direction if the error worsens
+                    if prev_error is not None and error > prev_error:
+                        # If we already reversed, reduce step size
+                        if direction < 0:
+                            step_size = min_step
+                        direction *= -1  # flip movement direction
+    
+                    prev_error = error
+    
+                    # Create the transformation matrix: a translation along the z-axis
+                    transform_change = np.eye(4)
+                    transform_change[:3, 3] = np.array([0, 0, step_size * direction])
+    
+                    # Apply transformation to update the 3D points and accumulate the change
+                    points_3d = depth_map_tools.transform_points(points_3d, transform_change)
+                    tranformation_to_ref @= transform_change
+                
+                        
+                points_2d[:, 0] += frame_width//2
+                points_2d[:, 1] += frame_height//2
 
             to_ref_zero @= tranformation_to_ref
+            
+            print('movment z:', to_ref_zero[:3, 3][2])
             transformations.append(to_ref_zero.tolist())
 
 
@@ -385,7 +412,6 @@ if __name__ == '__main__':
                 #print("max_nr: ", max_nr)
 
                 debug_image = rgb_frames[-1]
-                
                 
                 x = np.clip(points_2d[:,0].astype(np.int32), 0, frame_width-2)
                 y = np.clip(points_2d[:,1].astype(np.int32), 0, frame_height-2)
