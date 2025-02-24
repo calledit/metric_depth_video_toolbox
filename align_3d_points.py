@@ -7,49 +7,39 @@ import depth_map_tools
 from itertools import islice
 
 
+np.set_printoptions(suppress=True, precision=4)
 
-def find_best_matching_frame(selected_frame_id, frames, used_frames):
-    selected_frame = frames[selected_frame_id]
-    # Extract point IDs from the selected frame
-    if len(selected_frame) == 0:
-        print(selected_frame_id, "has zero registerd points")
-        return
-    point_ids_in_selected_frame = set(selected_frame[:, 0])  # Use a set for fast lookup
-
-    frame_common_counts = []  # Store (frame_id, common points)
-
-
-
-    start_index = max(0, selected_frame_id - 60)
-    end_index = min(selected_frame_id + 60, len(frames))
-
-    #for frame_id, frame in enumerate(frames):
-    for frame_id, frame in enumerate(islice(frames, start_index, end_index), start=start_index):
-        if frame_id in used_frames:  # Ignore already used frames
-            continue
-
-        if len(frame) == 0:
-            continue
-
-        # Extract point IDs from the current frame
-        points_in_frame = set(frame[:, 0])
-
-        # Find common points
-        common_elements = list(point_ids_in_selected_frame & points_in_frame)  # Set intersection
-
-        frame_common_counts.append((frame_id, common_elements))  # Store frame ID and common points
-
-    # Sort by the number of common points in descending order
-    frame_common_counts.sort(key=lambda x: len(x[1]), reverse=True)
-
-    # Get the best frame ID and its common points (if available)
-    if frame_common_counts:
-        best_frame_id, best_common_points = frame_common_counts[0]
-    else:
-        best_frame_id, best_common_points = None, []
-
-    return best_frame_id, best_common_points
-
+def angle_between_rays(d1, d2):
+    # Convert inputs to numpy arrays.
+    d1 = np.asarray(d1)
+    d2 = np.asarray(d2)
+    
+    # If the inputs are single rays (1D arrays), add a new axis.
+    if d1.ndim == 1:
+        d1 = d1[None, :]
+    if d2.ndim == 1:
+        d2 = d2[None, :]
+    
+    # Normalize each ray along the row (axis=1).
+    d1_norm = d1 / np.linalg.norm(d1, axis=1, keepdims=True)
+    d2_norm = d2 / np.linalg.norm(d2, axis=1, keepdims=True)
+    
+    # Compute the cross product for each pair.
+    cross = np.cross(d1_norm, d2_norm)
+    cross_norm = np.linalg.norm(cross, axis=1)
+    
+    # Compute the dot product for each pair.
+    dot = np.sum(d1_norm * d2_norm, axis=1)
+    
+    # Compute the angle for each pair using arctan2.
+    angles = np.arctan2(cross_norm, dot)
+    
+    # If the original inputs were single rays, return a scalar.
+    if angles.size == 1:
+        return angles.item()
+    
+    return angles
+    
 
 class NumpyEncoder(json.JSONEncoder):
     def default(self, obj):
@@ -158,6 +148,8 @@ if __name__ == '__main__':
 
     # Load frames
     depth_frames = []
+    frame_residuals = []
+    depth_frames_all = []
     rgb_frames = []
     fr_n = 0
     while raw_video.isOpened():
@@ -211,6 +203,10 @@ if __name__ == '__main__':
         depth_unit[..., 2] = raw_frame[..., 2]
         depth = depth.astype(np.float32)/((255**4)/MODEL_maxOUTPUT_depth)
         depth_frames.append(depth)
+        
+        
+        #Only used for point tirangulation of points# need to remove eventually
+        depth_frames_all.append(depth)
 
         #DEBUG: Only looking at 25 frames dont want to load entire video when DEBUGING
         #if fr_n > 210:
@@ -227,11 +223,14 @@ if __name__ == '__main__':
             cur_mask = np.isin(point_ids_in_frame, best_common_points)
             points_2d = frames[this_frame_no][cur_mask][:, 1:3]
 
+            global_point_ids = frames[this_frame_no][cur_mask][:, 0]
 
             #Ref frame points
             point_ids_in_frame = frames[ref_frame_no][:,0]
             cur_mask = np.isin(point_ids_in_frame, best_common_points)
             ref_points_2d = frames[ref_frame_no][cur_mask][:, 1:3]
+            
+            
             
             tranformation_to_ref = np.eye(4)
             
@@ -338,14 +337,14 @@ if __name__ == '__main__':
                 points_3d = depth_map_tools.transform_points(points_3d, final_overall_rot)
                 tranformation_to_ref @= final_overall_rot
                 
+                
                 #We now assume the camera is aligned in rotation and x and y movment
                 #lets do depth
                 
-                ref_points_2d[:, 0] -= frame_width//2
-                ref_points_2d[:, 1] -= frame_height//2
-                avg_points_2d_ref = np.mean(ref_points_2d, 0)
-                ref_points_2d[:, 0] += frame_width//2
-                ref_points_2d[:, 1] += frame_height//2
+                # Precompute the image center offset
+                center_offset = np.array([frame_width // 2, frame_height // 2])
+                
+                avg_points_2d_ref = np.mean(ref_points_2d, 0) - center_offset
                 
                 ref_dist = np.linalg.norm(avg_points_2d_ref)
                 
@@ -355,8 +354,6 @@ if __name__ == '__main__':
                 max_iter  = 20
                 tolerance = 1e-5       # stop if error is smaller than this
 
-                # Precompute the image center offset
-                center_offset = np.array([frame_width // 2, frame_height // 2])
 
                 # Initialize variables
                 direction = 1.0  # positive means moving forward
@@ -365,10 +362,9 @@ if __name__ == '__main__':
                 for i in range(max_iter):
                     # Project the 3D points and recenter the result
                     points_2d = depth_map_tools.project_3d_points_to_2d(points_3d, cam_matrix)
-                    points_2d -= center_offset
     
                     # Compute the average 2D location and its distance from the center
-                    avg_2d = np.mean(points_2d, axis=0)
+                    avg_2d = np.mean(points_2d, axis=0) - center_offset
                     current_dist = np.linalg.norm(avg_2d)
     
                     # Compute error relative to the reference distance
@@ -394,15 +390,89 @@ if __name__ == '__main__':
                     # Apply transformation to update the 3D points and accumulate the change
                     points_3d = depth_map_tools.transform_points(points_3d, transform_change)
                     tranformation_to_ref @= transform_change
-                
-                        
-                points_2d[:, 0] += frame_width//2
-                points_2d[:, 1] += frame_height//2
 
             to_ref_zero @= tranformation_to_ref
             
-            print('movment z:', to_ref_zero[:3, 3][2])
             transformations.append(to_ref_zero.tolist())
+            
+            
+            #The depth estimations has now done their part
+            #Now we will use the resulting transformation to calculate more accurate points
+            
+            #We use a reference frame 15 steps back, That way we always have points
+            #You could probably get more accuracy by going even further back
+            #On the other hand you lose acuracy the further back you go as the errors in the estimations of camera movment might add up
+            
+            _ref_frame_no = max(0, fr_n-15)
+            _this_frame_no = fr_n
+            _best_common_points = list(set(frames[_ref_frame_no][:, 0]) & set(frames[_this_frame_no][:, 0]))
+
+            #Current frame points
+            point_ids_in_frame = frames[_this_frame_no][:,0]
+            cur_mask = np.isin(point_ids_in_frame, _best_common_points)
+            points_2d_z = frames[this_frame_no][cur_mask][:, 1:3]
+
+            global_point_ids = frames[_this_frame_no][cur_mask][:, 0]
+
+            #Ref frame points
+            point_ids_in_frame = frames[_ref_frame_no][:,0]
+            cur_mask = np.isin(point_ids_in_frame, _best_common_points)
+            ref_points_2d_z = frames[_ref_frame_no][cur_mask][:, 1:3]
+            
+            points_3d_c = depth_map_tools.project_2d_points_to_3d(points_2d_z, depth_frames[-1], cam_matrix)
+            
+            
+            #Get tranformation from refernce frame to current frame
+            ref_frame_inv_trans = np.linalg.inv(np.array(transformations[_ref_frame_no]))
+            t_to_z = to_ref_zero @ ref_frame_inv_trans
+            tranformation_to_ref_rot = t_to_z.copy()
+            tranformation_to_ref_rot[:3, 3] = 0
+            points_3d_c = depth_map_tools.transform_points(points_3d_c, tranformation_to_ref_rot)
+            
+            
+            ref_points_3d_z = depth_map_tools.project_2d_points_to_3d(ref_points_2d_z, depth_frames_all[_ref_frame_no], cam_matrix)
+            
+            
+            
+            ref_ray = ref_points_3d_z
+            ray = points_3d_c
+            
+            cam_move = t_to_z[:3, 3]
+            cam_move_dist = np.linalg.norm(cam_move) 
+            
+            cam_2_cam_ray = cam_move / cam_move_dist
+            
+            cam_2_cam_ray = np.tile(cam_2_cam_ray, (ray.shape[0], 1))
+            
+            
+            ray_angle = angle_between_rays(ref_ray, ray) #This angle will be wrong as this triangle has non planar vectors
+            
+            cam_2ref = angle_between_rays(ref_ray, cam_2_cam_ray)
+            cam_2ray = angle_between_rays(ray, -cam_2_cam_ray)
+            
+            angle = np.pi - cam_2ref - cam_2ray
+            
+            residual = np.abs(angle - ray_angle) # as the tracking gets better the vecotrs should become more planar and
+            #the residual should go closer to zero
+            
+            frame_residuals.append(np.sum(residual))
+            
+            
+            #if _this_frame_no == 1000:
+                #print("residuals:", np.rad2deg(np.mean(frame_residuals))/args.xfov)
+                #exit(0)
+             
+            
+            ref_cam2point = cam_move_dist * np.sin(cam_2ray)/np.sin(angle)
+            cam2point = cam_move_dist * np.sin(cam_2ref)/np.sin(angle)
+            
+            distance_to_point = np.column_stack((global_point_ids, cam2point, ref_cam2point, angle, points_2d_z[:,0], points_2d_z[:,1]))
+            
+            #Filter out angles that are to small, thay are to unreliable
+            distance_to_point = distance_to_point[distance_to_point[:, 3] >= 0.01]
+            
+            #print(distance_to_point)
+
 
 
             if debug_video is not None:
@@ -412,6 +482,9 @@ if __name__ == '__main__':
                 #print("max_nr: ", max_nr)
 
                 debug_image = rgb_frames[-1]
+                
+                for pt in distance_to_point:
+                    cv2.putText(debug_image, "{:.2f}".format(pt[1]), ( int(pt[4]), int(pt[5])), cv2.FONT_HERSHEY_SIMPLEX, 0.3, (0,0,0), 1, cv2.LINE_AA)
                 
                 x = np.clip(points_2d[:,0].astype(np.int32), 0, frame_width-2)
                 y = np.clip(points_2d[:,1].astype(np.int32), 0, frame_height-2)
