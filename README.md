@@ -4,6 +4,9 @@ Tools for Generating and working with metric 3D depth videos.
 
 ![gif_banner](https://github.com/user-attachments/assets/4d737bb3-6fb6-4135-b01e-b35528371d22)
 
+_Banner created with 3d_view_depthfile.py_
+
+
 ## Video showcase
 https://youtu.be/nEiUloZ591Q
 
@@ -57,7 +60,7 @@ python video_metric_convert.py --color_video some_video.mkv
 ```
 
 #### unidepth_video.py (rquires installation with  ./install_mvda.sh -unidepth )
-_Uses ML to create FOV locked metric depth video from any normal video file._ UniDepth is not made for video so the videos it produces are very jittery. However UniDepth has the capability of using FOV as given by the user. Which means it's output tend to be more accurate as a whole. That said UniDepth has been trained with less data so it struggles with certain types of scenes. **UniDepth requires Cuda 11.8 and Torch 2.2.0.**
+_Uses ML to create FOV locked metric depth video from any normal video file._ UniDepth is not made for video so the videos it produces are very jittery. However UniDepth has the capability of using FOV as given by the user. Which means it's output tend to be more accurate as a whole. That said UniDepth has been trained with less data than many other models so it struggles with certain types of scenes. **UniDepth requires Cuda 11.8 and Torch 2.2.0.**
 ```bash
 # Create a metric depth video from a normal video (Note that the unidepth_video.py script is copied to the UniDepth folder on installation.)
 
@@ -200,7 +203,7 @@ Uses ML to paint over logos, text overlays or other objects from a video, can be
 ```bash
 example:
 Create a overlay_mask.png that is white where the overlay is located.
-./create_video_mask.sh some_video.mkv
+./apply_inpainting.sh some_video.mkv
 ```
 
 #### track_points_in_video.py
@@ -253,14 +256,14 @@ python align_3d_points.py --track_file some_video_tracking.json --color_video so
 ```
 
 ## RGB encoded metric 3D depth video format
-The rgb encoded video depth format is a normal video file with RGB values(that has to be saved as lossless video). Where the _red_ and _green_ channels represent the upper 8 bits of the depth (duplicated to make visualization easy) and the _blue_ channel represent
+The rgb encoded video depth format is a normal video file with RGB values(that has to be saved as lossless video). Where the _red_ and _green_ channels represent the upper 8 bits of the depth (duplicated to make visualization easy), the _blue_ channel represent
 the lower 8 bits. Only 16bits of the 24 bit rgb data is used to keep down filesizes. The values are scaled to the argument --max_depth, default is 20 meters.
 
 **With the default --max_depth of 20 meters each "ridge" represents a depth of 78mm (=20/256) and the depth resolution is 0.3 mm.**
 
 ![depth_example](https://github.com/user-attachments/assets/c77ae630-7ccd-4b82-9220-07d6c855d514)
 
-As the depth models improve (especially for distant things)this 16bit depth format will need to be replaced with something better. At that point the use of the full 24bits might be the easiest solution(using 24bits keeping the resolution at 1mm the max depth would be 16km which is the distancde to the horizon if standing 20m up from the ground), but one could also encode deepth logaritmicly making things in the distance less accurate.
+As depth estimation models improve (especially for distant things) this 16bit depth format will need to be replaced with something better. At that point the use of the full 24bits might be the easiest solution(using 24bits and keeping the resolution at 1mm; the max depth would be 16km which is the distancde to the horizon if standing 20m up from the ground), but one could also encode deepth logaritmicly making things in the distance less accurate.
 
 
 ## Install
@@ -296,7 +299,7 @@ export DISPLAY=:2
 # First setup any required venv (open3d requires python3.11 on OSX (as of 2025)))
 pip3.11 install open3d numpy opencv-python
 
-#if you want to use 3d camera tracking and 3d reconstruction
+#if you want to use madpose for 3d camera tracking
 ./install_mvda.sh -madpose
 
 #On Windows (Not tested or "officially" supported, but anecdotally working)
