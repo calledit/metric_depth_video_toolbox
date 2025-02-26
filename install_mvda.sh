@@ -56,25 +56,31 @@ if [[ " $@ " =~ " -stereocrafter " ]]; then
 	
 fi
 
+#install support for Moge
+if [[ " $@ " =~ " -moge " ]]; then
+	git clone https://github.com/microsoft/MoGe
 
-#install support for unidepth (requires cuda 11.8 and torch 2.2.0)
+	cd MoGe
+	
+	pip install -r requirements.txt
+
+	cd ..
+	
+	cp -a src/moge_video.py MoGe/.
+	
+	exit
+fi
+
+#install support for unidepth
 if [[ " $@ " =~ " -unidepth " ]]; then
 	git clone https://github.com/lpiccinelli-eth/UniDepth
 
 	cd UniDepth
-
-	#export VENV_DIR=<YOUR-VENVS-DIR>
-	#export NAME=Unidepth
-
-	#python -m venv $VENV_DIR/$NAME
-	#source $VENV_DIR/$NAME/bin/activate
-
-	# Install UniDepth and dependencies
-	pip install -e . --extra-index-url https://download.pytorch.org/whl/cu118
-
-	# Install Pillow-SIMD (Optional)
-	pip uninstall pillow
-	CC="cc -mavx2" pip install -U --force-reinstall pillow-simd
+	
+	pip install timm wandb xformers
+	wget https://raw.githubusercontent.com/AbdBarho/xformers-wheels/refs/heads/main/xformers/components/attention/nystrom.py
+	sed -i 's/from xformers\.components\.attention import NystromAttention/from nystrom import NystromAttention/g' unidepth/layers/nystrom_attention.py
+	
 	
 	cd ..
 	
