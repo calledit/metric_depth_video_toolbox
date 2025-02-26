@@ -234,6 +234,32 @@ example:
 python track_points_in_video.py --color_video some_video.mkv
 ```
 
+#### sam_track_video.py
+Use Mega-sam to track camera
+```
+usage: sam_track_video.py [-h] --color_video COLOR_VIDEO --depth_video DEPTH_VIDEO [--mask_video MASK_VIDEO] [--max_frames MAX_FRAMES] [--max_depth MAX_DEPTH] [--xfov XFOV] [--yfov YFOV]
+
+Mega-sam camera tracker
+
+options:
+  -h, --help            show this help message and exit
+  --color_video COLOR_VIDEO
+  --depth_video DEPTH_VIDEO
+                        depth video
+  --mask_video MASK_VIDEO
+                        black and white mask video for thigns that should not be tracked
+  --max_frames MAX_FRAMES
+                        maximum length of the input video, -1 means no limit
+  --max_depth MAX_DEPTH
+                        the max depth that the video uses
+  --xfov XFOV           fov in deg in the x-direction, calculated from aspectratio and yfov in not given
+  --yfov YFOV           fov in deg in the y-direction, calculated from aspectratio and xfov in not given
+  
+example:
+cd mega-sam
+python sam_track_video.py --yfov 50 --color_video ~/somevideo.mp4 --depth_video ~/somevideo.mp4_depth.mkv
+```
+
 #### align_3d_points.py
 Uses tracked points in the video and projectes them on to the depth video for 3D alignment and camera tracking. Outputs a _transformations.json_ file describing the camera movment and rotation.
 ```bash
@@ -290,11 +316,20 @@ sudo apt-get install -y libgl1
 ./install_mvda.sh
 pip install open3d numpy opencv-python
 
+#if you want to use Mega-sam camera tracking
+./install_mvda.sh -megasam
+
 #if you want to use paralax ML infill
 ./install_mvda.sh -stereocrafter
 
 #if you want to use 3d camera tracking and 3d reconstruction
 ./install_mvda.sh -madpose
+
+#if you want to generate depth maps with unidepth
+./install_mvda.sh -unidepth
+
+#if you want to generate depth maps with MoGe
+./install_mvda.sh -moge
 
 
 # If you want to export directly to the avc1 codec using the --compress argument
@@ -331,5 +366,9 @@ Longer shots with loots of camera movement may be problematic, video_metric_conv
 
 
 ### Camera tracking
-align_3d_points.py is a tool to extract camera movment from the video. It is based on the [madpose library](https://github.com/MarkYu98/madpose), madpose offers excellent camera pose estimation and given enogh acurate non moving tracking markers, and somewhat acurate stable metric depth it can give quite accurate pose estimations even for scenes where traditional pnpSolve or SVD solutions strugle (like scenes where there is little camera movment or where the depth maps are not perfeecly accurate). Due to the inaccuracies in the generated depth maps the camera tracking is not perfect but for ceratain task or shorter clips it can be usefull. If the camera is mostly still and only rotates running with --assume_stationary_camera creates tracking results that are good enogh to be usefull in most cases.
+align_3d_points.py is a tool to extract camera movment from the video. Metric depth video toolbox offers four difrrent algorithms.
+1. Madpose PnPSolver [madpose library](https://github.com/MarkYu98/madpose). Better than traditonal PnPSolve, but suffers to long term drift as it is a fram 2 frame solution.
+2. SVD based rotational solver asuming the camera is stationary and only tracking rotation. If the camera is trully still this is the best option.
+3. Iterative camera movmenet untill best fitt. Offers better tracking than madpose and is very fast.
+4. [Mega-sam](https://github.com/mega-sam/mega-sam) Mega sam is a project based on Droid-Slam that ofers great tracking for ML generated depth maps. By far the most accurate alternative. Capable of almost perfect tracking.
 

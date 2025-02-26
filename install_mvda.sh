@@ -71,6 +71,28 @@ if [[ " $@ " =~ " -moge " ]]; then
 	exit
 fi
 
+
+#install support for Mega-sam
+if [[ " $@ " =~ " -megasam " ]]; then
+	git clone --recursive https://github.com/mega-sam/mega-sam
+
+	cd mega-sam
+	
+	pip install torch_scatter
+	
+	#install mega-sam specific version of Droid-slam
+	cd base
+	python setup.py install
+	cd ..
+	
+	
+	cd ..
+	
+	cp -a src/sam_track_video.py mega-sam/.
+	
+	exit
+fi
+
 #install support for unidepth
 if [[ " $@ " =~ " -unidepth " ]]; then
 	git clone https://github.com/lpiccinelli-eth/UniDepth
