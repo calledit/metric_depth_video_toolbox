@@ -65,6 +65,32 @@ def save_24bit(frames, output_video_path, fps, max_depth_arg):
 
     out.release()
 
+def compute_scale_and_shift_full(prediction, target, mask = None):
+    # system matrix: A = [[a_00, a_01], [a_10, a_11]]
+    prediction = prediction.astype(np.float32)
+    target = target.astype(np.float32)
+    if mask is None:
+        mask = np.ones_like(target)==1
+    mask = mask.astype(np.float32)
+
+    a_00 = np.sum(mask * prediction * prediction)
+    a_01 = np.sum(mask * prediction)
+    a_11 = np.sum(mask)
+
+    b_0 = np.sum(mask * prediction * target)
+    b_1 = np.sum(mask * target)
+
+    x_0 = 1
+    x_1 = 0
+
+    det = a_00 * a_11 - a_01 * a_01
+
+    if det != 0:
+        x_0 = (a_11 * b_0 - a_01 * b_1) / det
+        x_1 = (-a_01 * b_0 + a_00 * b_1) / det
+
+    return x_0, x_1
+
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Video Depth Anything')
@@ -74,8 +100,7 @@ if __name__ == '__main__':
     parser.add_argument('--max_frames', type=int, default=-1, help='maximum length of the input video, -1 means no limit')
     parser.add_argument('--target_fps', type=int, default=-1, help='target fps of the input video, -1 means the original fps')
     parser.add_argument('--max_depth', default=20, type=int, help='the max depth that the video uses', required=False)
-    parser.add_argument('--no_rolling_average', action='store_true', help='Bases the conversion from affine to metric on the first 60 frames. Good for videos where the camera does not move.', required=False)
-
+    
     args = parser.parse_args()
 
     DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
@@ -99,96 +124,45 @@ if __name__ == '__main__':
 
     #Figure out metric conversion factor and rescale depth
 
-    often_control_metric_depth = 4
+    targets = []
+    sources = []
 
-    std_std_constants = []
-    inv_metric_means = []
-    norm_inv_means = []
+    #We only do the first 32 as that is enogh and video_depth_anything.infer_video_depth tries to align everything to frame 0 anyway
+    print("Use 32 first frames to calculate metric conversion constants")
+    for i in range(0, min(32, len(frames))):
 
-    last_metric_depth, last_inv_depth = None, None
+        
+
+        norm_inv = depths[i]
+
+            
+        # get the metric depthmap
+        metric_depth = metric_dpt_func.get_metric_depth(frames[i])
+
+        inv_metric_depth = 1/metric_depth
+
+        targets.append(inv_metric_depth)
+        sources.append(norm_inv)
+
+    
+    scale, shift = compute_scale_and_shift_full(np.concatenate(sources), np.concatenate(targets))
+    
+        
+
+    print("scale:", scale, "shift:", shift)
+    
     for i in range(0, len(frames)):
-
+        
         print("---- frame ", i, " ---")
 
         norm_inv = depths[i]
-        norm_inv_std = norm_inv.std()
-        norm_inv_mean = norm_inv.mean()
-        pop_values = False
-
-        if not args.no_rolling_average or len(std_std_constants) < 60/often_control_metric_depth:
-            #We techinally only calculate the metric conversion every so often as it genreally is slow to change
-            if i % often_control_metric_depth == 0 or len(std_std_constants) < 10:
-
-                # get the metric depthmap
-                metric_depth = metric_dpt_func.get_metric_depth(frames[i])
-
-                metric_min = metric_depth.min()
-                metric_max = metric_depth.max()
-
-
-                inverse_metric_max = 1/metric_min
-                inverse_metric_min = 1/metric_max
-
-                #The inverse_metric_min comes from the unstable depthmap if you use the real one there is brutal jittering so we overide it and just use 0
-                inverse_metric_min = 0
-
-                inv_metric_depth = 1/metric_depth
-
-                inv_metric_std = inv_metric_depth.std()
-                inv_metric_mean = inv_metric_depth.mean()
-
-                #std_std_constant is used convert from rel depth (as given by the model) -> rel depth standard vales -> metric depthnstandard vales -> metric depth
-                #all that it baked in to the var but the intermidate steps cancel out, so are not writen out.
-                std_std_constant = inv_metric_std / norm_inv_std
-
-
-                #Debug stuff
-                print("raw inv_metric_std: ", inv_metric_std)
-                print("raw norm_inv_std: ", norm_inv_std)
-                print("raw std_std_constant: ", std_std_constant)
-
-                std_std_constants.append(std_std_constant)
-                inv_metric_means.append(inv_metric_mean)
-                norm_inv_means.append(norm_inv_mean)
-
-
-                if len(std_std_constants) > 60/often_control_metric_depth:
-                    pop_values = True
-
-
-        #When there is less than 10 frames in the rolling average we use the first frame for reference instead the rolling average need to stabilize
-        if len(std_std_constants) < 10:
-            std_std_constant = std_std_constants[0]
-            inv_metric_mean = inv_metric_means[0]
-            norm_inv_mean = norm_inv_means[0]
-        else:
-            std_std_constant = np.mean(std_std_constants)
-            inv_metric_mean = np.mean(inv_metric_means)
-            norm_inv_mean = np.mean(norm_inv_means)
-
-        print("norm_inv_mean: ", norm_inv_mean)
-        print("inv_metric_mean: ", inv_metric_mean)
-        print("std_std_constant: ", std_std_constant)
-
-
-        # Looking the constants instead of using rolling averages can give better results but it may allso have issues with moving cameras (i think)
-        #std_std_constant = 0.00031527123
-        #inv_metric_mean = 0.395
-        #norm_inv_mean = 680
-
+        
         #Convert from inverse rel depth to inverse metric depth
-        inverse_reconstructed_metric_depth = ((norm_inv - norm_inv_mean) * std_std_constant) + inv_metric_mean
+        inverse_reconstructed_metric_depth = (norm_inv * scale) + shift
+        
+        reconstructed_metric_depth = 1/inverse_reconstructed_metric_depth
 
-        metric_depth2 = 1/inverse_reconstructed_metric_depth
-
-
-        # clear the rolling average when it has a timespan over 60 frames (which i guess might be about 2 s)
-        if pop_values:
-            std_std_constants.pop(0)
-            inv_metric_means.pop(0)
-            norm_inv_means.pop(0)
-
-        depths[i] = metric_depth2
+        depths[i] = reconstructed_metric_depth
 
 
 
