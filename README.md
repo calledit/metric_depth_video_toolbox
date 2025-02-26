@@ -60,12 +60,24 @@ python video_metric_convert.py --color_video some_video.mkv
 ```
 
 #### unidepth_video.py (rquires installation with  ./install_mvda.sh -unidepth )
-_Uses ML to create FOV locked metric depth video from any normal video file._ UniDepth is not made for video so the videos it produces are very jittery. However UniDepth has the capability of using FOV as given by the user. Which means it's output tend to be more accurate as a whole. That said UniDepth has been trained with less data than many other models so it struggles with certain types of scenes. **UniDepth requires Cuda 11.8 and Torch 2.2.0.**
+_Uses ML to create FOV locked metric depth video from any normal video file._ UniDepth is not made for video so the videos it produces are jittery. However UniDepth has the capability of using FOV as given by the user. Which means it's output tend to be more accurate as a whole. That said UniDepth has been trained with less data than many other models so it struggles with certain types of scenes.
+
 ```bash
 # Create a metric depth video from a normal video (Note that the unidepth_video.py script is copied to the UniDepth folder on installation.)
 
 cd UniDepth
 python unidepth_video.py --color_video some_video.mkv -xfov 45
+
+```
+
+#### moge_video.py (rquires installation with  ./install_mvda.sh -moge )
+_Uses ML to create FOV "locked" metric depth video from any normal video file._ Moge is not made for video so the videos it produces are jittery. 
+
+```bash
+# Create a metric depth video from a normal video (Note that the moge_video.py script is copied to the MoGe folder on installation.)
+
+cd MoGe
+python moge_video.py --color_video some_video.mkv -xfov 45
 
 ```
 
