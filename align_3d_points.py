@@ -150,6 +150,7 @@ if __name__ == '__main__':
     depth_frames = []
     frame_residuals = []
     depth_frames_all = []
+    global_points = {}
     rgb_frames = []
     fr_n = 0
     while raw_video.isOpened():
@@ -219,8 +220,8 @@ if __name__ == '__main__':
             best_common_points = list(set(frames[ref_frame_no][:, 0]) & set(frames[this_frame_no][:, 0]))
 
             #Current frame points
-            point_ids_in_frame = frames[this_frame_no][:,0]
-            cur_mask = np.isin(point_ids_in_frame, best_common_points)
+            point_ids_in_this_frame = frames[this_frame_no][:,0]
+            cur_mask = np.isin(point_ids_in_this_frame, best_common_points)
             points_2d = frames[this_frame_no][cur_mask][:, 1:3]
 
             global_point_ids = frames[this_frame_no][cur_mask][:, 0]
@@ -288,16 +289,6 @@ if __name__ == '__main__':
                 
                 points_3d = depth_map_tools.project_2d_points_to_3d(points_2d, depth_frames[-1], cam_matrix)
                 ref_points_3d = depth_map_tools.project_2d_points_to_3d(ref_points_2d, depth_frames[-2], cam_matrix)
-                
-                #Step 0.5 correct the scale, based on point locations
-                ref_dist= np.abs(ref_points_3d - np.mean(ref_points_3d, axis=0))
-                ref_mean_dist = pos_dist = np.linalg.norm(np.mean(ref_dist, axis=0))
-                dist = np.abs(ref_points_3d - np.mean(points_3d, axis=0))
-                mean_dist = pos_dist = np.linalg.norm(np.mean(dist, axis=0))
-                ratio = ref_mean_dist/mean_dist
-                depth_frames[-1] *= ratio
-                #Generate new points based on new scale
-                points_3d = depth_map_tools.project_2d_points_to_3d(points_2d, depth_frames[-1], cam_matrix)
                 
                 mean_depth = np.mean(points_3d[:, 2])
                 distant_points = points_3d[:, 2] > mean_depth
@@ -423,7 +414,10 @@ if __name__ == '__main__':
             
             
             #Get tranformation from refernce frame to current frame
-            ref_frame_inv_trans = np.linalg.inv(np.array(transformations[_ref_frame_no]))
+            ref_camtrans = np.array(transformations[_ref_frame_no])
+            ref_camtrans_pos = ref_camtrans[:3, 3]
+            camtrans_pos = to_ref_zero[:3, 3]
+            ref_frame_inv_trans = np.linalg.inv(ref_camtrans)
             t_to_z = to_ref_zero @ ref_frame_inv_trans
             tranformation_to_ref_rot = t_to_z.copy()
             tranformation_to_ref_rot[:3, 3] = 0
@@ -434,11 +428,12 @@ if __name__ == '__main__':
             
             
             
-            ref_ray = ref_points_3d_z
+            ref_ray = ref_points_3d_z/np.linalg.norm(ref_points_3d_z, axis=1, keepdims=True)
             ray = points_3d_c
             
             cam_move = t_to_z[:3, 3]
             cam_move_dist = np.linalg.norm(cam_move) 
+            #print(cam_move_dist)
             
             cam_2_cam_ray = cam_move / cam_move_dist
             
@@ -466,12 +461,25 @@ if __name__ == '__main__':
             ref_cam2point = cam_move_dist * np.sin(cam_2ray)/np.sin(angle)
             cam2point = cam_move_dist * np.sin(cam_2ref)/np.sin(angle)
             
+            
+            ponts = (ref_ray * ref_cam2point[:, np.newaxis])-ref_camtrans_pos
+            
+            #print(ponts)
+            
             distance_to_point = np.column_stack((global_point_ids, cam2point, ref_cam2point, angle, points_2d_z[:,0], points_2d_z[:,1]))
             
             #Filter out angles that are to small, thay are to unreliable
-            distance_to_point = distance_to_point[distance_to_point[:, 3] >= 0.01]
+            #distance_to_point = distance_to_point[distance_to_point[:, 3] >= 0.01]
             
-            #print(distance_to_point)
+            for l, pt in enumerate(distance_to_point):
+                global_id = int(pt[0])
+                if pt[3] < 0.01: # Dont save if angle is to small
+                    continue
+                if global_id not in global_points:
+                    global_points[global_id] = []
+                global_points[global_id].append(ponts[l])
+            
+            #print(global_points)
 
 
 
@@ -484,7 +492,13 @@ if __name__ == '__main__':
                 debug_image = rgb_frames[-1]
                 
                 for pt in distance_to_point:
-                    cv2.putText(debug_image, "{:.2f}".format(pt[1]), ( int(pt[4]), int(pt[5])), cv2.FONT_HERSHEY_SIMPLEX, 0.3, (0,0,0), 1, cv2.LINE_AA)
+                    global_id = int(pt[0])
+                    if global_id in global_points:
+                        avg_depth = np.linalg.norm(np.mean(global_points[global_id], axis=0)-camtrans_pos)#TODO FIx there is something wrong with this
+                        if pt[3] < 0.01: # Dont save if angle is to small
+                            continue
+                        avg_depth = pt[2]
+                        cv2.putText(debug_image, "{:.2f}".format(avg_depth), ( int(pt[4]), int(pt[5])), cv2.FONT_HERSHEY_SIMPLEX, 0.3, (0,0,0), 1, cv2.LINE_AA)
                 
                 x = np.clip(points_2d[:,0].astype(np.int32), 0, frame_width-2)
                 y = np.clip(points_2d[:,1].astype(np.int32), 0, frame_height-2)
