@@ -231,6 +231,10 @@ if __name__ == '__main__':
 
         if mask_video is not None:
             mask = torch.as_tensor(cv2.cvtColor(this_mask_frame, cv2.COLOR_BGR2GRAY))/255.0
+            mask = F.interpolate(
+                mask[None, None], (h1, w1), mode="nearest-exact"
+            ).squeeze()
+            mask = mask[: h1 - h1 % 8, : w1 - w1 % 8]
         else:
             mask = torch.ones_like(depth)
 
@@ -283,7 +287,16 @@ if __name__ == '__main__':
     est_cam_matrix[0,2] = estimated_intrinsic[2]
     est_cam_matrix[1,2] = estimated_intrinsic[3]
 
-    #print("depth_est:", depth_est)
+
+    depths_o = []
+    for out_depth in depth_est:
+        depth = F.interpolate(
+                torch.as_tensor(out_depth)[None, None], (frame_height, frame_width), mode="nearest-exact"
+            ).squeeze().numpy()
+        #print("depth_est:", depth.shape)
+        depths_o.append(depth)
+
+    save_24bit(np.array(depths_o), args.depth_video + '_megasam.mkv', frame_rate, MODEL_maxOUTPUT_depth)
     #print("motion_prob:", motion_prob)
 
     poses_th = torch.as_tensor(traj_est, device="cpu")
