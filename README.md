@@ -14,12 +14,15 @@ Stereo video clip samples can be found here:
 https://github.com/calledit/metric_depth_video_toolbox/releases/tag/Showcase
 
 ## This Repo consists of:
-1. A tool for generating metric 3D depth videos based on the Depth-Anything series of machine learning models.
-2. A tool for generating metric 3D depth videos based on [UniDepth](https://github.com/lpiccinelli-eth/UniDepth)
-3. A tool for adding parallax infill to generated stero video based on [StereoCrafter](https://github.com/TencentARC/StereoCrafter).
-4. A tool for viewing, rendering and visualising metric 3D videos from novel camera perspectives.
-5. A tool for doing things like 3D stereo rendering.
-6. Tools for using the generated metric 3D videos for camera tracking(camera pose estimation) and (full scene 3D reconstruction).
+1. Tools for generating metric 3D depth videos based on:
+   a) the Depth-Anything series of machine learning models.
+   b) The [MoGe](https://github.com/microsoft/MoGe) machine learning model.
+   c) The [UniDepth](https://github.com/lpiccinelli-eth/UniDepth)  machine learning model.
+2. A tool for viewing, rendering and visualising metric 3D videos from novel camera perspectives.
+3. A tool for 3D stereo rendering. Converting normal video in to 3D video.
+4. A tool for adding parallax infill to generated stero video based on [StereoCrafter](https://github.com/TencentARC/StereoCrafter).
+5. Tools for using metric 3D videos for camera tracking(camera pose estimation) and (full scene 3D reconstruction).
+6. Tools for automaticly creating masks and doing ML infill over logos or subtitles in videos.
 
 
 ## Usage 
