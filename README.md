@@ -237,9 +237,10 @@ example:
 python track_points_in_video.py --color_video some_video.mkv
 ```
 
-#### sam_track_video.py
-Use Mega-sam to track camera
-```
+#### sam_track_video.py (rquires installation with  ./install_mvda.sh -megasam )
+Use [Mega-sam](https://github.com/mega-sam/mega-sam) to track the camera. Outputs a transfomations.json file. Mega-sam merges traditonal SLAM methods with data from estimated ML depth videos to track the camera.
+
+```bash
 usage: sam_track_video.py [-h] --color_video COLOR_VIDEO --depth_video DEPTH_VIDEO [--mask_video MASK_VIDEO] [--max_frames MAX_FRAMES] [--max_depth MAX_DEPTH] [--xfov XFOV] [--yfov YFOV]
 
 Mega-sam camera tracker
@@ -264,7 +265,7 @@ python sam_track_video.py --yfov 50 --color_video ~/somevideo.mp4 --depth_video 
 ```
 
 #### align_3d_points.py
-Uses tracked points in the video and projectes them on to the depth video for 3D alignment and camera tracking. Outputs a _transformations.json_ file describing the camera movment and rotation.
+Uses tracked points in the video to do camera tracking. Outputs a _transformations.json_ file describing the camera movment and rotation.
 ```bash
 usage: align_3d_points.py [-h] --track_file TRACK_FILE [--mask_video MASK_VIDEO] [--strict_mask] [--xfov XFOV] [--yfov YFOV] --depth_video DEPTH_VIDEO [--max_frames MAX_FRAMES]
                           [--max_depth MAX_DEPTH] [--color_video COLOR_VIDEO] [--assume_stationary_camera] [--use_madpose]
