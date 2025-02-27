@@ -232,11 +232,14 @@ if __name__ == '__main__':
 
         if mask_video is not None:
             mask = torch.as_tensor(cv2.cvtColor(this_mask_frame, cv2.COLOR_BGR2GRAY)).float()/255.0
+            
+            
             mask = F.interpolate(
-                mask[None, None], (h1, w1), mode="nearest-exact"
+                mask[None, None], (h1, w1), mode="bilinear"
             ).squeeze()
-            mask = mask[: h1 - h1 % 8, : w1 - w1 % 8]
-        else:
+            #Should i scale down all the way.. instead of using this 
+            mask = mask[: h1 - h1 % 8, : w1 - w1 % 8] 
+        else: 
             mask = torch.ones_like(depth)
 
         if fr_n == 0:
