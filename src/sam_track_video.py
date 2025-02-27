@@ -199,11 +199,12 @@ if __name__ == '__main__':
             final_frame = True
 
         rgb_color = cv2.cvtColor(this_color_frame, cv2.COLOR_BGR2RGB)
+        rgb_depth = cv2.cvtColor(this_color_frame, cv2.COLOR_BGR2RGB)
 
         depth = np.zeros((frame_height, frame_width), dtype=np.uint32)
         depth_unit = depth.view(np.uint8).reshape((frame_height, frame_width, 4))
-        depth_unit[..., 3] = ((this_frame[..., 0].astype(np.uint32) + this_frame[..., 1]).astype(np.uint32) / 2)
-        depth_unit[..., 2] = this_frame[..., 2]
+        depth_unit[..., 3] = ((rgb_depth[..., 0].astype(np.uint32) + rgb_depth[..., 1]).astype(np.uint32) / 2)
+        depth_unit[..., 2] = rgb_depth[..., 2]
         depth = depth.astype(np.float32)/((255**4)/MODEL_maxOUTPUT_depth)
 
         #Down scale input images by 8
@@ -230,7 +231,7 @@ if __name__ == '__main__':
         depth = depth[: h1 - h1 % 8, : w1 - w1 % 8]
 
         if mask_video is not None:
-            mask = torch.as_tensor(cv2.cvtColor(this_mask_frame, cv2.COLOR_BGR2GRAY))/255.0
+            mask = torch.as_tensor(cv2.cvtColor(this_mask_frame, cv2.COLOR_BGR2GRAY)).float()/255.0
             mask = F.interpolate(
                 mask[None, None], (h1, w1), mode="nearest-exact"
             ).squeeze()
