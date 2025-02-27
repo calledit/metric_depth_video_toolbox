@@ -95,12 +95,13 @@ def compute_scale_and_shift_full(prediction, target, mask = None):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Video Depth Anything')
     parser.add_argument('--color_video', type=str, required=True)
+    parser.add_argument('--depth_video', type=str, required=False, help='reference metric depth video')
     parser.add_argument('--input_size', type=int, default=518)
     parser.add_argument('--max_res', type=int, default=1440)
     parser.add_argument('--max_frames', type=int, default=-1, help='maximum length of the input video, -1 means no limit')
     parser.add_argument('--target_fps', type=int, default=-1, help='target fps of the input video, -1 means the original fps')
     parser.add_argument('--max_depth', default=20, type=int, help='the max depth that the video uses', required=False)
-    
+
     args = parser.parse_args()
 
     DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
@@ -115,6 +116,10 @@ if __name__ == '__main__':
     video_depth_anything = video_depth_anything.to(DEVICE).eval()
 
     frames, target_fps = read_video_frames(args.color_video, args.max_frames, args.target_fps, args.max_res)
+
+    ref_frames = None
+    if args.depth_video is not None:
+        ref_frames, _ = read_video_frames(args.depth_video, 32, args.target_fps, args.max_res)
 
     height = frames.shape[1]
     width = frames.shape[2]
@@ -131,35 +136,43 @@ if __name__ == '__main__':
     print("Use 32 first frames to calculate metric conversion constants")
     for i in range(0, min(32, len(frames))):
 
-        
+
 
         norm_inv = depths[i]
 
-            
+
         # get the metric depthmap
-        metric_depth = metric_dpt_func.get_metric_depth(frames[i])
+        if ref_frames is not None:
+            raw_frame = ref_frames[i]
+            depth = np.zeros((height, width), dtype=np.uint32)
+            depth_unit = depth.view(np.uint8).reshape((height, width, 4))
+            depth_unit[..., 3] = ((raw_frame[..., 0].astype(np.uint32) + raw_frame[..., 1]).astype(np.uint32) / 2)
+            depth_unit[..., 2] = raw_frame[..., 2]
+            metric_depth = depth.astype(np.float32)/((255**4)/args.max_depth)
+        else:
+            metric_depth = metric_dpt_func.get_metric_depth(frames[i])
 
         inv_metric_depth = 1/metric_depth
 
         targets.append(inv_metric_depth)
         sources.append(norm_inv)
 
-    
+
     scale, shift = compute_scale_and_shift_full(np.concatenate(sources), np.concatenate(targets))
-    
-        
+
+
 
     print("scale:", scale, "shift:", shift)
-    
+
     for i in range(0, len(frames)):
-        
+
         print("---- frame ", i, " ---")
 
         norm_inv = depths[i]
-        
+
         #Convert from inverse rel depth to inverse metric depth
         inverse_reconstructed_metric_depth = (norm_inv * scale) + shift
-        
+
         reconstructed_metric_depth = 1/inverse_reconstructed_metric_depth
 
         depths[i] = reconstructed_metric_depth
