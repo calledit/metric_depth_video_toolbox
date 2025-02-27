@@ -28,6 +28,41 @@ def float_image_to_byte_image(float_image, max_value=10.0, scale=255, log_scale=
     return byte_image
 
 
+def best_intersection_point_vectorized(points, directions):
+    """
+    Finds the best intersecting point of many lines in 3D using a vectorized approach.
+    
+    Parameters:
+        points (np.ndarray): An array of shape (N, 3) where each row is a point p_i.
+        directions (np.ndarray): An array of shape (N, 3) where each row is a direction d_i.
+    
+    Returns:
+        x (np.ndarray): The best intersecting point in 3D.
+    """
+    # Ensure directions are normalized
+    d_norm = directions / np.linalg.norm(directions, axis=1, keepdims=True)
+    N = points.shape[0]
+    
+    # Compute the sum of outer products d_i d_i^T
+    # This can be done by (d_norm.T @ d_norm) since for each i, d_i d_i^T contributes to the sum.
+    sum_outer = d_norm.T @ d_norm  # shape (3, 3)
+    
+    # Construct A: A = N*I - sum_i(d_i d_i^T)
+    A = N * np.eye(3) - sum_outer
+    
+    # Compute b: for each i, b_i = p_i - d_i*(d_i^T p_i)
+    # First compute dot products for each line.
+    dp = np.sum(d_norm * points, axis=1, keepdims=True)  # shape (N, 1)
+    b_individual = points - d_norm * dp  # shape (N, 3)
+    
+    # Sum over all lines to get b.
+    b = np.sum(b_individual, axis=0)
+    
+    # Solve the linear system A x = b for the best intersection point.
+    x, residuals, rank, s = np.linalg.lstsq(A, b, rcond=None)
+    return x
+
+
 if __name__ == '__main__':
     
     # Setup arguments
@@ -41,14 +76,17 @@ if __name__ == '__main__':
     parser.add_argument('--save_ply', type=str, help='folder to save .ply pointcloud files in', required=False)
     parser.add_argument('--save_obj', type=str, help='folder to save .obj mesh files in', required=False)
     parser.add_argument('--color_video', type=str, help='video file to use as color input', required=False)
-    parser.add_argument('--xfov', type=int, help='fov in deg in the x-direction, calculated from aspectratio and yfov in not given', required=False)
-    parser.add_argument('--yfov', type=int, help='fov in deg in the y-direction, calculated from aspectratio and xfov in not given', required=False)
+    parser.add_argument('--xfov', type=float, help='fov in deg in the x-direction, calculated from aspectratio and yfov in not given', required=False)
+    parser.add_argument('--yfov', type=float, help='fov in deg in the y-direction, calculated from aspectratio and xfov in not given', required=False)
     parser.add_argument('--min_frames', default=-1, type=int, help='start convertion after nr of frames', required=False)
     parser.add_argument('--max_frames', default=-1, type=int, help='quit after max_frames nr of frames', required=False)
     parser.add_argument('--transformation_file', type=str, help='file with scene transformations from the aligner', required=False)
     parser.add_argument('--transformation_lock_frame', default=0, type=int, help='the frame that the transformation will use as a base', required=False)
     parser.add_argument('--remove_edges', action='store_true', help='Tries to remove edges that was not visible in image', required=False)
     
+    parser.add_argument('--track_file', type=str, help='file with 2d point tracking data', required=False)
+    parser.add_argument('--strict_mask', default=False, action='store_true', help='Remove any points that has ever been masked out even in frames where they are not masked', required=False)
+    parser.add_argument('--mask_video', type=str, help='black and white mask video for thigns that should not be tracked', required=False)
     
     
     args = parser.parse_args()
@@ -62,6 +100,8 @@ if __name__ == '__main__':
 
         
     output_file = args.depth_video + "_grey_depth.mkv"
+    
+    global_3d_points = None
     
     raw_video = cv2.VideoCapture(args.depth_video)
     frame_width, frame_height = int(raw_video.get(cv2.CAP_PROP_FRAME_WIDTH)), int(raw_video.get(cv2.CAP_PROP_FRAME_HEIGHT))
@@ -91,35 +131,54 @@ if __name__ == '__main__':
     if args.save_obj is not None:
         if not os.path.exists(args.save_obj):
             os.makedirs(args.save_obj)
+            
+    mask_video = None
+    if args.mask_video is not None:
+        if not os.path.isfile(args.mask_video):
+            raise Exception("input mask_video does not exist")
+        mask_video = cv2.VideoCapture(args.mask_video)
+    
+    frames = None
+    if args.track_file is not None:
+        with open(args.track_file) as json_track_file_handle:
+            frames = json.load(json_track_file_handle)
     
     cam_matrix = None
     if args.save_ply is not None or args.save_obj is not None:
         if args.xfov is None and args.yfov is None:
             print("Either --xfov or --yfov is required.")
             exit(0)
+    
+    if args.xfov is not None or args.yfov is not None:
         cam_matrix = depth_map_tools.compute_camera_matrix(args.xfov, args.yfov, frame_width, frame_height)
         fovx, fovy = depth_map_tools.fov_from_camera_matrix(cam_matrix)
         print("Camera fovx: ", fovx, "fovy:", fovy)
         
-        color_video = None
-        if args.color_video is not None:
-            if not os.path.isfile(args.color_video):
-                raise Exception("input color_video does not exist")
-            color_video = cv2.VideoCapture(args.color_video)
-        
-        transformations = None
-        if args.transformation_file is not None:
-            if not os.path.isfile(args.transformation_file):
-                raise Exception("input transformation_file does not exist")
-            with open(args.transformation_file) as json_file_handle:
-                transformations = json.load(json_file_handle)
-        
-            if args.transformation_lock_frame != 0:
-                ref_frame = transformations[args.transformation_lock_frame]
-                ref_frame_inv_trans = np.linalg.inv(ref_frame)
-                for i, transformation in enumerate(transformations):
-                    transformations[i] = transformation @ ref_frame_inv_trans
-        
+    color_video = None
+    if args.color_video is not None:
+        if not os.path.isfile(args.color_video):
+            raise Exception("input color_video does not exist")
+        color_video = cv2.VideoCapture(args.color_video)
+    
+    transformations = None
+    if args.transformation_file is not None:
+        if not os.path.isfile(args.transformation_file):
+            raise Exception("input transformation_file does not exist")
+        with open(args.transformation_file) as json_file_handle:
+            transformations = json.load(json_file_handle)
+            transformations.insert(0, np.eye(4))#Mega sam bug, TODO fix in megsam script
+    
+        if args.transformation_lock_frame != 0:
+            ref_frame = transformations[args.transformation_lock_frame]
+            ref_frame_inv_trans = np.linalg.inv(ref_frame)
+            for i, transformation in enumerate(transformations):
+                transformations[i] = transformation @ ref_frame_inv_trans
+
+    
+    #Lets do 3d reconstruction
+    if args.transformation_file is not None and args.track_file is not None and cam_matrix is not none:
+        global_3d_points = {}
+    
     
     frame_n = 0
     mesh = None
@@ -157,14 +216,60 @@ if __name__ == '__main__':
         
         depth = depth.astype(np.float32)/((255**4)/MODEL_maxOUTPUT_depth)
         
+        if mask_video is not None and frames is not None:
+            ret, mask = mask_video.read()
+            if ret:
+                mask = cv2.cvtColor(mask, cv2.COLOR_BGR2GRAY)
+
+
+                rem = []
+                rem_global = []
+                for i, point in enumerate(frames[frame_n]):
+                    if point[1] >= frame_width or point[2] >= frame_height or mask[point[2], point[1]] > 0:
+                        rem.append(i)
+                        rem_global.append(point[0])
+
+                if len(rem) > 0:
+                    frames[frame_n] = np.delete(frames[frame_n], rem, axis=0)
+
+                if args.strict_mask:
+                    for global_id in rem_global:
+                        for frame_id, frame in enumerate(frames):
+                            rem = []
+                            for i, point in enumerate(frames[frame_n]):
+                                if global_id == point[0]:
+                                    rem.append(i)
+                            if len(rem) > 0:
+                                frames[frame_id] = np.delete(frames[frame_id], rem, axis=0)
+            else:
+                print("WARNING: mask video ended before other videos")
+        
+        
         if cam_matrix is not None:
             transform_to_zero = np.eye(4)
             if transformations is not None:
-                transform_to_zero = np.array(transformations[frame_n-1])
+                transform_to_zero = np.array(transformations[frame_n])
             mesh_ret, used_indices = depth_map_tools.get_mesh_from_depth_map(depth, cam_matrix, color_frame, mesh, remove_edges = args.remove_edges)
             
             if transformations is not None:
                 mesh_ret.transform(transform_to_zero)
+            
+                #frames is a bad name but it a var that holds all frames with 2d tracking points
+                if frames is not None:
+                    point_ids_in_this_frame = frames[frame_n][:,0]
+                    points_2d = frames[frame_n][:, 1:3]
+                    points_3d = depth_map_tools.project_2d_points_to_3d(points_2d, depth, cam_matrix)
+                    transform_to_zero_rot = transform_to_zero.copy()
+                    transform_to_zero_rot[:3, 3] = 0.0
+                    points_3d = depth_map_tools.transform_points(points_3d, transform_to_zero_rot)
+                    cam_pos = transform_to_zero[:3, 3]
+                    
+                    for i, global_id in enumerate(point_ids_in_this_frame):
+                        if global_id not in global_3d_points:
+                            global_3d_points[global_id] = [[],[],[]]
+                        global_3d_points[global_id][0].append(cam_pos)
+                        global_3d_points[global_id][1].append(points_3d[i])
+                        global_3d_points[global_id][2].append(np.array(color_frame[points_2d[i][1], points_2d[i][0]], dtype=np.float32)/255)
                 
             if args.save_obj is not None:
                 file_name = args.save_obj+f"/{frame_n:07d}"+".obj"
@@ -203,6 +308,29 @@ if __name__ == '__main__':
             break
             
         frame_n += 1
+    
+    if global_3d_points is not None:
+        points = []
+        colors = []
+        for global_id in global_3d_points:
+            com_poses = np.array(global_3d_points[global_id][0])
+            
+            if len(com_poses) > 5:
+                line_directions = np.array(global_3d_points[global_id][1])
+                #print("global_id", global_id, "poses:", com_poses, "dirs:", line_directions)
+                #exit(0)
+                intersection_point = best_intersection_point_vectorized(com_poses, line_directions)
+                if intersection_point is None:
+                    continue
+            
+                print("Global id:", global_id, "best Iintersection point:", intersection_point)
+                points.append(intersection_point)
+                
+                rgb = np.array(global_3d_points[global_id][2])
+                colors.append(np.mean(rgb, axis=0))
+            
+        pcd = depth_map_tools.pts_2_pcd(points, colors)
+        depth_map_tools.draw([pcd])
         
     raw_video.release()
     if out is not None:
