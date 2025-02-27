@@ -43,6 +43,16 @@ def compute_camera_matrix(fov_horizontal_deg, fov_vertical_deg, image_width, ima
 
     return camera_matrix
 
+def fov_from_camera_matrix(mat):
+    w = mat[0][2]*2
+    h = mat[1][2]*2
+    fx = mat[0][0]
+    fy = mat[1][1]
+
+    fov_x = np.rad2deg(2 * np.arctan2(w, 2 * fx))
+    fov_y = np.rad2deg(2 * np.arctan2(h, 2 * fy))
+
+    return fov_x, fov_y
 
 def save_24bit(frames, output_video_path, fps, max_depth_arg):
     """
@@ -131,8 +141,11 @@ if __name__ == '__main__':
         rgb = cv2.cvtColor(raw_frame, cv2.COLOR_BGR2RGB)
         rgb_torch = torch.from_numpy(rgb).permute(2, 0, 1)
 
-        predictions = model.infer(rgb_torch, cam_matrix_torch)
+        predictions = model.infer(rgb_torch)
         depths.append(predictions["depth"].squeeze().cpu().numpy())
+        pred_intrinsic = predictions["intrinsics"].squeeze().cpu().numpy()
+        fovx, fovy = fov_from_camera_matrix(pred_intrinsic)
+        print("fovx:", fovx, "fovy:", fovy)
 
     video_name = os.path.basename(args.color_video)
     if not os.path.exists(args.output_dir):
