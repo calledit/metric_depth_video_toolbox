@@ -62,6 +62,32 @@ def best_intersection_point_vectorized(points, directions):
     x, residuals, rank, s = np.linalg.lstsq(A, b, rcond=None)
     return x
 
+def find_nearby_points(points_3d, i, threshold=0.01, exclude_self=True):
+    """
+    Finds all points within a given threshold from points_3d[i].
+
+    Parameters:
+        points_3d (np.ndarray): Array of shape (N, 3) with 3D points.
+        i (int): Index of the current point.
+        threshold (float): Distance threshold.
+        exclude_self (bool): Whether to exclude the point itself.
+    
+    Returns:
+        np.ndarray: Indices of points within the threshold distance.
+        np.ndarray: The corresponding 3D points.
+    """
+    current_point = points_3d[i]
+    # Compute Euclidean distances from current_point to all points.
+    distances = np.linalg.norm(points_3d - current_point, axis=1)
+    
+    # Create a mask for points within the threshold.
+    mask = distances < threshold
+    if exclude_self:
+        mask[i] = False  # Optionally exclude the current point.
+    
+    nearby_indices = np.where(mask)[0]
+    return nearby_indices
+
 
 if __name__ == '__main__':
     
@@ -176,10 +202,10 @@ if __name__ == '__main__':
 
     
     #Lets do 3d reconstruction
-    if args.transformation_file is not None and args.track_file is not None and cam_matrix is not none:
+    if args.transformation_file is not None and args.track_file is not None and cam_matrix is not None:
         global_3d_points = {}
     
-    
+    remaped_points = {}
     frame_n = 0
     mesh = None
     while raw_video.isOpened():
@@ -267,6 +293,12 @@ if __name__ == '__main__':
                     for i, global_id in enumerate(point_ids_in_this_frame):
                         if global_id not in global_3d_points:
                             global_3d_points[global_id] = [[],[],[]]
+                        nearby_points = find_nearby_points(points_3d, i)
+                        for pt in nearby_points:
+                            if global_id not in remaped_points:
+                                remaped_points[global_id] = []
+                            remaped_points[global_id].append(point_ids_in_this_frame[pt])
+                        
                         global_3d_points[global_id][0].append(cam_pos)
                         global_3d_points[global_id][1].append(points_3d[i])
                         global_3d_points[global_id][2].append(np.array(color_frame[points_2d[i][1], points_2d[i][0]], dtype=np.float32)/255)
@@ -310,12 +342,23 @@ if __name__ == '__main__':
         frame_n += 1
     
     if global_3d_points is not None:
+        
+        for global_id in remaped_points:
+            pts = remaped_points[global_id]
+            for rem_global_id in pts:
+                if rem_global_id in global_3d_points and global_id in global_3d_points:
+                    global_3d_points[global_id][0].extend(global_3d_points[rem_global_id][0])
+                    global_3d_points[global_id][1].extend(global_3d_points[rem_global_id][1])
+                    global_3d_points[global_id][2].extend(global_3d_points[rem_global_id][2])
+                    del global_3d_points[rem_global_id]
+        
+        
         points = []
         colors = []
         for global_id in global_3d_points:
             com_poses = np.array(global_3d_points[global_id][0])
             
-            if len(com_poses) > 5:
+            if len(com_poses) > 20:
                 line_directions = np.array(global_3d_points[global_id][1])
                 #print("global_id", global_id, "poses:", com_poses, "dirs:", line_directions)
                 #exit(0)
@@ -323,7 +366,7 @@ if __name__ == '__main__':
                 if intersection_point is None:
                     continue
             
-                print("Global id:", global_id, "best Iintersection point:", intersection_point)
+                print("Global id:", global_id," nr observations:", len(com_poses), "best Iintersection point:", intersection_point)
                 points.append(intersection_point)
                 
                 rgb = np.array(global_3d_points[global_id][2])
