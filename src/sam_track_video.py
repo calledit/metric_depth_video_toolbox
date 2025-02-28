@@ -307,7 +307,8 @@ if __name__ == '__main__':
     cam_c2w = SE3(poses_th).inv().matrix().numpy()
 
     with open(out_file, "w") as json_file_handle:
-        json_file_handle.write(json.dumps(cam_c2w, cls=NumpyEncoder))
+        tranforms  = np.insert(cam_c2w, 0, np.eye(4))
+        json_file_handle.write(json.dumps(tranforms, cls=NumpyEncoder))
 
 
     fovx, fovy = fov_from_camera_matrix(est_cam_matrix)
