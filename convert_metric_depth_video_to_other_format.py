@@ -511,11 +511,14 @@ if __name__ == '__main__':
             
         for frame_n, depth in enumerate(saved_depth_maps):
             
+            target = []
+            source = []
+            
             inv_depth = 1/depth
             inverse_reconstructed_metric_depth = (inv_depth * scale) + shift
             
             fixed_depth = 1/inverse_reconstructed_metric_depth
-            #fixed_depth *= scale
+            #fixed_depth = depth / scale
             
             scaled_depth = (((255**4)/MODEL_maxOUTPUT_depth)*fixed_depth.astype(np.float64)).astype(np.uint32)
 
