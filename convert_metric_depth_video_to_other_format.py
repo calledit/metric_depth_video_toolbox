@@ -62,6 +62,33 @@ def best_intersection_point_vectorized(points, directions):
     x, residuals, rank, s = np.linalg.lstsq(A, b, rcond=None)
     return x
 
+def compute_scale_and_shift_full(prediction, target, mask = None):
+    # system matrix: A = [[a_00, a_01], [a_10, a_11]]
+    prediction = prediction.astype(np.float32)
+    target = target.astype(np.float32)
+    if mask is None:
+        mask = np.ones_like(target)==1
+    mask = mask.astype(np.float32)
+
+    a_00 = np.sum(mask * prediction * prediction)
+    a_01 = np.sum(mask * prediction)
+    a_11 = np.sum(mask)
+
+    b_0 = np.sum(mask * prediction * target)
+    b_1 = np.sum(mask * target)
+
+    x_0 = 1
+    x_1 = 0
+
+    det = a_00 * a_11 - a_01 * a_01
+
+    if det != 0:
+        x_0 = (a_11 * b_0 - a_01 * b_1) / det
+        x_1 = (-a_01 * b_0 + a_00 * b_1) / det
+
+    return x_0, x_1
+
+
 def find_nearby_points(points_3d, i, threshold=0.01, exclude_self=True):
     """
     Finds all points within a given threshold from points_3d[i].
@@ -262,10 +289,13 @@ if __name__ == '__main__':
             for i, transformation in enumerate(transformations):
                 transformations[i] = transformation @ ref_frame_inv_trans
 
-    
+    saved_depth_maps = None
     #Lets do 3d reconstruction
     if args.transformation_file is not None and args.track_file is not None and cam_matrix is not None:
         global_3d_points = {}
+        saved_depth_maps = []
+        output_file = args.depth_video + "_rescaled.mkv"
+        out = cv2.VideoWriter(output_file, cv2.VideoWriter_fourcc(*"FFV1"), frame_rate, (frame_width, frame_height))
     
     remaped_points = {}
     frame_n = 0
@@ -344,6 +374,9 @@ if __name__ == '__main__':
             
                 #frames is a bad name but it a var that holds all frames with 2d tracking points
                 if frames is not None:
+                    
+                    saved_depth_maps.append(depth)
+                    
                     point_ids_in_this_frame = frames[frame_n][:,0]
                     points_2d = frames[frame_n][:, 1:3]
                     points_3d = depth_map_tools.project_2d_points_to_3d(points_2d, depth, cam_matrix)
@@ -354,7 +387,7 @@ if __name__ == '__main__':
                     
                     for i, global_id in enumerate(point_ids_in_this_frame):
                         if global_id not in global_3d_points:
-                            global_3d_points[global_id] = [[],[],[]]
+                            global_3d_points[global_id] = [[],[],[],[]]
                         nearby_points = find_nearby_points(points_3d, i)
                         for pt in nearby_points:
                             if global_id not in remaped_points:
@@ -364,6 +397,7 @@ if __name__ == '__main__':
                         global_3d_points[global_id][0].append(cam_pos)
                         global_3d_points[global_id][1].append(points_3d[i])
                         global_3d_points[global_id][2].append(np.array(color_frame[points_2d[i][1], points_2d[i][0]], dtype=np.float32)/255)
+                        global_3d_points[global_id][3].append(frame_n)
                 
             if args.save_obj is not None:
                 file_name = args.save_obj+f"/{frame_n:07d}"+".obj"
@@ -410,6 +444,8 @@ if __name__ == '__main__':
         
         points = []
         colors = []
+        messured_points = {}
+        messured_points_3d = {}
         for global_id in global_3d_points:
             com_poses = np.array(global_3d_points[global_id][0])
             
@@ -424,11 +460,75 @@ if __name__ == '__main__':
                 print("Global id:", global_id," nr observations:", len(com_poses), "best Iintersection point:", intersection_point)
                 points.append(intersection_point)
                 
+                for frame_n in global_3d_points[global_id][3]:
+                    if frame_n not in messured_points:
+                        messured_points[frame_n] = []
+                        messured_points_3d[frame_n] = []
+                    messured_points[frame_n].append(global_id)
+                    messured_points_3d[frame_n].append(intersection_point)
+                
                 rgb = np.array(global_3d_points[global_id][2])
                 colors.append(np.mean(rgb, axis=0))
             
         pcd = depth_map_tools.pts_2_pcd(points, colors)
         depth_map_tools.draw([pcd])
+        target = []
+        source = []
+        print("rescaling depthmap based on triangulated depth")
+        for frame_n, depth in enumerate(saved_depth_maps):
+            
+            
+            global_points_in_frame = []
+            global_points_3d_in_frame = []
+            if frame_n in messured_points:
+                global_points_in_frame = messured_points[frame_n]
+                global_points_3d_in_frame = messured_points_3d[frame_n]
+                    
+            #global_points_3d_in_frame = np.array(global_points_3d_in_frame)
+            
+            if len(global_points_in_frame) == 0:
+                continue
+            
+            #print(global_points_3d_in_frame)
+            global_points_3d_in_frame = np.array(global_points_3d_in_frame)
+            
+            transform_from_zero = np.linalg.inv(np.array(transformations[frame_n]))
+            
+            point_ids_in_this_frame = frames[frame_n][:,0]
+            cur_mask = np.isin(point_ids_in_this_frame, global_points_in_frame)
+            points_2d = frames[frame_n][cur_mask][:, 1:3]
+            points_3d = depth_map_tools.project_2d_points_to_3d(points_2d, depth, cam_matrix)
+            
+            ref_points_3d = depth_map_tools.transform_points(global_points_3d_in_frame, transform_from_zero)
+            
+            target.append(1/ref_points_3d[:,2])
+            source.append(1/points_3d[:, 2])
+            
+            #scale = np.mean(points_3d[:, 2]/global_points_3d_in_frame[:,2])
+            
+        #scale = np.mean(np.concatenate(source)/ np.concatenate(target))
+        scale, shift = compute_scale_and_shift_full(np.concatenate(source), np.concatenate(target))
+            
+        for frame_n, depth in enumerate(saved_depth_maps):
+            
+            inv_depth = 1/depth
+            inverse_reconstructed_metric_depth = (inv_depth * scale) + shift
+            
+            fixed_depth = 1/inverse_reconstructed_metric_depth
+            #fixed_depth *= scale
+            
+            scaled_depth = (((255**4)/MODEL_maxOUTPUT_depth)*fixed_depth.astype(np.float64)).astype(np.uint32)
+
+            # View the depth as raw bytes: shape (H, W, 4)
+            depth_bytes = scaled_depth.view(np.uint8).reshape(frame_height, frame_width, 4)
+
+
+            R = (depth_bytes[:, :, 3]) # Most significant bits in R and G channel (duplicated to reduce compression artifacts)
+            G = (depth_bytes[:, :, 3])
+            B = (depth_bytes[:, :, 2]) # Least significant bit in blue channel
+            bgr24bit = np.dstack((B, G, R))
+
+            out.write(bgr24bit)
         
     raw_video.release()
     if out is not None:
