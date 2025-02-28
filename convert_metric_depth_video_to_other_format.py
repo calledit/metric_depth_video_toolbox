@@ -28,65 +28,87 @@ def float_image_to_byte_image(float_image, max_value=10.0, scale=255, log_scale=
     return byte_image
 
 
-def best_intersection_point_vectorized(points, directions):
+def compute_weights(directions):
     """
-    Finds the best intersecting point of many lines in 3D using a vectorized approach.
+    Compute weights for each direction based on its average angular difference
+    with all other directions. The measure used is 1 - |dot product|.
     
     Parameters:
-        points (np.ndarray): An array of shape (N, 3) where each row is a point p_i.
-        directions (np.ndarray): An array of shape (N, 3) where each row is a direction d_i.
+        directions (np.ndarray): Array of shape (N, 3) of normalized direction vectors.
     
     Returns:
-        x (np.ndarray): The best intersecting point in 3D.
+        weights (np.ndarray): Array of shape (N,) with computed weights.
     """
-    # Ensure directions are normalized
+    N = directions.shape[0]
+    # Compute the pairwise dot products
+    dot_products = directions @ directions.T  # shape (N, N)
+    # Take absolute value so that parallel and anti-parallel are both considered similar
+    abs_dot = np.abs(dot_products)
+    # Compute difference measure: 1 - |dot|
+    diff = 1 - abs_dot
+    # Exclude the diagonal (self comparison) which is 0 since |dot(d_i,d_i)| = 1.
+    # Average the differences over the other directions.
+    weights = np.sum(diff, axis=1) / (N - 1)
+    return weights
+
+def best_intersection_point_vectorized_weighted(points, directions, weights=None):
+    """
+    Finds the best intersecting point of many 3D lines in a weighted least-squares sense.
+    
+    Each line is defined by a point and a normalized direction vector.
+    The goal is to find x that minimizes:
+    
+        J(x) = sum_i w_i * || (I - d_i d_i^T)(x - p_i) ||^2
+    
+    If weights are not provided, they are computed based on the average angular difference.
+    
+    Parameters:
+        points (np.ndarray): Array of shape (N, 3) with each row as the line's origin.
+        directions (np.ndarray): Array of shape (N, 3) with each row as the line's direction.
+        weights (np.ndarray, optional): Array of shape (N,) of weights for each line.
+            If None, weights are computed from the directions.
+    
+    Returns:
+        x (np.ndarray): The best intersection point in 3D (shape (3,)).
+    """
+    # Normalize direction vectors
     d_norm = directions / np.linalg.norm(directions, axis=1, keepdims=True)
     N = points.shape[0]
     
-    # Compute the sum of outer products d_i d_i^T
-    # This can be done by (d_norm.T @ d_norm) since for each i, d_i d_i^T contributes to the sum.
-    sum_outer = d_norm.T @ d_norm  # shape (3, 3)
+    # If no weights are provided, compute them based on angular differences.
+    if weights is None:
+        weights = compute_weights(d_norm)
+    # Ensure weights is a column vector for broadcasting.
+    weights = weights.reshape(-1, 1)
     
-    # Construct A: A = N*I - sum_i(d_i d_i^T)
-    A = N * np.eye(3) - sum_outer
+    # Instead of computing the full projection matrix per line,
+    # note that for each line:
+    #   (I - d d^T) p = p - d (d^T p)
+    # Also, the sum of projection matrices:
+    #   A = sum_i w_i * (I - d_i d_i^T)
+    # can be computed as:
+    #   A = (sum_i w_i)*I - sum_i w_i * (d_i d_i^T)
     
-    # Compute b: for each i, b_i = p_i - d_i*(d_i^T p_i)
-    # First compute dot products for each line.
+    # Compute weighted sum of outer products d_i d_i^T:
+    weighted_outer = (d_norm * weights)  # shape (N, 3)
+    weighted_outer = weighted_outer.T @ d_norm  # shape (3, 3)
+    
+    # Sum of weights:
+    sum_weights = np.sum(weights)
+    
+    # Form the matrix A
+    A = sum_weights * np.eye(3) - weighted_outer
+    
+    # Compute the weighted sum for b:
+    # For each line, b_i = w_i * (p_i - d_i * (d_i dot p_i))
     dp = np.sum(d_norm * points, axis=1, keepdims=True)  # shape (N, 1)
     b_individual = points - d_norm * dp  # shape (N, 3)
+    # Apply weights and sum over all lines:
+    b = np.sum(weights * b_individual, axis=0)
     
-    # Sum over all lines to get b.
-    b = np.sum(b_individual, axis=0)
-    
-    # Solve the linear system A x = b for the best intersection point.
+    # Solve the linear system A x = b (using lstsq to be robust in case A is singular)
     x, residuals, rank, s = np.linalg.lstsq(A, b, rcond=None)
     return x
-
-def compute_scale_and_shift_full(prediction, target, mask = None):
-    # system matrix: A = [[a_00, a_01], [a_10, a_11]]
-    prediction = prediction.astype(np.float32)
-    target = target.astype(np.float32)
-    if mask is None:
-        mask = np.ones_like(target)==1
-    mask = mask.astype(np.float32)
-
-    a_00 = np.sum(mask * prediction * prediction)
-    a_01 = np.sum(mask * prediction)
-    a_11 = np.sum(mask)
-
-    b_0 = np.sum(mask * prediction * target)
-    b_1 = np.sum(mask * target)
-
-    x_0 = 1
-    x_1 = 0
-
-    det = a_00 * a_11 - a_01 * a_01
-
-    if det != 0:
-        x_0 = (a_11 * b_0 - a_01 * b_1) / det
-        x_1 = (-a_01 * b_0 + a_00 * b_1) / det
-
-    return x_0, x_1
 
 
 def find_nearby_points(points_3d, i, threshold=0.01, exclude_self=True):
@@ -176,6 +198,39 @@ def merge_global_points(global_3d_points, remaped_points):
             global_3d_points[root][2].extend(global_3d_points[key][2])
             # Remove the merged key.
             del global_3d_points[key]
+
+def estimate_scale_shift(depth, depth_target):
+    """
+    Estimates the scale and shift constants to map 'depth' to 'depth_target'
+    using the model:
+    
+        1/depth_target = scale * (1/depth) + shift
+    
+    Parameters:
+        depth (np.ndarray): 1D array of original depth values.
+        depth_target (np.ndarray): 1D array of target depth values.
+        
+    Returns:
+        scale (float): Estimated scale constant.
+        shift (float): Estimated shift constant.
+    """
+    # Ensure no zeros to avoid division issues:
+    valid = (depth > 0) & (depth_target > 0)
+    d = depth[valid]
+    d_t = depth_target[valid]
+    
+    # Compute the transformed variables.
+    x = 1.0 / d
+    y = 1.0 / d_t
+    
+    # Build the design matrix for the linear model y = a*x + b
+    X = np.vstack([x, np.ones_like(x)]).T
+    
+    # Solve the least-squares problem
+    solution, residuals, rank, s = np.linalg.lstsq(X, y, rcond=None)
+    scale, shift = solution
+    
+    return scale, shift
 
 
 if __name__ == '__main__':
@@ -281,8 +336,7 @@ if __name__ == '__main__':
             raise Exception("input transformation_file does not exist")
         with open(args.transformation_file) as json_file_handle:
             transformations = json.load(json_file_handle)
-            transformations.insert(0, np.eye(4))#Mega sam bug, TODO fix in megsam script
-    
+            
         if args.transformation_lock_frame != 0:
             ref_frame = transformations[args.transformation_lock_frame]
             ref_frame_inv_trans = np.linalg.inv(ref_frame)
@@ -334,6 +388,11 @@ if __name__ == '__main__':
         
         depth = depth.astype(np.float32)/((255**4)/MODEL_maxOUTPUT_depth)
         
+        #Test values for crop_dancing
+        #depth = 1/depth
+        #depth *= 0.55 #decrese to move back out from camera
+        #depth = 1/(depth+0.25) #increse to compress the scene
+        
         if mask_video is not None and frames is not None:
             ret, mask = mask_video.read()
             if ret:
@@ -382,22 +441,24 @@ if __name__ == '__main__':
                     points_3d = depth_map_tools.project_2d_points_to_3d(points_2d, depth, cam_matrix)
                     transform_to_zero_rot = transform_to_zero.copy()
                     transform_to_zero_rot[:3, 3] = 0.0
-                    points_3d = depth_map_tools.transform_points(points_3d, transform_to_zero_rot)
+                    points_3d_rot = depth_map_tools.transform_points(points_3d, transform_to_zero_rot)
+                    points_3d_trans = depth_map_tools.transform_points(points_3d, transform_to_zero)
                     cam_pos = transform_to_zero[:3, 3]
                     
                     for i, global_id in enumerate(point_ids_in_this_frame):
                         if global_id not in global_3d_points:
-                            global_3d_points[global_id] = [[],[],[],[]]
-                        nearby_points = find_nearby_points(points_3d, i)
+                            global_3d_points[global_id] = [[],[],[],[],[]]
+                        nearby_points = find_nearby_points(points_3d_rot, i)
                         for pt in nearby_points:
                             if global_id not in remaped_points:
                                 remaped_points[global_id] = []
                             remaped_points[global_id].append(point_ids_in_this_frame[pt])
                         
                         global_3d_points[global_id][0].append(cam_pos)
-                        global_3d_points[global_id][1].append(points_3d[i])
+                        global_3d_points[global_id][1].append(points_3d_rot[i])
                         global_3d_points[global_id][2].append(np.array(color_frame[points_2d[i][1], points_2d[i][0]], dtype=np.float32)/255)
                         global_3d_points[global_id][3].append(frame_n)
+                        global_3d_points[global_id][4].append(points_3d_trans[i])
                 
             if args.save_obj is not None:
                 file_name = args.save_obj+f"/{frame_n:07d}"+".obj"
@@ -439,87 +500,116 @@ if __name__ == '__main__':
     
     if global_3d_points is not None:
         
+        #Merge points that overlap at some point
         merge_global_points(global_3d_points, remaped_points)
         
         
         points = []
+        points_i = []
         colors = []
         messured_points = {}
         messured_points_3d = {}
+        dist_m_2_a = {}
+        avg_mon_points_3d = {}
+        #Find intersecting rays from the camera and use that to determine distance and make a point cloud
+        #Also take averages of the depth from the depth map to make a point cloud
         for global_id in global_3d_points:
             com_poses = np.array(global_3d_points[global_id][0])
             
-            if len(com_poses) > 20:
+            if len(com_poses) > 2:
                 line_directions = np.array(global_3d_points[global_id][1])
                 #print("global_id", global_id, "poses:", com_poses, "dirs:", line_directions)
                 #exit(0)
-                intersection_point = best_intersection_point_vectorized(com_poses, line_directions)
+                intersection_point = best_intersection_point_vectorized_weighted(com_poses, line_directions)
                 if intersection_point is None:
                     continue
+                
+                mon_dep = np.mean(global_3d_points[global_id][4], axis=0)
             
-                print("Global id:", global_id," nr observations:", len(com_poses), "best Iintersection point:", intersection_point)
-                points.append(intersection_point)
+                print("Global id:", global_id," nr observations:", len(com_poses), "best intersection point:", intersection_point, "mono:", mon_dep)
+                points.append(mon_dep)
+                points_i.append(intersection_point)
                 
                 for frame_n in global_3d_points[global_id][3]:
                     if frame_n not in messured_points:
                         messured_points[frame_n] = []
                         messured_points_3d[frame_n] = []
+                        avg_mon_points_3d[frame_n] = []
+                        dist_m_2_a[frame_n] = []
                     messured_points[frame_n].append(global_id)
                     messured_points_3d[frame_n].append(intersection_point)
+                    avg_mon_points_3d[frame_n].append(mon_dep)
+                    dist_m_2_a[frame_n].append(np.linalg.norm(mon_dep-intersection_point))
                 
                 rgb = np.array(global_3d_points[global_id][2])
                 colors.append(np.mean(rgb, axis=0))
-            
-        pcd = depth_map_tools.pts_2_pcd(points, colors)
-        depth_map_tools.draw([pcd])
+        
+        
+        pcd = depth_map_tools.pts_2_pcd(np.array(points), colors)
+        pcd_i = depth_map_tools.pts_2_pcd(np.array(points_i), colors)
+        o3d.io.write_point_cloud(args.depth_video + "_triangulated.ply", pcd_i)
+        o3d.io.write_point_cloud(args.depth_video + "_avgmonodepth.ply", pcd)
+        depth_map_tools.draw([pcd, pcd_i])
+        
+        
         target = []
         source = []
-        print("rescaling depthmap based on triangulated depth")
+        
+        # this sort of works but you get better shift and scale values by selecting values yourself (but that is manual work)
+        # i have observed that you get better output if you run this iteravly using the rescaled output as input 2-3 times.
+        # dont know why or how. But it is an observation.
+        print("rescaling depthmap based on triangulated depth (run in iterations for better result)")
         for frame_n, depth in enumerate(saved_depth_maps):
-            
-            
+        
+        
             global_points_in_frame = []
             global_points_3d_in_frame = []
             if frame_n in messured_points:
                 global_points_in_frame = messured_points[frame_n]
-                global_points_3d_in_frame = messured_points_3d[frame_n]
-                    
-            #global_points_3d_in_frame = np.array(global_points_3d_in_frame)
-            
+                global_points_3d_in_frame = np.array(messured_points_3d[frame_n])
+                points_3d_avg = np.array(avg_mon_points_3d[frame_n])
+                
+                #We filter away ponts that are to far from eachother
+                dists = np.array(dist_m_2_a[frame_n])
+                m_d = np.mean(dists)
+                mask = dists < m_d
+                
             if len(global_points_in_frame) == 0:
                 continue
-            
-            #print(global_points_3d_in_frame)
-            global_points_3d_in_frame = np.array(global_points_3d_in_frame)
-            
+        
             transform_from_zero = np.linalg.inv(np.array(transformations[frame_n]))
+        
+            points_3d = depth_map_tools.transform_points(points_3d_avg[mask], transform_from_zero)
+            ref_points_3d = depth_map_tools.transform_points(global_points_3d_in_frame[mask], transform_from_zero)
+        
+        
+            scale, shift = estimate_scale_shift(points_3d[:, 2], ref_points_3d[:,2])
             
-            point_ids_in_this_frame = frames[frame_n][:,0]
-            cur_mask = np.isin(point_ids_in_this_frame, global_points_in_frame)
-            points_2d = frames[frame_n][cur_mask][:, 1:3]
-            points_3d = depth_map_tools.project_2d_points_to_3d(points_2d, depth, cam_matrix)
+            #we filter away extreme values. Dont know exatly why those values apear anyway filtering gives better result
+            if abs(shift) > 1 or abs(scale) > 3:
+                continue
             
-            ref_points_3d = depth_map_tools.transform_points(global_points_3d_in_frame, transform_from_zero)
-            
-            target.append(1/ref_points_3d[:,2])
-            source.append(1/points_3d[:, 2])
-            
-            #scale = np.mean(points_3d[:, 2]/global_points_3d_in_frame[:,2])
-            
-        #scale = np.mean(np.concatenate(source)/ np.concatenate(target))
-        scale, shift = compute_scale_and_shift_full(np.concatenate(source), np.concatenate(target))
-            
+            target.append(ref_points_3d[:,2])
+            source.append(points_3d[:, 2])
+            print("frame scale:", scale, "shift:", shift, "len", len(points_3d_avg[mask]))
+        
+        
+        scale, shift = estimate_scale_shift(np.concatenate(source), np.concatenate(target))
+        print("full scale:", scale, "shift:", shift)
+    
+    
+    
         for frame_n, depth in enumerate(saved_depth_maps):
-            
+        
             target = []
             source = []
-            
+        
             inv_depth = 1/depth
             inverse_reconstructed_metric_depth = (inv_depth * scale) + shift
-            
+        
             fixed_depth = 1/inverse_reconstructed_metric_depth
-            #fixed_depth = depth / scale
-            
+            #fixed_depth = depth
+        
             scaled_depth = (((255**4)/MODEL_maxOUTPUT_depth)*fixed_depth.astype(np.float64)).astype(np.uint32)
 
             # View the depth as raw bytes: shape (H, W, 4)
