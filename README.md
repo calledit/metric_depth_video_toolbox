@@ -174,10 +174,12 @@ python 3d_view_depthfile.py --depth_video some_video_depth.mkv --color_video som
 
 #### convert_metric_depth_video_to_other_format.py
 Converts a RGB encoded depth video to other formats. Either 3d formats like .ply (point cloud files) or .obj (3d mesh) or to a simple greyscale video. The 8 bit greyscale format loses lots of details due to low depth resolution of only 8 bits. The 16bit format has more details but does not compress well and is not well supported.
+The tool can also use 2D tracking points in combination with camera transformations to do SLAM triangulation and output a "perfect" .ply that is not based on the estimated depth i a similar way to how colmap works, this can be usefull as reference or as "ground truth". Good tranformation data is required for this to work. Use the mega-sam tool to get accurate tranformations.
+
 ```
-usage: convert_metric_depth_video_to_other_format.py [-h] --depth_video DEPTH_VIDEO [--bit16] [--bit8] [--max_depth MAX_DEPTH] [--save_ply SAVE_PLY] [--save_obj SAVE_OBJ]
-                                              [--color_video COLOR_VIDEO] [--xfov XFOV] [--yfov YFOV] [--max_frames MAX_FRAMES] [--transformation_file TRANSFORMATION_FILE]
-                                              [--transformation_lock_frame TRANSFORMATION_LOCK_FRAME] [--remove_edges]
+usage: convert_metric_depth_video_to_other_format.py [-h] --depth_video DEPTH_VIDEO [--bit16] [--bit8] [--max_depth MAX_DEPTH] [--save_ply SAVE_PLY] [--save_obj SAVE_OBJ] [--color_video COLOR_VIDEO]
+                                                     [--xfov XFOV] [--yfov YFOV] [--min_frames MIN_FRAMES] [--max_frames MAX_FRAMES] [--transformation_file TRANSFORMATION_FILE]
+                                                     [--transformation_lock_frame TRANSFORMATION_LOCK_FRAME] [--remove_edges] [--track_file TRACK_FILE] [--strict_mask] [--mask_video MASK_VIDEO]
 
 Convert depth video other formats like .obj or .ply or greyscale video
 
@@ -195,6 +197,8 @@ options:
                         video file to use as color input
   --xfov XFOV           fov in deg in the x-direction, calculated from aspectratio and yfov in not given
   --yfov YFOV           fov in deg in the y-direction, calculated from aspectratio and xfov in not given
+  --min_frames MIN_FRAMES
+                        start convertion after nr of frames
   --max_frames MAX_FRAMES
                         quit after max_frames nr of frames
   --transformation_file TRANSFORMATION_FILE
@@ -202,7 +206,17 @@ options:
   --transformation_lock_frame TRANSFORMATION_LOCK_FRAME
                         the frame that the transformation will use as a base
   --remove_edges        Tries to remove edges that was not visible in image
+  --track_file TRACK_FILE
+                        file with 2d point tracking data
+  --strict_mask         Remove any points that has ever been masked out even in frames where they are not masked
+  --mask_video MASK_VIDEO
+                        black and white mask video for thigns that should not be tracked
+  
 python convert_metric_depth_video_to_other_format.py --depth_video some_video_depth.mkv --color_video some_video.mp4 --xfov 55 --save_ply ply_output_folder
+
+# Export the entire scene as a .ply files based on points in the tracking file and the transformations in the transformations file
+# this will also output a rescaled depth video that has been corrected to be more like the triangulated depth
+python convert_metric_depth_video_to_other_format.py --color_video dancing_crop.mp4 --depth_video dancing_crop.mp4_depth.mkv --transformation_file dancing_crop.mp4_depth.mkv_transformations.json --mask_video dancing_crop_mask.mp4 --track_file dancing_crop.mp4_tracking_120.json --yfov 31.2
 ```
 
 #### create_video_mask.sh
