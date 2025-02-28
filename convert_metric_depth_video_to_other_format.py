@@ -87,6 +87,68 @@ def find_nearby_points(points_3d, i, threshold=0.01, exclude_self=True):
     
     nearby_indices = np.where(mask)[0]
     return nearby_indices
+    
+class UnionFind:
+    def __init__(self, items):
+        # Initialize each item as its own parent.
+        self.parent = {item: item for item in items}
+
+    def find(self, x):
+        # Path compression.
+        if self.parent[x] != x:
+            self.parent[x] = self.find(self.parent[x])
+        return self.parent[x]
+
+    def union(self, a, b):
+        root_a = self.find(a)
+        root_b = self.find(b)
+        if root_a != root_b:
+            # Attach root_b to root_a.
+            self.parent[root_b] = root_a
+
+def merge_global_points(global_3d_points, remaped_points):
+    """
+    Merge points in global_3d_points based on the remapping dictionary.
+    This version uses union-find for faster merging.
+
+    Parameters:
+        global_3d_points (dict): Keys are point IDs and values are lists of 3 lists (e.g., x, y, z observations).
+        remaped_points (dict): Keys are global IDs mapping to lists of IDs that should be merged into them.
+
+    Returns:
+        None: global_3d_points is modified in-place.
+    """
+    # Initialize union-find with all keys in global_3d_points.
+    uf = UnionFind(global_3d_points.keys())
+
+    # Union the points according to remaped_points.
+    for global_id, pts in remaped_points.items():
+        if global_id not in uf.parent:
+            continue
+        for rem_global_id in pts:
+            if rem_global_id in uf.parent:
+                uf.union(global_id, rem_global_id)
+
+    # Group keys by their final representative (root).
+    groups = {}
+    for key in list(uf.parent.keys()):
+        root = uf.find(key)
+        groups.setdefault(root, []).append(key)
+
+    # Merge all points in each group into the representative (the union-find root)
+    for root, group_keys in groups.items():
+        if len(group_keys) <= 1:
+            continue  # nothing to merge
+        # Merge data from every key into root.
+        for key in group_keys:
+            if key == root:
+                continue
+            # Extend the lists from key into root.
+            global_3d_points[root][0].extend(global_3d_points[key][0])
+            global_3d_points[root][1].extend(global_3d_points[key][1])
+            global_3d_points[root][2].extend(global_3d_points[key][2])
+            # Remove the merged key.
+            del global_3d_points[key]
 
 
 if __name__ == '__main__':
@@ -343,14 +405,7 @@ if __name__ == '__main__':
     
     if global_3d_points is not None:
         
-        for global_id in remaped_points:
-            pts = remaped_points[global_id]
-            for rem_global_id in pts:
-                if rem_global_id in global_3d_points and global_id in global_3d_points:
-                    global_3d_points[global_id][0].extend(global_3d_points[rem_global_id][0])
-                    global_3d_points[global_id][1].extend(global_3d_points[rem_global_id][1])
-                    global_3d_points[global_id][2].extend(global_3d_points[rem_global_id][2])
-                    del global_3d_points[rem_global_id]
+        merge_global_points(global_3d_points, remaped_points)
         
         
         points = []
