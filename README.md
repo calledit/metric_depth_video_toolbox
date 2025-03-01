@@ -176,10 +176,13 @@ python 3d_view_depthfile.py --depth_video some_video_depth.mkv --color_video som
 Converts a RGB encoded depth video to other formats. Either 3d formats like .ply (point cloud files) or .obj (3d mesh) or to a simple greyscale video. The 8 bit greyscale format loses lots of details due to low depth resolution of only 8 bits. The 16bit format has more details but does not compress well and is not well supported.
 The tool can also use 2D tracking points in combination with camera transformations to do SLAM triangulation and output a "perfect" .ply that is not based on the estimated depth i a similar way to how colmap works, this can be usefull as reference or as "ground truth". Good tranformation data is required for this to work. Use the mega-sam tool to get accurate tranformations.
 
+Can be used export the camera transformation and triangulated points to .abc alembic format and .blend belnder for usage in other software using --save_alembic.
+
 ```
 usage: convert_metric_depth_video_to_other_format.py [-h] --depth_video DEPTH_VIDEO [--bit16] [--bit8] [--max_depth MAX_DEPTH] [--save_ply SAVE_PLY] [--save_obj SAVE_OBJ] [--color_video COLOR_VIDEO]
                                                      [--xfov XFOV] [--yfov YFOV] [--min_frames MIN_FRAMES] [--max_frames MAX_FRAMES] [--transformation_file TRANSFORMATION_FILE]
                                                      [--transformation_lock_frame TRANSFORMATION_LOCK_FRAME] [--remove_edges] [--track_file TRACK_FILE] [--strict_mask] [--mask_video MASK_VIDEO]
+                                                     [--show_scene_point_clouds] [--save_alembic] [--save_rescaled_depth]
 
 Convert depth video other formats like .obj or .ply or greyscale video
 
@@ -211,12 +214,17 @@ options:
   --strict_mask         Remove any points that has ever been masked out even in frames where they are not masked
   --mask_video MASK_VIDEO
                         black and white mask video for thigns that should not be tracked
+  --show_scene_point_clouds
+                        Opens window and shows the resulting pointclouds
+  --save_alembic        Save data to a alembic file
+  --save_rescaled_depth
+                        Saves a video with rescaled depth
   
 python convert_metric_depth_video_to_other_format.py --depth_video some_video_depth.mkv --color_video some_video.mp4 --xfov 55 --save_ply ply_output_folder
 
 # Export the entire scene as a .ply files based on points in the tracking file and the transformations in the transformations file
 # this will also output a rescaled depth video that has been corrected to be more like the triangulated depth
-python convert_metric_depth_video_to_other_format.py --color_video dancing_crop.mp4 --depth_video dancing_crop.mp4_depth.mkv --transformation_file dancing_crop.mp4_depth.mkv_transformations.json --mask_video dancing_crop_mask.mp4 --track_file dancing_crop.mp4_tracking_120.json --yfov 31.2
+python convert_metric_depth_video_to_other_format.py --color_video dancing_crop.mp4 --depth_video dancing_crop.mp4_depth.mkv --transformation_file dancing_crop.mp4_depth.mkv_transformations.json --mask_video dancing_crop_mask.mp4 --track_file dancing_crop.mp4_tracking_120.json --save_rescaled_depth --yfov 31.2
 ```
 
 #### create_video_mask.sh
