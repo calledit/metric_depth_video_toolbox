@@ -27,6 +27,7 @@ if __name__ == '__main__':
     parser.add_argument('--render', action='store_true', help='Render to video insted of GUI', required=False)
     parser.add_argument('--remove_edges', action='store_true', help='Tries to remove edges that was not visible in image(it is a bit slow)', required=False)
     parser.add_argument('--show_camera', action='store_true', help='Shows lines representing the camera frustrum', required=False)
+    parser.add_argument('--background_ply', type=str, help='PLY file that will be included in the scene', required=False)
     
     parser.add_argument('--compressed', action='store_true', help='Render the video in a compressed format. Reduces file size but also quality.', required=False)
     parser.add_argument('--draw_frame', default=-1, type=int, help='open gui with specific frame', required=False)
@@ -40,6 +41,7 @@ if __name__ == '__main__':
     parser.add_argument('--tx', default=-99.0, type=float, help='set poistion of camera target x cordinate in meters', required=False)
     parser.add_argument('--ty', default=-99.0, type=float, help='set poistion of camera target y cordinate in meters', required=False)
     parser.add_argument('--tz', default=-99.0, type=float, help='set poistion of camera target z cordinate in meters', required=False)
+    
     
     
     
@@ -74,6 +76,10 @@ if __name__ == '__main__':
             ref_frame_inv_trans = np.linalg.inv(ref_frame)
             for i, transformation in enumerate(transformations):
                 transformations[i] = transformation @ ref_frame_inv_trans
+    
+    background_obj = None
+    if args.background_ply is not None:
+        background_obj = o3d.io.read_point_cloud(args.background_ply)
         
     raw_video = cv2.VideoCapture(args.depth_video)
     frame_width, frame_height = int(raw_video.get(cv2.CAP_PROP_FRAME_WIDTH)), int(raw_video.get(cv2.CAP_PROP_FRAME_HEIGHT))
@@ -160,6 +166,8 @@ if __name__ == '__main__':
         if mesh is None:
             if not args.render and args.draw_frame == -1:
                 vis.add_geometry(mesh_ret)
+            if background_obj is not None:
+                vis.add_geometry(background_obj)
         mesh = mesh_ret
         
         
@@ -169,12 +177,12 @@ if __name__ == '__main__':
         to_draw = [mesh]
         if cameraLines is not None:
             to_draw.append(cameraLines)
+            
+        if background_obj is not None:
+            to_draw.append(background_obj)
+            
         
         if args.draw_frame == frame_n:
-            
-            
-            
-            
             depth_map_tools.draw(to_draw)
             exit(0)
         
