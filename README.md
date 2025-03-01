@@ -375,7 +375,7 @@ pip3.11 install open3d numpy opencv-python
 #if you want to use madpose for 3d camera tracking
 ./install_mvda.sh -madpose
 
-#On Windows (Not tested or "officially" supported, but anecdotally working)
+#On Windows (Not tested or "officially" supported, but anecdotally working).
 WindowsInstall.bat
 See https://github.com/calledit/metric_depth_video_toolbox/issues/1#issuecomment-2632040738
 
@@ -383,12 +383,12 @@ See https://github.com/calledit/metric_depth_video_toolbox/issues/1#issuecomment
 ```
 
 ### Requirements
-The ML models (excluding unidepth) have been tested on machines that support Cuda 12.4 on [vast.ai](https://cloud.vast.ai/?ref_id=148636) "template PyTorch (cuDNN Devel)"
+The tools that reuire ML models have been tested on machines that support Cuda 12.4 and Torch 2.5.1 on [vast.ai](https://cloud.vast.ai/?ref_id=148636) using "template PyTorch (cuDNN Devel)"
 
 ### Limitations
-Depth-Anything-V2 does not take any FOV input and it does not give any FOV outputs. I recommend [PerspectiveFields](https://huggingface.co/spaces/jinlinyi/PerspectiveFields) to estimate the original FOV if you want to project the output in to 3D. But since Depth-Anything-V2 does not take FOV as input the results may look distorted, to thin, to wide or to narrow as the model may have estimated a different FOV internally and used that for its depth estimations. This is especially problematic in dolly zoom shots, where the FOV is very hard to get right.
-
-Longer shots with loots of camera movement may be problematic, video_metric_convert.py uses metric conversion constants based on rolling averages to to try to mitigate this but it can still be an issue.
+Video-Depth-Anything does not take FOV as input and it does not give FOV as output. It is built to try to align all videos to the affine transfomed depth of the first frame.
+To estimate camera FOV you can either guess or use [PerspectiveFields](https://huggingface.co/spaces/jinlinyi/PerspectiveFields), or use moge_video.py, or use unidepth_video.py. If the camera has moved durring the video sam_track_video.py can usually recover the real FOV using SLAM if you simply provide give it with resonable guess.
+Since Video-Depth-Anything does not take FOV in to acount it may drift more than acceptable if the camera moves to much from the first frame if this becomes aproblem. You might be able to cut the video in to shorter sections for better intial results.
 
 
 ### Camera tracking
@@ -398,3 +398,9 @@ align_3d_points.py is a tool to extract camera movment from the video. Metric de
 3. Iterative camera movmenet untill best fitt. Offers better tracking than madpose and is very fast.
 4. [Mega-sam](https://github.com/mega-sam/mega-sam) Mega sam is a project based on Droid-Slam that ofers great tracking for ML generated depth maps. By far the most accurate alternative. Capable of almost perfect tracking.
 
+
+### Work or contracting
+Post in issues with contact details.
+
+### Contributing
+Is appreciated. Even for simple things like spelling.
