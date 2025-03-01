@@ -493,12 +493,21 @@ if __name__ == '__main__':
     parser.add_argument('--mask_video', type=str, help='black and white mask video for thigns that should not be tracked', required=False)
     
     parser.add_argument('--show_scene_point_clouds', action='store_true', help='Opens window and shows the resulting pointclouds', required=False)
+    parser.add_argument('--show_both_point_clouds', action='store_true', help='If the viewer should show both pointclouds overlapping', required=False)
+    
     
     parser.add_argument('--save_alembic', action='store_true', help='Save data to a alembic file', required=False)
+    parser.add_argument('--use_triangulated_points', action='store_true', help='If the triangulated points should be used', required=False)
+    
     parser.add_argument('--save_rescaled_depth', action='store_true', help='Saves a video with rescaled depth', required=False)
+    parser.add_argument('--global_align', action='store_true', help='Aligns the depth video to the triangulated depth', required=False)
+    
     
     
     args = parser.parse_args()
+    
+    if args.global_align:
+        args.use_triangulated_points = True
     
    
     MODEL_maxOUTPUT_depth = args.max_depth
@@ -590,7 +599,8 @@ if __name__ == '__main__':
         global_3d_points = {}
         saved_depth_maps = []
         output_file = args.depth_video + "_rescaled.mkv"
-        out = cv2.VideoWriter(output_file, cv2.VideoWriter_fourcc(*"FFV1"), frame_rate, (frame_width, frame_height))
+        if args.save_rescaled_depth:
+            out = cv2.VideoWriter(output_file, cv2.VideoWriter_fourcc(*"FFV1"), frame_rate, (frame_width, frame_height))
     
     remaped_points = {}
     frame_n = 0
@@ -692,7 +702,9 @@ if __name__ == '__main__':
                     for i, global_id in enumerate(point_ids_in_this_frame):
                         if global_id not in global_3d_points:
                             global_3d_points[global_id] = [[],[],[],[],[]]
-                        nearby_points = find_nearby_points(points_3d_rot, i)
+                            
+                        #Disable Temporarily
+                        nearby_points = find_nearby_points(points_3d_rot, i, 0.005)
                         for pt in nearby_points:
                             if global_id not in remaped_points:
                                 remaped_points[global_id] = []
@@ -758,6 +770,7 @@ if __name__ == '__main__':
         messured_points_3d = {}
         dist_m_2_a = {}
         avg_mon_points_3d = {}
+        raw_points_3d = {}
         #Find intersecting rays from the camera and use that to determine distance and make a point cloud
         #Also take averages of the depth from the depth map to make a point cloud
         for global_id in global_3d_points:
@@ -767,9 +780,11 @@ if __name__ == '__main__':
                 line_directions = np.array(global_3d_points[global_id][1])
                 #print("global_id", global_id, "poses:", com_poses, "dirs:", line_directions)
                 #exit(0)
-                intersection_point = best_intersection_point_vectorized_weighted(com_poses, line_directions)
-                if intersection_point is None:
-                    continue
+                intersection_point = np.array([0.0,0.0,0.0])
+                if args.use_triangulated_points:
+                    intersection_point = best_intersection_point_vectorized_weighted(com_poses, line_directions)
+                    if intersection_point is None:
+                        continue
                 
                 mon_dep = np.mean(global_3d_points[global_id][4], axis=0)
             
@@ -777,30 +792,45 @@ if __name__ == '__main__':
                 points.append(mon_dep)
                 points_i.append(intersection_point)
                 
-                for frame_n in global_3d_points[global_id][3]:
+                for k, frame_n in enumerate(global_3d_points[global_id][3]):
                     if frame_n not in messured_points:
                         messured_points[frame_n] = []
                         messured_points_3d[frame_n] = []
                         avg_mon_points_3d[frame_n] = []
                         dist_m_2_a[frame_n] = []
+                        raw_points_3d[frame_n] = []
                     messured_points[frame_n].append(global_id)
                     messured_points_3d[frame_n].append(intersection_point)
                     avg_mon_points_3d[frame_n].append(mon_dep)
                     dist_m_2_a[frame_n].append(np.linalg.norm(mon_dep-intersection_point))
+                    raw_points_3d[frame_n].append(global_3d_points[global_id][4][k])
                 
                 rgb = np.array(global_3d_points[global_id][2])
                 colors.append(np.mean(rgb, axis=0))
         
-        alembic_point_cloud = points_i
+        
+        if args.use_triangulated_points:
+            alembic_point_cloud = points_i
+        else:
+            alembic_point_cloud = points
         alembic_point_cloud_colors = colors
         
+        print("Creating and saving pcd files")
         pcd = depth_map_tools.pts_2_pcd(np.array(points), colors)
-        pcd_i = depth_map_tools.pts_2_pcd(np.array(points_i), colors)
-        o3d.io.write_point_cloud(args.depth_video + "_triangulated.ply", pcd_i)
         o3d.io.write_point_cloud(args.depth_video + "_avgmonodepth.ply", pcd)
-        if args.show_scene_point_clouds:
-            depth_map_tools.draw([pcd, pcd_i])
+        pcd_i = None
+        if args.use_triangulated_points:
+            pcd_i = depth_map_tools.pts_2_pcd(np.array(points_i), colors)
+            o3d.io.write_point_cloud(args.depth_video + "_triangulated.ply", pcd_i)
+
         
+        
+        if args.show_scene_point_clouds:
+            print("Showing pointclouds")
+            if args.show_both_point_clouds and args.use_triangulated_points:
+                depth_map_tools.draw([pcd, pcd_i])
+            else:
+                depth_map_tools.draw([depth_map_tools.pts_2_pcd(np.array(alembic_point_cloud), colors)])
         
         target = []
         source = []
@@ -817,49 +847,71 @@ if __name__ == '__main__':
                 global_points_3d_in_frame = []
                 if frame_n in messured_points:
                     global_points_in_frame = messured_points[frame_n]
-                    global_points_3d_in_frame = np.array(messured_points_3d[frame_n])
+                    mes_ref_points_3d = np.array(messured_points_3d[frame_n])
                     points_3d_avg = np.array(avg_mon_points_3d[frame_n])
-                
-                    #We filter away ponts that are to far from eachother
-                    dists = np.array(dist_m_2_a[frame_n])
-                    m_d = np.mean(dists)
-                    mask = dists < m_d
+                    frame_points = np.array(raw_points_3d[frame_n])
                 
                 if len(global_points_in_frame) == 0:
                     continue
         
                 transform_from_zero = np.linalg.inv(np.array(transformations[frame_n]))
+                
+                
+                # There are multiple ways of scaling here.
+                # One is to scale the average points to the messured points (over all frames) this
+                # will give you a global scaling factor that tries to globally align the video to the messured values
+                # Another is to scale each frame indevidually to the average points. This should give better internal consistency within the video
         
-                points_3d = depth_map_tools.transform_points(points_3d_avg[mask], transform_from_zero)
-                ref_points_3d = depth_map_tools.transform_points(global_points_3d_in_frame[mask], transform_from_zero)
+                points_3d = depth_map_tools.transform_points(frame_points, transform_from_zero)
+                ref_points_3d = depth_map_tools.transform_points(points_3d_avg, transform_from_zero)
+                
+                
+                scale = np.mean(ref_points_3d[:,2]/points_3d[:, 2])
+                
+                # apply self alignment
+                saved_depth_maps[frame_n] = depth*scale
+                #points_3d[:, 2] *= scale
         
-        
-                scale, shift = estimate_scale_shift(points_3d[:, 2], ref_points_3d[:,2])
+                
+                if args.global_align:
+                    
+                    points_3d = ref_points_3d
+                    ref_points_3d = depth_map_tools.transform_points(mes_ref_points_3d, transform_from_zero)
+                    
+                    # filter away ponts that are to far from eachother, can good for global alignment in certain cases like
+                    # when the triangulated truth is very difrent from the ML model output. Adding more tracking points is often
+                    # a better alternative than doing this filtering
+                    #dists = np.array(dist_m_2_a[frame_n])
+                    #m_d = np.mean(dists)
+                    #mask = dists < m_d
+                    
+                    #Global need this since we need to account for shift
+                    scale, shift = estimate_scale_shift(points_3d[:, 2], ref_points_3d[:,2])
             
-                #we filter away extreme values. Dont know exatly why those values apear anyway filtering gives better result
-                if abs(shift) > 1 or abs(scale) > 3:
-                    continue
+                    #we filter away extreme values. Dont know exatly why those values apear anyway filtering gives better result
+                    if abs(shift) > 1 or abs(scale) > 3:
+                        print("ignoring bad align: frame shift:", shift, "scale:", scale)
+                        continue
             
-                target.append(ref_points_3d[:,2])
-                source.append(points_3d[:, 2])
-                print("frame scale:", scale, "shift:", shift, "len", len(points_3d_avg[mask]))
+                    target.append(ref_points_3d[:,2])
+                    source.append(points_3d[:, 2])
+                    
         
         
             scale, shift = estimate_scale_shift(np.concatenate(source), np.concatenate(target))
-            print("full scale:", scale, "shift:", shift)
-    
-    
+            print("global alignment scale:", scale, "shift:", shift)
+            target = []
+            source = []
     
             for frame_n, depth in enumerate(saved_depth_maps):
         
-                target = []
-                source = []
-        
-                inv_depth = 1/depth
-                inverse_reconstructed_metric_depth = (inv_depth * scale) + shift
-        
-                fixed_depth = 1/inverse_reconstructed_metric_depth
-                #fixed_depth = depth
+   
+                if args.global_align:
+                    inv_depth = 1/depth
+                    inverse_reconstructed_metric_depth = (inv_depth * scale) + shift
+                    fixed_depth = 1/inverse_reconstructed_metric_depth
+                else:
+                    fixed_depth = depth
         
                 scaled_depth = (((255**4)/MODEL_maxOUTPUT_depth)*fixed_depth.astype(np.float64)).astype(np.uint32)
 
@@ -879,7 +931,7 @@ if __name__ == '__main__':
     if out is not None:
         out.release()
         
-    if args.save_alembic is not None:
+    if args.save_alembic:
         try:
             import bpy
             from fractions import Fraction
