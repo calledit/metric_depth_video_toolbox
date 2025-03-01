@@ -5,6 +5,7 @@ import os
 import sys
 import depth_map_tools
 import json
+import copy
 import open3d as o3d
 
 np.set_printoptions(suppress=True, precision=4)
@@ -198,6 +199,239 @@ def merge_global_points(global_3d_points, remaped_points):
             global_3d_points[root][2].extend(global_3d_points[key][2])
             # Remove the merged key.
             del global_3d_points[key]
+            
+def add_open3d_mesh(o3d_mesh, object_name="ImportedMesh"):
+    """
+    Converts an Open3D TriangleMesh to a Blender mesh object and adds it to the current collection.
+    """
+    vertices = np.asarray(o3d_mesh.vertices)
+    faces = np.asarray(o3d_mesh.triangles)
+    
+    mesh_data = bpy.data.meshes.new(object_name + "Mesh")
+    obj = bpy.data.objects.new(object_name, mesh_data)
+    bpy.context.collection.objects.link(obj)
+    
+    vertices_list = [tuple(v) for v in vertices]
+    faces_list = [tuple(face) for face in faces]
+    
+    mesh_data.from_pydata(vertices_list, [], faces_list)
+    mesh_data.update()
+    
+    if o3d_mesh.has_vertex_colors():
+        vertex_colors = np.asarray(o3d_mesh.vertex_colors)
+        if len(vertex_colors) != len(vertices):
+            raise ValueError("Number of vertex colors must match number of vertices.")
+        color_attr = mesh_data.color_attributes.new(name="Col", domain='POINT', type='FLOAT_COLOR')
+        for i, col in enumerate(vertex_colors):
+            if len(col) == 3:
+                color_attr.data[i].color = (col[0], col[1], col[2], 1.0)
+            else:
+                color_attr.data[i].color = tuple(col)
+    return obj
+
+def add_point_cloud(point_cloud, point_colors=None, object_name="PointCloud"):
+    """
+    Creates a Blender mesh object from a point cloud (Nx3 numpy array) with vertices only.
+    Optionally assigns per-vertex colors.
+    """
+    mesh = bpy.data.meshes.new(object_name + "Mesh")
+    obj = bpy.data.objects.new(object_name, mesh)
+    bpy.context.collection.objects.link(obj)
+    
+    vertices = [tuple(pt) for pt in point_cloud]
+    mesh.from_pydata(vertices, [], [])
+    mesh.update()
+    
+    if point_colors is not None:
+        if len(point_colors) != len(vertices):
+            raise ValueError("Number of point colors must match number of vertices.")
+        color_attr = mesh.color_attributes.new(name="Col", domain='POINT', type='FLOAT_COLOR')
+        for i, col in enumerate(point_colors):
+            if len(col) == 3:
+                color_attr.data[i].color = (col[0], col[1], col[2], 1.0)
+            else:
+                color_attr.data[i].color = tuple(col)
+    return obj
+
+def assign_vertex_color_material(obj, vcol_name="Col"):
+    """
+    Creates and assigns a simple material that uses the given vertex color attribute.
+    """
+    mat = bpy.data.materials.new(name="PointCloudMaterial")
+    mat.use_nodes = True
+    nodes = mat.node_tree.nodes
+    links = mat.node_tree.links
+
+    # Clear existing nodes.
+    for node in nodes:
+        nodes.remove(node)
+
+    output_node = nodes.new(type="ShaderNodeOutputMaterial")
+    diffuse_node = nodes.new(type="ShaderNodeBsdfDiffuse")
+    vcol_node = nodes.new(type="ShaderNodeVertexColor")
+    vcol_node.layer_name = vcol_name
+
+    links.new(vcol_node.outputs["Color"], diffuse_node.inputs["Color"])
+    links.new(diffuse_node.outputs["BSDF"], output_node.inputs["Surface"])
+
+    if len(obj.data.materials) == 0:
+        obj.data.materials.append(mat)
+    else:
+        obj.data.materials[0] = mat
+        
+
+
+def create_camera_alembic(transforms, output_file, fps=24.0, camera_name="TrackedCamera",
+                           intrinsic_matrix=None, resolution=(1920, 1080),
+                           point_cloud_points=None, point_cloud_colors=None,
+                           point_cloud_name="PointCloud",
+                           open3d_mesh=None, open3d_mesh_name="ImportedMesh",
+                           blend_filepath=None):
+    """
+    Creates an animated camera in Blender from a list of 4x4 transformation matrices,
+    optionally adds a colored point cloud and an Open3D mesh, then exports the scene
+    as an Alembic (.abc) file. Optionally, the Blender file can also be saved.
+    
+    Parameters:
+        transforms (list or np.ndarray):
+            A list of 4x4 NumPy arrays representing world transforms for each frame.
+        output_file (str):
+            The file path for the output Alembic file.
+        fps (float):
+            Desired frames per second (e.g., 29.97, 24, 30).
+        camera_name (str):
+            Name for the created camera object.
+        intrinsic_matrix (np.ndarray):
+            A 3x3 camera intrinsic matrix:
+                [ fx   0  cx ]
+                [  0  fy  cy ]
+                [  0   0   1 ]
+            If provided, it is used to set the camera’s focal length and sensor size.
+        resolution (tuple):
+            The image resolution as (width, height) in pixels.
+        point_cloud_points (np.ndarray, optional):
+            An Nx3 array of 3D points for a point cloud.
+        point_cloud_colors (np.ndarray, optional):
+            An Nx3 or Nx4 array of per-vertex colors (RGB or RGBA, values 0-1).
+        point_cloud_name (str):
+            Name for the point cloud object.
+        open3d_mesh (open3d.geometry.TriangleMesh, optional):
+            An Open3D mesh to import into the Blender scene.
+        open3d_mesh_name (str):
+            Name for the imported Open3D mesh object.
+        blend_filepath (str, optional):
+            If provided, the Blender file (.blend) will be saved to this path.
+    """
+    # Create a new camera.
+    bpy.ops.object.camera_add()
+    camera = bpy.context.active_object
+    camera.name = camera_name
+    cam_data = camera.data
+
+    # Set camera intrinsics if provided.
+    if intrinsic_matrix is not None:
+        fx = intrinsic_matrix[0, 0]
+        fy = intrinsic_matrix[1, 1]
+        cx = intrinsic_matrix[0, 2]
+        cy = intrinsic_matrix[1, 2]
+        
+        sensor_width = 36.0  
+        image_width, image_height = resolution
+        computed_lens = fx * (sensor_width / image_width)
+        sensor_height = sensor_width * image_height / image_width
+        
+        cam_data.lens = computed_lens
+        cam_data.sensor_width = sensor_width
+        cam_data.sensor_height = sensor_height
+        
+        print(f"Using intrinsic matrix: fx={fx}, fy={fy}, cx={cx}, cy={cy}")
+        print(f"Computed lens: {computed_lens} mm, sensor size: {sensor_width}x{sensor_height} mm")
+    else:
+        cam_data.lens = 35.0
+        cam_data.sensor_width = 36.0
+        cam_data.sensor_height = 24.0
+
+    # Create animation data for the camera.
+    if camera.animation_data is None:
+        camera.animation_data_create()
+    camera.animation_data.action = bpy.data.actions.new(name=f"{camera_name}_Action")
+    
+    fps_fraction = Fraction(fps).limit_denominator(1001)
+    bpy.context.scene.render.fps = fps_fraction.numerator
+    bpy.context.scene.render.fps_base = fps_fraction.denominator
+    
+    num_frames = len(transforms)
+    bpy.context.scene.frame_start = 1
+    bpy.context.scene.frame_end = num_frames
+    
+    # Animate the camera: apply each transformation as a keyframe.
+    for frame, mat in enumerate(transforms, start=1):
+        bpy.context.scene.frame_set(frame)
+        # Convert the transformation matrix and apply correction.
+        bl_matrix = mathutils.Matrix(mat.tolist())
+        # Correct the orientation: rotate 180° about the Y axis.
+        correction = mathutils.Matrix.Rotation(np.pi, 4, 'X')
+        bl_matrix = bl_matrix @ correction
+        camera.matrix_world = bl_matrix
+        camera.keyframe_insert(data_path="location", frame=frame)
+        camera.keyframe_insert(data_path="rotation_euler", frame=frame)
+        camera.keyframe_insert(data_path="scale", frame=frame)
+    
+    # Optionally, add a point cloud.
+    point_cloud_obj = None
+    if point_cloud_points is not None:
+        point_cloud_obj = add_point_cloud(point_cloud_points, point_colors=point_cloud_colors, object_name=point_cloud_name)
+        assign_vertex_color_material(point_cloud_obj, vcol_name="Col")
+    
+    # Optionally, add an Open3D mesh.
+    open3d_mesh_obj = None
+    if open3d_mesh is not None:
+        open3d_mesh_obj = add_open3d_mesh(open3d_mesh, object_name=open3d_mesh_name)
+        assign_vertex_color_material(open3d_mesh_obj, vcol_name="Col")
+        
+        
+    # --- Global Coordinate Conversion ---
+    # Create an empty object that applies the coordinate conversion from external (Y-up)
+    # to Blender (Z-up). For example, if your external system has the floor in the Z-X plane (Y up),
+    # then swapping Y and Z will convert it to Blender's XY floor.
+    # The conversion matrix below swaps Y and Z:
+    conversion_matrix = mathutils.Matrix((
+        (1, 0, 0, 0),
+        (0, 0, 1, 0),
+        (0, -1, 0, 0),
+        (0, 0, 0, 1)
+    ))
+    bpy.ops.object.empty_add(type='PLAIN_AXES')
+    global_empty = bpy.context.active_object
+    global_empty.name = "GlobalCorrection"
+    global_empty.matrix_world = conversion_matrix
+
+    # Parent your scene objects to the global empty.
+    for obj in (camera, point_cloud_obj, open3d_mesh_obj):
+        if obj is not None:
+            obj.parent = global_empty
+            
+            
+    bpy.ops.wm.save_as_mainfile(filepath=output_file+".blend")
+
+    # Select the global empty and all its children.
+    bpy.ops.object.select_all(action='DESELECT')
+    global_empty.select_set(True)
+    for child in global_empty.children_recursive:
+        child.select_set(True)
+    bpy.context.view_layer.objects.active = global_empty
+
+    # Export the global empty (with children) to Alembic.
+    bpy.ops.wm.alembic_export(
+        filepath=output_file,
+        selected=True,
+        start=bpy.context.scene.frame_start,
+        end=bpy.context.scene.frame_end,
+        vcolors=True,
+        flatten=False  # Do not flatten to preserve hierarchy
+    )
+    print("Alembic export complete:", output_file)
+
 
 def estimate_scale_shift(depth, depth_target):
     """
@@ -257,6 +491,11 @@ if __name__ == '__main__':
     parser.add_argument('--track_file', type=str, help='file with 2d point tracking data', required=False)
     parser.add_argument('--strict_mask', default=False, action='store_true', help='Remove any points that has ever been masked out even in frames where they are not masked', required=False)
     parser.add_argument('--mask_video', type=str, help='black and white mask video for thigns that should not be tracked', required=False)
+    
+    parser.add_argument('--show_scene_point_clouds', action='store_true', help='Opens window and shows the resulting pointclouds', required=False)
+    
+    parser.add_argument('--save_alembic', action='store_true', help='Save data to a alembic file', required=False)
+    parser.add_argument('--save_rescaled_depth', action='store_true', help='Saves a video with rescaled depth', required=False)
     
     
     args = parser.parse_args()
@@ -343,6 +582,8 @@ if __name__ == '__main__':
             for i, transformation in enumerate(transformations):
                 transformations[i] = transformation @ ref_frame_inv_trans
 
+    
+    alembic_mesh = None
     saved_depth_maps = None
     #Lets do 3d reconstruction
     if args.transformation_file is not None and args.track_file is not None and cam_matrix is not None:
@@ -430,6 +671,9 @@ if __name__ == '__main__':
             
             if transformations is not None:
                 mesh_ret.transform(transform_to_zero)
+                
+                if alembic_mesh is None:
+                    alembic_mesh = copy.deepcopy(mesh_ret)
             
                 #frames is a bad name but it a var that holds all frames with 2d tracking points
                 if frames is not None:
@@ -498,6 +742,9 @@ if __name__ == '__main__':
             
         frame_n += 1
     
+    alembic_point_cloud = None
+    alembic_point_cloud_colors = None
+    
     if global_3d_points is not None:
         
         #Merge points that overlap at some point
@@ -544,85 +791,101 @@ if __name__ == '__main__':
                 rgb = np.array(global_3d_points[global_id][2])
                 colors.append(np.mean(rgb, axis=0))
         
+        alembic_point_cloud = points_i
+        alembic_point_cloud_colors = colors
         
         pcd = depth_map_tools.pts_2_pcd(np.array(points), colors)
         pcd_i = depth_map_tools.pts_2_pcd(np.array(points_i), colors)
         o3d.io.write_point_cloud(args.depth_video + "_triangulated.ply", pcd_i)
         o3d.io.write_point_cloud(args.depth_video + "_avgmonodepth.ply", pcd)
-        depth_map_tools.draw([pcd, pcd_i])
+        if args.show_scene_point_clouds:
+            depth_map_tools.draw([pcd, pcd_i])
         
         
         target = []
         source = []
         
-        # this sort of works but you get better shift and scale values by selecting values yourself (but that is manual work)
-        # i have observed that you get better output if you run this iteravly using the rescaled output as input 2-3 times.
-        # dont know why or how. But it is an observation.
-        print("rescaling depthmap based on triangulated depth (run in iterations for better result)")
-        for frame_n, depth in enumerate(saved_depth_maps):
+        if args.save_rescaled_depth:
+            # this sort of works but you get better shift and scale values by selecting values yourself (but that is manual work)
+            # i have observed that you get better output if you run this iteravly using the rescaled output as input 2-3 times.
+            # dont know why or how. But it is an observation.
+            print("rescaling depthmap based on triangulated depth (run in iterations for better result)")
+            for frame_n, depth in enumerate(saved_depth_maps):
         
         
-            global_points_in_frame = []
-            global_points_3d_in_frame = []
-            if frame_n in messured_points:
-                global_points_in_frame = messured_points[frame_n]
-                global_points_3d_in_frame = np.array(messured_points_3d[frame_n])
-                points_3d_avg = np.array(avg_mon_points_3d[frame_n])
+                global_points_in_frame = []
+                global_points_3d_in_frame = []
+                if frame_n in messured_points:
+                    global_points_in_frame = messured_points[frame_n]
+                    global_points_3d_in_frame = np.array(messured_points_3d[frame_n])
+                    points_3d_avg = np.array(avg_mon_points_3d[frame_n])
                 
-                #We filter away ponts that are to far from eachother
-                dists = np.array(dist_m_2_a[frame_n])
-                m_d = np.mean(dists)
-                mask = dists < m_d
+                    #We filter away ponts that are to far from eachother
+                    dists = np.array(dist_m_2_a[frame_n])
+                    m_d = np.mean(dists)
+                    mask = dists < m_d
                 
-            if len(global_points_in_frame) == 0:
-                continue
+                if len(global_points_in_frame) == 0:
+                    continue
         
-            transform_from_zero = np.linalg.inv(np.array(transformations[frame_n]))
+                transform_from_zero = np.linalg.inv(np.array(transformations[frame_n]))
         
-            points_3d = depth_map_tools.transform_points(points_3d_avg[mask], transform_from_zero)
-            ref_points_3d = depth_map_tools.transform_points(global_points_3d_in_frame[mask], transform_from_zero)
+                points_3d = depth_map_tools.transform_points(points_3d_avg[mask], transform_from_zero)
+                ref_points_3d = depth_map_tools.transform_points(global_points_3d_in_frame[mask], transform_from_zero)
         
         
-            scale, shift = estimate_scale_shift(points_3d[:, 2], ref_points_3d[:,2])
+                scale, shift = estimate_scale_shift(points_3d[:, 2], ref_points_3d[:,2])
             
-            #we filter away extreme values. Dont know exatly why those values apear anyway filtering gives better result
-            if abs(shift) > 1 or abs(scale) > 3:
-                continue
+                #we filter away extreme values. Dont know exatly why those values apear anyway filtering gives better result
+                if abs(shift) > 1 or abs(scale) > 3:
+                    continue
             
-            target.append(ref_points_3d[:,2])
-            source.append(points_3d[:, 2])
-            print("frame scale:", scale, "shift:", shift, "len", len(points_3d_avg[mask]))
+                target.append(ref_points_3d[:,2])
+                source.append(points_3d[:, 2])
+                print("frame scale:", scale, "shift:", shift, "len", len(points_3d_avg[mask]))
         
         
-        scale, shift = estimate_scale_shift(np.concatenate(source), np.concatenate(target))
-        print("full scale:", scale, "shift:", shift)
+            scale, shift = estimate_scale_shift(np.concatenate(source), np.concatenate(target))
+            print("full scale:", scale, "shift:", shift)
     
     
     
-        for frame_n, depth in enumerate(saved_depth_maps):
+            for frame_n, depth in enumerate(saved_depth_maps):
         
-            target = []
-            source = []
+                target = []
+                source = []
         
-            inv_depth = 1/depth
-            inverse_reconstructed_metric_depth = (inv_depth * scale) + shift
+                inv_depth = 1/depth
+                inverse_reconstructed_metric_depth = (inv_depth * scale) + shift
         
-            fixed_depth = 1/inverse_reconstructed_metric_depth
-            #fixed_depth = depth
+                fixed_depth = 1/inverse_reconstructed_metric_depth
+                #fixed_depth = depth
         
-            scaled_depth = (((255**4)/MODEL_maxOUTPUT_depth)*fixed_depth.astype(np.float64)).astype(np.uint32)
+                scaled_depth = (((255**4)/MODEL_maxOUTPUT_depth)*fixed_depth.astype(np.float64)).astype(np.uint32)
 
-            # View the depth as raw bytes: shape (H, W, 4)
-            depth_bytes = scaled_depth.view(np.uint8).reshape(frame_height, frame_width, 4)
+                # View the depth as raw bytes: shape (H, W, 4)
+                depth_bytes = scaled_depth.view(np.uint8).reshape(frame_height, frame_width, 4)
 
 
-            R = (depth_bytes[:, :, 3]) # Most significant bits in R and G channel (duplicated to reduce compression artifacts)
-            G = (depth_bytes[:, :, 3])
-            B = (depth_bytes[:, :, 2]) # Least significant bit in blue channel
-            bgr24bit = np.dstack((B, G, R))
+                R = (depth_bytes[:, :, 3]) # Most significant bits in R and G channel (duplicated to reduce compression artifacts)
+                G = (depth_bytes[:, :, 3])
+                B = (depth_bytes[:, :, 2]) # Least significant bit in blue channel
+                bgr24bit = np.dstack((B, G, R))
 
-            out.write(bgr24bit)
+                out.write(bgr24bit)
+    
         
     raw_video.release()
     if out is not None:
         out.release()
+        
+    if args.save_alembic is not None:
+        try:
+            import bpy
+            from fractions import Fraction
+            import mathutils
+            create_camera_alembic(np.array(transformations), args.depth_video + "_alembic.abc", fps=frame_rate,
+            intrinsic_matrix=cam_matrix, resolution=(frame_width, frame_height), point_cloud_points=alembic_point_cloud,
+            point_cloud_colors=alembic_point_cloud_colors, open3d_mesh=alembic_mesh)
+        except ImportError:
+            print("Error: 'bpy' module is not installed and is required to export to alembic. Install with: pip install bpy")
