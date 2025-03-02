@@ -58,7 +58,7 @@ Visualised here as tiny dots in the images:
 <img width="926" alt="tracking_on_video" src="https://github.com/user-attachments/assets/d3f66daf-25ab-4f05-8067-ffbe6822a595" />
 
 ## Step 4
-Generate camera transformations from the depth and the source video. We make a guess of 30-50 deg and chose 40 deg. Later analysis showed that the real FOV is something like 42 deg. See [RECOVER_FOV.md] for more info on recovering the FOV of a video.
+Generate camera transformations from the depth and the source video. We make a guess of 30-50 deg and chose 40 deg. Later analysis showed that the real FOV is something like 42 deg. See [RECOVER_FOV.md](RECOVER_FOV.md) for more info on recovering the FOV of a video.
 
 ```
 ./install_mvdtoolbox.sh -megasam #takes a long time to install
