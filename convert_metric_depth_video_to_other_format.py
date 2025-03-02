@@ -628,7 +628,9 @@ if __name__ == '__main__':
         if args.min_frames >= frame_n and args.min_frames != -1:
             frame_n += 1
             continue
-            
+        
+        frames[frame_n] = np.array(frames[frame_n])
+        
         depth = np.zeros((frame_height, frame_width), dtype=np.uint32)
         
         depth_unit = depth.view(np.uint8).reshape((frame_height, frame_width, 4))
@@ -897,9 +899,9 @@ if __name__ == '__main__':
                     source.append(points_3d[:, 2])
                     
         
-        
-            scale, shift = estimate_scale_shift(np.concatenate(source), np.concatenate(target))
-            print("global alignment scale:", scale, "shift:", shift)
+            if args.global_align:
+                scale, shift = estimate_scale_shift(np.concatenate(source), np.concatenate(target))
+                print("global alignment scale:", scale, "shift:", shift)
             target = []
             source = []
     
