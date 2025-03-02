@@ -5,6 +5,7 @@ import json
 import argparse
 import cv2
 import gc
+import random
 
 
 DEVICE = 'cuda'
@@ -83,7 +84,7 @@ def mask_from_orb_features(image, mask=None):
 
     return keypoint_mask
 
-def generate_square_spiral_grid(width, height, grid_edge, width_step, height_step, iteration, nr_iterations):
+def generate_grid(width, height, grid_edge, width_step, height_step, iteration, nr_iterations):
     """
     Generate a grid of points with a square spiral offset that uses separate maximum offsets for x and y.
 
@@ -109,45 +110,25 @@ def generate_square_spiral_grid(width, height, grid_edge, width_step, height_ste
     )
 
     # Define maximum offsets for x and y.
-    max_offset_x = width_step / 2 - 1
-    max_offset_y = height_step / 2 - 1
+    max_offset_x = width_step / 2
+    max_offset_y = height_step / 2
 
     # Compute fraction f that scales from 0 (iteration 0) to 1 (final iteration)
-    if nr_iterations <= 1:
-        f = 0.0
-    else:
-        f = iteration / (nr_iterations - 1)
+    f = iteration / (nr_iterations - 1)
+    
+    random.seed(nr_iterations^iteration)
+    
+    random_x = (random.random()*2) - 1
+    random_y = (random.random()*2) - 1
+    
+    #Zero offset on first frame
+    if iteration == 0:
+        random_x = 0
+        random_y = 0
 
     # Current amplitude for each axis.
-    current_amplitude_x = f * max_offset_x
-    current_amplitude_y = f * max_offset_y
-
-    # Map f to a parameter t that runs from 0 to 4 (one for each side of the square)
-    t = f * 4
-    side = int(t)
-    local_t = t - side  # position along the current side (0 to 1)
-
-    # Compute offsets based on the current side of the square spiral:
-    if side == 0:
-        # Moving vertically down while x is fixed at current_amplitude_x.
-        # Offset goes from (current_amplitude_x, current_amplitude_y) to (current_amplitude_x, -current_amplitude_y)
-        offset_x = current_amplitude_x
-        offset_y = current_amplitude_y * (1 - 2 * local_t)
-    elif side == 1:
-        # Moving horizontally left while y is fixed at -current_amplitude_y.
-        # Offset goes from (current_amplitude_x, -current_amplitude_y) to (-current_amplitude_x, -current_amplitude_y)
-        offset_x = current_amplitude_x * (1 - 2 * local_t)
-        offset_y = -current_amplitude_y
-    elif side == 2:
-        # Moving vertically up while x is fixed at -current_amplitude_x.
-        # Offset goes from (-current_amplitude_x, -current_amplitude_y) to (-current_amplitude_x, current_amplitude_y)
-        offset_x = -current_amplitude_x
-        offset_y = -current_amplitude_y + 2 * current_amplitude_y * local_t
-    else:  # side == 3
-        # Moving horizontally right while y is fixed at current_amplitude_y.
-        # Offset goes from (-current_amplitude_x, current_amplitude_y) to (current_amplitude_x, current_amplitude_y)
-        offset_x = -current_amplitude_x + 2 * current_amplitude_x * local_t
-        offset_y = current_amplitude_y
+    offset_x = random_x * max_offset_x 
+    offset_y = random_y * max_offset_y
 
     # Apply the computed square spiral offset to the entire grid.
     x_offset = x + offset_x
@@ -184,7 +165,7 @@ def process_clip(frames, grid_size, global_id_start, start_frame, last_points, i
 
     print("iteration:", iteration)
 
-    track_2d_points = generate_square_spiral_grid(width, height, grid_egde, width_step, height_step, iteration, nr_iterations)
+    track_2d_points = generate_grid(width, height, grid_egde, width_step, height_step, iteration, nr_iterations)
 
     global_ids = []
     for x, pts in enumerate(track_2d_points):
@@ -269,6 +250,8 @@ if __name__ == '__main__':
     parser.add_argument('--color_video', type=str, help='video file to use as input', required=True)
     parser.add_argument('--downscale', type=int, default=1, help='how much to downscale the frames before tacking, presumably makes tracking faster?', required=False)
     parser.add_argument('--nr_iterations', type=int, default=1, help='how many times to do the tracking more times = more points', required=False)
+    parser.add_argument('--steps_bewtwen_track_init', type=int, default=60, help='how often to seek for new tracking points in nr of frames', required=False)
+    
 
     args = parser.parse_args()
 
@@ -304,7 +287,25 @@ if __name__ == '__main__':
 
 
     last_points = {}
-
+    nr_overlaps = nr_of_tracking_frames/args.steps_bewtwen_track_init
+    
+    assert nr_overlaps % 2 == 0, f"steps_bewtwen_track_init must evenly devide nr_of_tracking_frames"
+    
+    nr_overlaps = int(nr_overlaps)
+    
+    nr_overlaps = max(2, nr_overlaps) #never less than 2 overlaps
+    
+    steps_betwen_overlaps = nr_of_tracking_frames//nr_overlaps
+    
+    overlaps_offset = [0]
+    
+    for x in range(1, nr_overlaps):
+        overlaps_offset.append(overlaps_offset[-1] + steps_betwen_overlaps)
+    
+    act_clips = {}
+    for offset in overlaps_offset:
+        act_clips[offset] = []
+    
     while raw_video.isOpened():
         ret, raw_frame = raw_video.read()
         if not ret:
@@ -312,79 +313,57 @@ if __name__ == '__main__':
         frame = cv2.cvtColor(raw_frame, cv2.COLOR_BGR2RGB)
         frame = cv2.resize(frame, downscaled_dimensions, interpolation=cv2.INTER_AREA)
         print("--- frame ",frame_n+1," ----")
-        clip1.append(frame)
-        if frame_n >= int(nr_of_tracking_frames/2):
-            clip2.append(frame)
+        
+            
+        for offset in overlaps_offset:
+            extra_overlap_frames = 1
+            if frame_n <= offset+nr_of_tracking_frames:
+                extra_overlap_frames = 0
+            
+            if frame_n >= offset:
+                act_clips[offset].append(frame)
 
-        if len(clip1) == nr_of_tracking_frames+clip1_precursor:
-            clip_start_frame = frame_n-((len(clip1)-clip1_precursor)-1)
-            clip_nextstart_frame = clip_start_frame + nr_of_tracking_frames
-            print("process clip 1:", clip_start_frame)
-            for iteration in range(args.nr_iterations):
-                if clip_start_frame not in last_points:
-                    last_points[clip_start_frame] = []
-                if len(last_points[clip_start_frame]) >= iteration:
-                    last_points[clip_start_frame].append(None)
-                pts, clip_final_points, nr_new_points = process_clip(np.array(clip1, dtype=np.int32), grid_size, global_id_start, clip_start_frame, last_points[clip_start_frame][iteration], iteration, args.nr_iterations)
-                if clip_nextstart_frame not in last_points:
-                    last_points[clip_nextstart_frame] = []
-                last_points[clip_nextstart_frame].append(clip_final_points)
-                clip_tracking_points.append(pts)
-                global_id_start += nr_new_points
-            clip1_precursor = 1
-            clip1 = [clip1[-1]]
-        if len(clip2) == nr_of_tracking_frames+clip2_precursor:
-            clip_start_frame = frame_n - ((len(clip2)-clip2_precursor)-1)
-            clip_nextstart_frame = clip_start_frame + nr_of_tracking_frames
-            print("process clip 2:", clip_start_frame)
-            for iteration in range(args.nr_iterations):
-                if clip_start_frame not in last_points:
-                    last_points[clip_start_frame] = []
-                if len(last_points[clip_start_frame]) >= iteration:
-                    last_points[clip_start_frame].append(None)
-                pts, clip_final_points, nr_new_points = process_clip(np.array(clip2, dtype=np.int32), grid_size, global_id_start, clip_start_frame, last_points[clip_start_frame][iteration], iteration, args.nr_iterations)
-                if clip_nextstart_frame not in last_points:
-                    last_points[clip_nextstart_frame] = []
-                last_points[clip_nextstart_frame].append(clip_final_points)
-                clip_tracking_points.append(pts)
-                global_id_start += nr_new_points
-            clip2_precursor = 1
-            clip2 = [clip2[-1]]
+            if len(act_clips[offset]) == nr_of_tracking_frames+extra_overlap_frames:
+                clip_start_frame = frame_n-((len(act_clips[offset])-extra_overlap_frames)-1)
+                clip_nextstart_frame = clip_start_frame + nr_of_tracking_frames
+                print("process clip with offset", offset,":", clip_start_frame)
+                for iteration in range(args.nr_iterations):
+                    if clip_start_frame not in last_points:
+                        last_points[clip_start_frame] = []
+                    if len(last_points[clip_start_frame]) >= iteration:
+                        last_points[clip_start_frame].append(None)
+                    pts, clip_final_points, nr_new_points = process_clip(np.array(act_clips[offset], dtype=np.int32), grid_size, global_id_start, clip_start_frame, last_points[clip_start_frame][iteration], iteration, args.nr_iterations)
+                    if clip_nextstart_frame not in last_points:
+                        last_points[clip_nextstart_frame] = []
+                    last_points[clip_nextstart_frame].append(clip_final_points)
+                    clip_tracking_points.append(pts)
+                    global_id_start += nr_new_points
+                act_clips[offset] = [act_clips[offset][-1]]
 
 
         frame_n += 1
 
+    for offset in overlaps_offset:
+        extra_overlap_frames = 1
+        if frame_n <= offset+nr_of_tracking_frames:
+            extra_overlap_frames = 0
 
-    first_order = clip2, clip2_final_points, clip2_precursor
-    second_order = clip1, clip1_final_points, clip1_precursor
-    if len(clip1) > len(clip2):
-        first_order = clip1, clip1_final_points, clip1_precursor
-        second_order = clip2, clip2_final_points, clip2_precursor
-
-    if len(first_order[0]) != 0:
-        clip_start_frame = (frame_n-1) - ((len(first_order[0])-first_order[2])-1)
-        print("process first ordered clip:", clip_start_frame, len(first_order[0]))
+        clip_start_frame = (frame_n-1) - ((len(act_clips[offset])-extra_overlap_frames)-1)
+        clip_nextstart_frame = clip_start_frame + nr_of_tracking_frames
+        print("process final clip with offset", offset,":", clip_start_frame)
         for iteration in range(args.nr_iterations):
             if clip_start_frame not in last_points:
                 last_points[clip_start_frame] = []
             if len(last_points[clip_start_frame]) >= iteration:
                 last_points[clip_start_frame].append(None)
-            pts, _, nr_new_points = process_clip(np.array(first_order[0], dtype=np.int32), grid_size, global_id_start, clip_start_frame, last_points[clip_start_frame][iteration], iteration, args.nr_iterations)
-            global_id_start += nr_new_points
+            pts, clip_final_points, nr_new_points = process_clip(np.array(act_clips[offset], dtype=np.int32), grid_size, global_id_start, clip_start_frame, last_points[clip_start_frame][iteration], iteration, args.nr_iterations)
+            if clip_nextstart_frame not in last_points:
+                last_points[clip_nextstart_frame] = []
+            last_points[clip_nextstart_frame].append(clip_final_points)
             clip_tracking_points.append(pts)
-
-    if len(second_order[0]) != 0:
-        clip_start_frame = (frame_n-1) - ((len(second_order[0])-second_order[2])-1)
-        print("process second ordered clip:", clip_start_frame, len(second_order[0]))
-        for iteration in range(args.nr_iterations):
-            if clip_start_frame not in last_points:
-                last_points[clip_start_frame] = []
-            if len(last_points[clip_start_frame]) >= iteration:
-                last_points[clip_start_frame].append(None)
-            pts, _, nr_new_points = process_clip(np.array(second_order[0], dtype=np.int32), grid_size, global_id_start, clip_start_frame, last_points[clip_start_frame][iteration], iteration, args.nr_iterations)
             global_id_start += nr_new_points
-            clip_tracking_points.append(pts)
-
+        act_clips[offset] = [act_clips[offset][-1]]
+            
     track_frames = []
     for clip_id, clip in enumerate(clip_tracking_points):
         for point_id, point in enumerate(clip):
