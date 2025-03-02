@@ -332,12 +332,11 @@ if __name__ == '__main__':
                         last_points[clip_start_frame] = []
                     if len(last_points[clip_start_frame]) >= iteration:
                         last_points[clip_start_frame].append(None)
-                    pts, clip_final_points, nr_new_points = process_clip(np.array(act_clips[offset], dtype=np.int32), grid_size, global_id_start, clip_start_frame, last_points[clip_start_frame][iteration], iteration, args.nr_iterations)
+                    pts, clip_final_points, global_id_start = process_clip(np.array(act_clips[offset], dtype=np.int32), grid_size, global_id_start, clip_start_frame, last_points[clip_start_frame][iteration], iteration, args.nr_iterations)
                     if clip_nextstart_frame not in last_points:
                         last_points[clip_nextstart_frame] = []
                     last_points[clip_nextstart_frame].append(clip_final_points)
                     clip_tracking_points.append(pts)
-                    global_id_start += nr_new_points
                 act_clips[offset] = [act_clips[offset][-1]]
 
 
@@ -356,12 +355,11 @@ if __name__ == '__main__':
                 last_points[clip_start_frame] = []
             if len(last_points[clip_start_frame]) >= iteration:
                 last_points[clip_start_frame].append(None)
-            pts, clip_final_points, nr_new_points = process_clip(np.array(act_clips[offset], dtype=np.int32), grid_size, global_id_start, clip_start_frame, last_points[clip_start_frame][iteration], iteration, args.nr_iterations)
+            pts, clip_final_points, global_id_start = process_clip(np.array(act_clips[offset], dtype=np.int32), grid_size, global_id_start, clip_start_frame, last_points[clip_start_frame][iteration], iteration, args.nr_iterations)
             if clip_nextstart_frame not in last_points:
                 last_points[clip_nextstart_frame] = []
             last_points[clip_nextstart_frame].append(clip_final_points)
             clip_tracking_points.append(pts)
-            global_id_start += nr_new_points
         act_clips[offset] = [act_clips[offset][-1]]
             
     track_frames = []
