@@ -83,6 +83,87 @@ def mask_from_orb_features(image, mask=None):
 
     return keypoint_mask
 
+def generate_square_spiral_grid(width, height, grid_edge, width_step, height_step, iteration, nr_iterations):
+    """
+    Generate a grid of points with a square spiral offset that uses separate maximum offsets for x and y.
+
+    At iteration 0, the offset is (0, 0), so you get the original grid.
+    Over iterations, the grid is shifted along a square path with:
+      - max offset for x: width_step/2 - 1
+      - max offset for y: height_step/2 - 1
+
+    Parameters:
+      width, height: dimensions of the area.
+      grid_edge: distance from the edge to start the grid.
+      width_step, height_step: spacing between grid points.
+      iteration: current iteration (0-indexed).
+      nr_iterations: total number of iterations.
+
+    Returns:
+      track_2d_points: an array of shape (-1, 3) with columns [frame, x, y].
+    """
+    # Create the base grid.
+    x, y = np.meshgrid(
+        np.arange(grid_edge, width - grid_edge, width_step),
+        np.arange(grid_edge, height - grid_edge, height_step)
+    )
+
+    # Define maximum offsets for x and y.
+    max_offset_x = width_step / 2 - 1
+    max_offset_y = height_step / 2 - 1
+
+    # Compute fraction f that scales from 0 (iteration 0) to 1 (final iteration)
+    if nr_iterations <= 1:
+        f = 0.0
+    else:
+        f = iteration / (nr_iterations - 1)
+
+    # Current amplitude for each axis.
+    current_amplitude_x = f * max_offset_x
+    current_amplitude_y = f * max_offset_y
+
+    # Map f to a parameter t that runs from 0 to 4 (one for each side of the square)
+    t = f * 4
+    side = int(t)
+    local_t = t - side  # position along the current side (0 to 1)
+
+    # Compute offsets based on the current side of the square spiral:
+    if side == 0:
+        # Moving vertically down while x is fixed at current_amplitude_x.
+        # Offset goes from (current_amplitude_x, current_amplitude_y) to (current_amplitude_x, -current_amplitude_y)
+        offset_x = current_amplitude_x
+        offset_y = current_amplitude_y * (1 - 2 * local_t)
+    elif side == 1:
+        # Moving horizontally left while y is fixed at -current_amplitude_y.
+        # Offset goes from (current_amplitude_x, -current_amplitude_y) to (-current_amplitude_x, -current_amplitude_y)
+        offset_x = current_amplitude_x * (1 - 2 * local_t)
+        offset_y = -current_amplitude_y
+    elif side == 2:
+        # Moving vertically up while x is fixed at -current_amplitude_x.
+        # Offset goes from (-current_amplitude_x, -current_amplitude_y) to (-current_amplitude_x, current_amplitude_y)
+        offset_x = -current_amplitude_x
+        offset_y = -current_amplitude_y + 2 * current_amplitude_y * local_t
+    else:  # side == 3
+        # Moving horizontally right while y is fixed at current_amplitude_y.
+        # Offset goes from (-current_amplitude_x, current_amplitude_y) to (current_amplitude_x, current_amplitude_y)
+        offset_x = -current_amplitude_x + 2 * current_amplitude_x * local_t
+        offset_y = current_amplitude_y
+
+    # Apply the computed square spiral offset to the entire grid.
+    x_offset = x + offset_x
+    y_offset = y + offset_y
+
+    # Create a frame column (set to zeros in this example)
+    track_frame = np.zeros_like(x)
+    track_2d_points = np.stack((track_frame, x_offset, y_offset), axis=-1).reshape(-1, 3)
+
+    # Filter out any points outside the boundaries.
+    mask = (
+        (track_2d_points[:, 1] >= 0) & (track_2d_points[:, 1] < width) &
+        (track_2d_points[:, 2] >= 0) & (track_2d_points[:, 2] < height)
+    )
+    return track_2d_points[mask]
+
 def process_clip(frames, grid_size, global_id_start, start_frame, last_points, iteration, nr_iterations):
     global cotracker
     video = torch.tensor(frames).to(DEVICE).permute(0, 3, 1, 2)[None].float() # B T C H W
@@ -101,27 +182,9 @@ def process_clip(frames, grid_size, global_id_start, start_frame, last_points, i
     width_step = (width - (grid_egde*2)) // grid_size
     height_step = (height - (grid_egde*2)) // grid_size
 
-    int(float(width_step)/nr_iterations * iteration)
+    print("iteration:", iteration)
 
-    x, y = np.meshgrid(np.arange(grid_egde, width-grid_egde, width_step), np.arange(grid_egde, height-grid_egde, height_step))
-
-    print("iteration: ", iteration)
-    #We move the points a bit each iteration
-    x_per_iteration = float(width_step-1)/nr_iterations
-    y_per_iteration = float(height_step-1)/nr_iterations
-    x += int(x_per_iteration)*iteration
-    y += int(y_per_iteration)*iteration
-
-
-    track_frame = np.zeros(x.shape)
-
-    track_2d_points = np.stack((track_frame, x, y), axis=-1).reshape(-1, 3)
-
-    mask = (
-        (track_2d_points[:, 1] >= 0) & (track_2d_points[:, 1] < width) &
-        (track_2d_points[:, 2] >= 0) & (track_2d_points[:, 2] < height)
-    )
-    track_2d_points = track_2d_points[mask]
+    track_2d_points = generate_square_spiral_grid(width, height, grid_egde, width_step, height_step, iteration, nr_iterations)
 
     global_ids = []
     for x, pts in enumerate(track_2d_points):
@@ -168,11 +231,11 @@ def process_clip(frames, grid_size, global_id_start, start_frame, last_points, i
 
     # Check for each point: keep the point if the mask at that (y, x) location is white (>0)
     valid = mask[track_points_y, track_points_x] > 0
-    filtered_points = track_2d_points[valid]
+    filtered_points = track_2d_points#[valid]
 
     global_idret = global_id_start + len(global_ids)
     #print("global_ids:", global_id_start, "len:", len(global_ids))
-    global_ids = np.array(global_ids)[valid]
+    global_ids = np.array(global_ids)#[valid]
 
 
     if cotracker is None:
@@ -187,6 +250,14 @@ def process_clip(frames, grid_size, global_id_start, start_frame, last_points, i
     pred_tracks = pred_tracks.cpu().numpy()
     pred_visibility = pred_visibility.cpu().numpy()
 
+    # Memory allocated by tensors (in bytes)
+    #allocated = torch.cuda.memory_allocated()
+    #print(f"Allocated: {allocated / (1024**2):.2f} MB")
+
+    # Memory reserved by the caching allocator (in bytes)
+    #reserved = torch.cuda.memory_reserved()
+    #print(f"Reserved: {reserved / (1024**2):.2f} MB")
+
     gc.collect()
     torch.cuda.empty_cache()
 
@@ -196,7 +267,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Generate a json tracking file from a video')
 
     parser.add_argument('--color_video', type=str, help='video file to use as input', required=True)
-    parser.add_argument('--downscale', type=int, default=2, help='how much to downscale the frames before tacking, presumably makes tracking faster?', required=False)
+    parser.add_argument('--downscale', type=int, default=1, help='how much to downscale the frames before tacking, presumably makes tracking faster?', required=False)
     parser.add_argument('--nr_iterations', type=int, default=1, help='how many times to do the tracking more times = more points', required=False)
 
     args = parser.parse_args()
@@ -217,9 +288,9 @@ if __name__ == '__main__':
     #medium: 46 points x 120 frames
     #long: 30 points x 250 frames
 
-    #Default can be 120, but should let user set this with arg
+    #TIP reduce these if you are running you of memmory
     nr_of_tracking_frames = 120
-    grid_size = np.min([42, downscaled_dimensions[0], downscaled_dimensions[1]])
+    grid_size = np.min([36, downscaled_dimensions[0], downscaled_dimensions[1]])
 
     clip1 = []
     clip2 = []
@@ -231,9 +302,8 @@ if __name__ == '__main__':
     clip2_final_points = None
     global_id_start = 0
 
-    total_nr_points = grid_size * grid_size
 
-    clip_frame_start = []
+    last_points = {}
 
     while raw_video.isOpened():
         ret, raw_frame = raw_video.read()
@@ -248,18 +318,34 @@ if __name__ == '__main__':
 
         if len(clip1) == nr_of_tracking_frames+clip1_precursor:
             clip_start_frame = frame_n-((len(clip1)-clip1_precursor)-1)
+            clip_nextstart_frame = clip_start_frame + nr_of_tracking_frames
             print("process clip 1:", clip_start_frame)
             for iteration in range(args.nr_iterations):
-                pts, clip1_final_points, nr_new_points = process_clip(np.array(clip1, dtype=np.int32), grid_size, global_id_start, clip_start_frame, clip1_final_points, iteration, args.nr_iterations)
+                if clip_start_frame not in last_points:
+                    last_points[clip_start_frame] = []
+                if len(last_points[clip_start_frame]) >= iteration:
+                    last_points[clip_start_frame].append(None)
+                pts, clip_final_points, nr_new_points = process_clip(np.array(clip1, dtype=np.int32), grid_size, global_id_start, clip_start_frame, last_points[clip_start_frame][iteration], iteration, args.nr_iterations)
+                if clip_nextstart_frame not in last_points:
+                    last_points[clip_nextstart_frame] = []
+                last_points[clip_nextstart_frame].append(clip_final_points)
                 clip_tracking_points.append(pts)
                 global_id_start += nr_new_points
             clip1_precursor = 1
             clip1 = [clip1[-1]]
         if len(clip2) == nr_of_tracking_frames+clip2_precursor:
             clip_start_frame = frame_n - ((len(clip2)-clip2_precursor)-1)
+            clip_nextstart_frame = clip_start_frame + nr_of_tracking_frames
             print("process clip 2:", clip_start_frame)
             for iteration in range(args.nr_iterations):
-                pts, clip2_final_points, nr_new_points = process_clip(np.array(clip2, dtype=np.int32), grid_size, global_id_start, clip_start_frame, clip2_final_points, iteration, args.nr_iterations)
+                if clip_start_frame not in last_points:
+                    last_points[clip_start_frame] = []
+                if len(last_points[clip_start_frame]) >= iteration:
+                    last_points[clip_start_frame].append(None)
+                pts, clip_final_points, nr_new_points = process_clip(np.array(clip2, dtype=np.int32), grid_size, global_id_start, clip_start_frame, last_points[clip_start_frame][iteration], iteration, args.nr_iterations)
+                if clip_nextstart_frame not in last_points:
+                    last_points[clip_nextstart_frame] = []
+                last_points[clip_nextstart_frame].append(clip_final_points)
                 clip_tracking_points.append(pts)
                 global_id_start += nr_new_points
             clip2_precursor = 1
@@ -279,7 +365,11 @@ if __name__ == '__main__':
         clip_start_frame = (frame_n-1) - ((len(first_order[0])-first_order[2])-1)
         print("process first ordered clip:", clip_start_frame, len(first_order[0]))
         for iteration in range(args.nr_iterations):
-            pts, _, nr_new_points = process_clip(np.array(first_order[0], dtype=np.int32), grid_size, global_id_start, clip_start_frame, first_order[1], iteration, args.nr_iterations)
+            if clip_start_frame not in last_points:
+                last_points[clip_start_frame] = []
+            if len(last_points[clip_start_frame]) >= iteration:
+                last_points[clip_start_frame].append(None)
+            pts, _, nr_new_points = process_clip(np.array(first_order[0], dtype=np.int32), grid_size, global_id_start, clip_start_frame, last_points[clip_start_frame][iteration], iteration, args.nr_iterations)
             global_id_start += nr_new_points
             clip_tracking_points.append(pts)
 
@@ -287,7 +377,11 @@ if __name__ == '__main__':
         clip_start_frame = (frame_n-1) - ((len(second_order[0])-second_order[2])-1)
         print("process second ordered clip:", clip_start_frame, len(second_order[0]))
         for iteration in range(args.nr_iterations):
-            pts, _, nr_new_points = process_clip(np.array(second_order[0], dtype=np.int32), grid_size, global_id_start, clip_start_frame, second_order[1], iteration, args.nr_iterations)
+            if clip_start_frame not in last_points:
+                last_points[clip_start_frame] = []
+            if len(last_points[clip_start_frame]) >= iteration:
+                last_points[clip_start_frame].append(None)
+            pts, _, nr_new_points = process_clip(np.array(second_order[0], dtype=np.int32), grid_size, global_id_start, clip_start_frame, last_points[clip_start_frame][iteration], iteration, args.nr_iterations)
             global_id_start += nr_new_points
             clip_tracking_points.append(pts)
 
