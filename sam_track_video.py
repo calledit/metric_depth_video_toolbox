@@ -108,9 +108,10 @@ if __name__ == '__main__':
     parser.add_argument('--mask_video', type=str, help='black and white mask video for thigns that should not be tracked', required=False)
     parser.add_argument('--max_frames', type=int, default=-1, help='maximum length of the input video, -1 means no limit')
     parser.add_argument('--max_depth', default=20, type=int, help='the max depth that the video uses', required=False)
-    parser.add_argument('--xfov', type=int, help='fov in deg in the x-direction, calculated from aspectratio and yfov in not given', required=False)
-    parser.add_argument('--yfov', type=int, help='fov in deg in the y-direction, calculated from aspectratio and xfov in not given', required=False)
-
+    parser.add_argument('--xfov', type=float, help='fov in deg in the x-direction, calculated from aspectratio and yfov in not given', required=False)
+    parser.add_argument('--yfov', type=float, help='fov in deg in the y-direction, calculated from aspectratio and xfov in not given', required=False)
+    parser.add_argument('--optimize_intrinsic', action='store_true', help='Optimize camera instrinsics (ie FOV)', required=False)
+    
     args = parser.parse_args()
 
     if args.xfov is None and args.yfov is None:
@@ -231,7 +232,8 @@ if __name__ == '__main__':
         depth = depth[: h1 - h1 % 8, : w1 - w1 % 8]
 
         if mask_video is not None:
-            mask = torch.as_tensor(cv2.cvtColor(this_mask_frame, cv2.COLOR_BGR2GRAY)).float()/255.0
+            #Mega sam uses "inverted" masks, black means stuff should not be used for tracking
+            mask = torch.as_tensor(255-cv2.cvtColor(this_mask_frame, cv2.COLOR_BGR2GRAY)).float()/255.0
             
             
             mask = F.interpolate(
@@ -274,8 +276,8 @@ if __name__ == '__main__':
         fr_n += 1
 
     traj_est, depth_est, motion_prob = droid.terminate(
-        iter(stream), #Need to make a steam here
-        _opt_intr=True,
+        iter(stream),
+        _opt_intr=args.optimize_intrinsic,
         full_ba=True,
         scene_name='output_scene',
     )
@@ -293,15 +295,19 @@ if __name__ == '__main__':
 
 
     depths_o = []
-    for out_depth in depth_est:
+    motions_p = []
+    for h, out_depth in enumerate(depth_est):
         depth = F.interpolate(
                 torch.as_tensor(out_depth)[None, None], (frame_height, frame_width), mode="nearest-exact"
             ).squeeze().numpy()
-        #print("depth_est:", depth.shape)
         depths_o.append(depth)
 
+    for motion_p in motion_prob:
+        motions_p.append(motion_p)
+
+
     save_24bit(np.array(depths_o), args.depth_video + '_megasam.mkv', frame_rate, MODEL_maxOUTPUT_depth)
-    #print("motion_prob:", motion_prob)
+    save_24bit(np.array(motions_p), args.depth_video + '_megasam_motion.mkv', frame_rate, 2)
 
     poses_th = torch.as_tensor(traj_est, device="cpu")
     cam_c2w = SE3(poses_th).inv().matrix().numpy()
