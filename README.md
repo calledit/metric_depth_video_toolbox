@@ -27,7 +27,7 @@ https://github.com/calledit/metric_depth_video_toolbox/releases/tag/Showcase
 
 ## Usage 
 
-
+See [HOWTO.md](https://github.com/calledit/metric_depth_video_toolbox/blob/main/HOWTO.md) for a simple beginner guide.
 
 #### video_metric_convert.py
 _Uses ML to create stable metric depth video from any normal video file_
