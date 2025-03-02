@@ -76,20 +76,25 @@ and a debug depth video file called in_office_720p.mp4_depth.mkv_megasam.mkv
 Triangulate points to get acurate depth readings and realigin the metric depth video to fit the more accurate depth readings.
 
 ```
-python3.11 convert_metric_depth_video_to_other_format.py --color_video ~/in_office_720p.mp4 --depth_video ~/in_office_720p.mp4_depth.mkv --yfov 9 --transformation_file ~/in_office_720p.mp4_depth.mkv_transformations.json --track_file ~/in_office_720p.mp4_tracking.json --mask_video ~/in_office_720p.mp4_mask.mkv --show_scene_point_clouds --use_triangulated_points --save_rescaled_depth --show_both_point_clouds --global_align
+python3.11 convert_metric_depth_video_to_other_format.py --color_video ~/in_office_720p.mp4 --depth_video ~/in_office_720p.mp4_depth.mkv --yfov 9 --transformation_file ~/in_office_720p.mp4_depth.mkv_transformations.json --track_file ~/in_office_720p.mp4_tracking.json --mask_video ~/in_office_720p.mp4_mask.mkv --show_scene_point_clouds --use_triangulated_points --tringulation_min_observations 20 --save_rescaled_depth --show_both_point_clouds --global_align
 
 The result is a rescaled depth video ~/in_office_720p.mp4_depth.mkv_rescaled.mkv
 And two .ply files with point cloud data for the scene. One ply file with tirangualted points and one with averages of the depth map called in_office_720p.mp4_depth.mkv_avgmonodepth.ply, in_office_720p.mp4_depth.mkv_triangulated.ply.
-You can run the script again with the new _rescled.mkv file to get a rescaled version of the avgmonodepth.ply file.
+
+You can run the script again with the new _rescled.mkv file to get a rescaled version of the _avgmonodepth.ply file.
+python3.11 convert_metric_depth_video_to_other_format.py --color_video ~/in_office_720p.mp4 --depth_video ~/in_office_720p.mp4_depth.mkv_rescaled.mkv --yfov 9 --transformation_file ~/in_office_720p.mp4_depth.mkv_transformations.json --track_file ~/in_office_720p.mp4_tracking.json --mask_video ~/in_office_720p.mp4_mask.mkv --show_scene_point_clouds
 
 ```
 
 
 ## Step  6
-View the final result with camera movment canceled out, edges removed, a background .ply file inserted and visulisation for the camera view frustrum.
+View the result where or two subjects are walking throgh a point cloud.
+Camera movment has been canceled out, edges removed, a background .ply file inserted and we have added visulisation for the camera view-frustrum.
+Finanly we use the mask video to mask out the bakground so we only see the point cloud.
 
 ```
 python3.11 3d_view_depthfile.py --color_video ~/in_office_720p.mp4 --depth_video ~/in_office_720p.mp4_depth.mkv_rescaled.mkv --yfov 9 --transformation_file ~/in_office_720p.mp4_depth.mkv_transformations.json --background_ply ~/in_office_720p.mp4_depth.mkv_avgmonodepth.ply --remove_edges --show_camera
+--x -0.1 --y 0 --z -3 --mask_video ~/in_office_720p.mp4_mask.mkv --invert_mask --background_ply ~/in_office_720p.mp4_depth.mkv_rescaled.mkv_avgmonodepth.ply
 
 ```
-<img width="763" alt="3d_side_image" src="https://github.com/user-attachments/assets/144f363f-ff92-4b98-9cd7-ba361e8ecd26" />
+<img width="547" alt="walking_throgh_point_cloud" src="https://github.com/user-attachments/assets/92000420-4b9b-41c2-a503-96f10c17c1b7" />
