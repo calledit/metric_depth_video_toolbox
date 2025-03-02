@@ -47,10 +47,10 @@ the result is a black and white mask video ~/in_office_720p.mp4_mask.mkv
 <img width="929" alt="mask" src="https://github.com/user-attachments/assets/d282bc87-2026-4f9e-9f85-21bfb69dace0" />
 
 ## Step 3
-Generate tracking points from the source video, more iterations = more points. (But to many points may cause later triangulation to crash due to memmory usage.)
+Generate tracking points from the source video, more iterations = more points.
 
 ```
-python track_points_in_video.py --color_video ~/in_office_720p.mp4 --nr_iterations 2
+python track_points_in_video.py --color_video ~/in_office_720p.mp4 --nr_iterations 4
 
 the result is a tracking file called ~/in_office_720p.mp4_tracking.json
 ```
