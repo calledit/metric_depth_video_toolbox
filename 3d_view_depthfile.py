@@ -28,6 +28,8 @@ if __name__ == '__main__':
     parser.add_argument('--remove_edges', action='store_true', help='Tries to remove edges that was not visible in image(it is a bit slow)', required=False)
     parser.add_argument('--show_camera', action='store_true', help='Shows lines representing the camera frustrum', required=False)
     parser.add_argument('--background_ply', type=str, help='PLY file that will be included in the scene', required=False)
+    parser.add_argument('--mask_video', type=str, help='Mask video to filter out back or forground', required=False)
+    parser.add_argument('--invert_mask', action='store_true', help='Remove the baground(black) instead of the forground(white)', required=False)
     
     parser.add_argument('--compressed', action='store_true', help='Render the video in a compressed format. Reduces file size but also quality.', required=False)
     parser.add_argument('--draw_frame', default=-1, type=int, help='open gui with specific frame', required=False)
@@ -63,6 +65,12 @@ if __name__ == '__main__':
         if not os.path.isfile(args.color_video):
             raise Exception("input color_video does not exist")
         color_video = cv2.VideoCapture(args.color_video)
+    
+    mask_video = None
+    if args.mask_video is not None:
+        if not os.path.isfile(args.mask_video):
+            raise Exception("input mask_video does not exist")
+        mask_video = cv2.VideoCapture(args.mask_video)
     
     transformations = None
     if args.transformation_file is not None:
@@ -139,6 +147,14 @@ if __name__ == '__main__':
         else:
             color_frame = rgb
             
+        mask = None
+        if mask_video is not None:
+            ret, mask = mask_video.read()
+            if ret:
+                mask = cv2.cvtColor(mask, cv2.COLOR_BGR2GRAY)
+                if args.invert_mask:
+                    mask = 255-mask
+            
         if args.draw_frame != -1 and args.draw_frame != frame_n:
             continue
 
@@ -161,7 +177,7 @@ if __name__ == '__main__':
             cameraLines = o3d.geometry.LineSet.create_camera_visualization(view_width_px=frame_width, view_height_px=frame_height, intrinsic=cam_matrix, extrinsic=np.eye(4), scale=roll_depth)
             cameraLines.transform(transform_to_zero)
         
-        mesh_ret, _ = depth_map_tools.get_mesh_from_depth_map(depth, cam_matrix, color_frame, mesh, remove_edges = args.remove_edges)
+        mesh_ret, _ = depth_map_tools.get_mesh_from_depth_map(depth, cam_matrix, color_frame, mesh, remove_edges = args.remove_edges, mask = mask)
         
         if mesh is None:
             if not args.render and args.draw_frame == -1:

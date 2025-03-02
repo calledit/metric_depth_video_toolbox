@@ -188,11 +188,11 @@ def project_2d_points_to_3d(points, depth, camera_matrix, distCoeffs = None):
     return np.array(points_3d)
 
 
-def get_mesh_from_depth_map(depth_map, cam_mat, color_frame = None, inp_mesh = None, remove_edges = False):
+def get_mesh_from_depth_map(depth_map, cam_mat, color_frame = None, inp_mesh = None, remove_edges = False, mask = None):
     points, height, width = create_point_cloud_from_depth(depth_map, cam_mat, True)
 
     # Create mesh from point cloud
-    mesh, used_indices = create_mesh_from_point_cloud(points, height, width, color_frame, inp_mesh, remove_edges)
+    mesh, used_indices = create_mesh_from_point_cloud(points, height, width, color_frame, inp_mesh, remove_edges, mask = mask)
     return mesh, used_indices
 
 def create_point_cloud_from_depth(depth_image, intrinsics, of_by_one = False):
@@ -272,6 +272,7 @@ def create_mesh_from_point_cloud(points, height, width,
                                  image_frame=None,
                                  inp_mesh=None,
                                  remove_edges=False,
+                                 mask = None,
                                  angle_threshold_deg=85):
     """
     Creates an Open3D TriangleMesh from a grid-organized point cloud while
@@ -302,6 +303,7 @@ def create_mesh_from_point_cloud(points, height, width,
     colors = None
     if image_frame is not None:
         colors = np.array(image_frame).reshape(-1, 3) / 255.0
+
     
     # If no mesh exists or if we need to remove edges, compute the triangles.
     if inp_mesh is None or remove_edges:
@@ -345,20 +347,47 @@ def create_mesh_from_point_cloud(points, height, width,
                 ref_to_all_col[:] = colors[:]
         
         # --- Filter triangles based on the triangle angle relative to the camera ---
-        if remove_edges:
-            v1 = vertices[triangles_all[:, 0]]
-            v2 = vertices[triangles_all[:, 1]]
-            v3 = vertices[triangles_all[:, 2]]
-            cos_threshold = np.cos(np.radians(angle_threshold_deg))
+        if remove_edges or mask is not None:
+            invalid_mask = None
+            if remove_edges:
+                v1 = vertices[triangles_all[:, 0]]
+                v2 = vertices[triangles_all[:, 1]]
+                v3 = vertices[triangles_all[:, 2]]
+                cos_threshold = np.cos(np.radians(angle_threshold_deg))
             
-            normals = np.cross(v2 - v1, v3 - v1)            # shape (N, 3)
-            view    = - (v1 + v2 + v3)/3.0                  # same shape (N, 3) as centers
-            dot     = np.einsum('ij,ij->i', normals, view)  # dot products
-            len_n   = np.sqrt(np.einsum('ij,ij->i', normals, normals))
-            len_v   = np.sqrt(np.einsum('ij,ij->i', view, view))
-            cosines = dot / (len_n * len_v + 1e-15)         # +1e-15 to avoid div-by-zero
+                normals = np.cross(v2 - v1, v3 - v1)            # shape (N, 3)
+                view    = - (v1 + v2 + v3)/3.0                  # same shape (N, 3) as centers
+                dot     = np.einsum('ij,ij->i', normals, view)  # dot products
+                len_n   = np.sqrt(np.einsum('ij,ij->i', normals, normals))
+                len_v   = np.sqrt(np.einsum('ij,ij->i', view, view))
+                cosines = dot / (len_n * len_v + 1e-15)         # +1e-15 to avoid div-by-zero
 
-            invalid_mask = (cosines < cos_threshold)
+                invalid_mask = (cosines < cos_threshold)
+            
+            if mask is not None:
+                mask = mask > 128
+                
+                #cell_mask = mask[:-1, :-1] & mask[1:, :-1] & mask[:-1, 1:] & mask[1:, 1:]
+                
+                
+                #mask_flat = mask.flatten()
+                #cell_mask = np.stack([mask_flat, mask_flat, mask_flat], axis=1)
+                #triangle_mask = np.vstack([cell_mask, cell_mask])
+                
+                
+                cell_mask = mask[:-1, :-1] & mask[1:, :-1] & mask[:-1, 1:] & mask[1:, 1:]
+                
+                # Then each cell corresponds to two triangles:
+                cell_mask_flat = cell_mask.ravel()
+                # Duplicate for both triangles in each grid cell:
+                #triangle_mask = np.repeat(cell_mask_flat, 2)
+                triangle_mask = np.concatenate([cell_mask_flat, cell_mask_flat])
+                
+                if invalid_mask is not None:
+                    invalid_mask = invalid_mask | triangle_mask
+                else:
+                    invalid_mask = (~triangle_mask)
+                
             ref_to_all_tri[invalid_mask] = np.array([0,0,0])
             
             # 1) Identify which rows are *not* all zero:
