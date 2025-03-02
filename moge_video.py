@@ -5,6 +5,8 @@ import torch
 import cv2
 
 import sys
+sys.path.append("MoGe")
+
 
 from moge.model import MoGeModel
 
