@@ -40,5 +40,6 @@ FPS_FRACTION=$(ffprobe -v error \
   -of csv=p=0 \
   "$COLOR_VIDEO")
 	  
+OUTPUTVIDEO="${COLOR_VIDEO}_mask.mkv"
 
-ffmpeg -i ${COLOR_VIDEO} -an -f rawvideo -pix_fmt rgb24 pipe:1 | rembg b -om ${VIDEO_WIDTH} ${VIDEO_HEIGHT} | ffmpeg -y -f image2pipe -framerate ${FPS_FRACTION} -vcodec png -i pipe:0 -c:v libx265 -crf 23 -pix_fmt yuv420p mask.mp4
+ffmpeg -i ${COLOR_VIDEO} -an -f rawvideo -pix_fmt rgb24 pipe:1 | rembg b -om ${VIDEO_WIDTH} ${VIDEO_HEIGHT} | ffmpeg -y -f image2pipe -framerate ${FPS_FRACTION} -vcodec png -i pipe:0 -c:v libx265 -crf 23 -pix_fmt yuv420p "${OUTPUTVIDEO}"
