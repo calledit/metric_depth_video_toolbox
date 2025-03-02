@@ -29,27 +29,34 @@ def float_image_to_byte_image(float_image, max_value=10.0, scale=255, log_scale=
     return byte_image
 
 
-def compute_weights(directions):
+def compute_weights_chunked(directions, chunk_size=1024):
     """
-    Compute weights for each direction based on its average angular difference
-    with all other directions. The measure used is 1 - |dot product|.
+    Compute weights in chunks to reduce memory usage.
     
     Parameters:
         directions (np.ndarray): Array of shape (N, 3) of normalized direction vectors.
+        chunk_size (int): Number of rows to process at a time.
     
     Returns:
         weights (np.ndarray): Array of shape (N,) with computed weights.
     """
     N = directions.shape[0]
-    # Compute the pairwise dot products
-    dot_products = directions @ directions.T  # shape (N, N)
-    # Take absolute value so that parallel and anti-parallel are both considered similar
-    abs_dot = np.abs(dot_products)
-    # Compute difference measure: 1 - |dot|
-    diff = 1 - abs_dot
-    # Exclude the diagonal (self comparison) which is 0 since |dot(d_i,d_i)| = 1.
-    # Average the differences over the other directions.
-    weights = np.sum(diff, axis=1) / (N - 1)
+    weights = np.empty(N)
+    
+    for start in range(0, N, chunk_size):
+        end = min(start + chunk_size, N)
+        # Compute the dot products for a chunk (shape: (chunk_size, N))
+        chunk = directions[start:end]  # shape (chunk_size, 3)
+        dots = np.abs(np.dot(chunk, directions.T))  # shape (chunk_size, N)
+        
+        # For rows in this chunk, set the self dot product to 0 (if applicable)
+        for i in range(end - start):
+            idx = start + i
+            dots[i, idx] = 0  # Exclude self comparison
+        
+        # Compute the weights for this chunk
+        weights[start:end] = np.sum(1 - dots, axis=1) / (N - 1)
+    
     return weights
 
 def best_intersection_point_vectorized_weighted(points, directions, weights=None):
@@ -78,7 +85,7 @@ def best_intersection_point_vectorized_weighted(points, directions, weights=None
     
     # If no weights are provided, compute them based on angular differences.
     if weights is None:
-        weights = compute_weights(d_norm)
+        weights = compute_weights_chunked(d_norm)
     # Ensure weights is a column vector for broadcasting.
     weights = weights.reshape(-1, 1)
     
@@ -109,7 +116,7 @@ def best_intersection_point_vectorized_weighted(points, directions, weights=None
     
     # Solve the linear system A x = b (using lstsq to be robust in case A is singular)
     x, residuals, rank, s = np.linalg.lstsq(A, b, rcond=None)
-    return x
+    return x, rank
 
 
 def find_nearby_points(points_3d, i, threshold=0.01, exclude_self=True):
@@ -492,12 +499,16 @@ if __name__ == '__main__':
     parser.add_argument('--strict_mask', default=False, action='store_true', help='Remove any points that has ever been masked out even in frames where they are not masked', required=False)
     parser.add_argument('--mask_video', type=str, help='black and white mask video for thigns that should not be tracked', required=False)
     
+    parser.add_argument('--merge_close_points', action='store_true', help='Merges points that are very close to eachother(not recomended)', required=False)
+    
     parser.add_argument('--show_scene_point_clouds', action='store_true', help='Opens window and shows the resulting pointclouds', required=False)
     parser.add_argument('--show_both_point_clouds', action='store_true', help='If the viewer should show both pointclouds overlapping', required=False)
     
     
     parser.add_argument('--save_alembic', action='store_true', help='Save data to a alembic file', required=False)
     parser.add_argument('--use_triangulated_points', action='store_true', help='If the triangulated points should be used', required=False)
+    parser.add_argument('--tringulation_min_observations', default=5, type=int, help='Nr of observations of a tracked point required for it to be included', required=False)
+    
     
     parser.add_argument('--save_rescaled_depth', action='store_true', help='Saves a video with rescaled depth', required=False)
     parser.add_argument('--global_align', action='store_true', help='Aligns the depth video to the triangulated depth', required=False)
@@ -705,12 +716,12 @@ if __name__ == '__main__':
                         if global_id not in global_3d_points:
                             global_3d_points[global_id] = [[],[],[],[],[]]
                             
-                        #Disable Temporarily
-                        nearby_points = find_nearby_points(points_3d_rot, i, 0.005)
-                        for pt in nearby_points:
-                            if global_id not in remaped_points:
-                                remaped_points[global_id] = []
-                            remaped_points[global_id].append(point_ids_in_this_frame[pt])
+                        if args.merge_close_points:
+                            nearby_points = find_nearby_points(points_3d_rot, i, 0.005)
+                            for pt in nearby_points:
+                                if global_id not in remaped_points:
+                                    remaped_points[global_id] = []
+                                remaped_points[global_id].append(point_ids_in_this_frame[pt])
                         
                         global_3d_points[global_id][0].append(cam_pos)
                         global_3d_points[global_id][1].append(points_3d_rot[i])
@@ -762,7 +773,8 @@ if __name__ == '__main__':
     if global_3d_points is not None:
         
         #Merge points that overlap at some point
-        merge_global_points(global_3d_points, remaped_points)
+        if args.merge_close_points:
+            merge_global_points(global_3d_points, remaped_points)
         
         
         points = []
@@ -778,19 +790,22 @@ if __name__ == '__main__':
         for global_id in global_3d_points:
             com_poses = np.array(global_3d_points[global_id][0])
             
-            if len(com_poses) > 2:
+            if len(com_poses) > args.tringulation_min_observations:
                 line_directions = np.array(global_3d_points[global_id][1])
                 #print("global_id", global_id, "poses:", com_poses, "dirs:", line_directions)
                 #exit(0)
+                traig_text = ""
                 intersection_point = np.array([0.0,0.0,0.0])
                 if args.use_triangulated_points:
-                    intersection_point = best_intersection_point_vectorized_weighted(com_poses, line_directions)
+                    
+                    intersection_point, rank = best_intersection_point_vectorized_weighted(com_poses, line_directions)
                     if intersection_point is None:
                         continue
+                    traig_text = "triangulation point: "+ str(intersection_point)
                 
                 mon_dep = np.mean(global_3d_points[global_id][4], axis=0)
             
-                print("Global id:", global_id," nr observations:", len(com_poses), "best intersection point:", intersection_point, "mono:", mon_dep)
+                print("Global id:", global_id," nr observations:", len(com_poses), traig_text, "depth map avg:", mon_dep)
                 points.append(mon_dep)
                 points_i.append(intersection_point)
                 
