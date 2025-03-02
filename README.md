@@ -53,33 +53,30 @@ options:
 
 
 # Notes:
-# the video_metric_convert.py script is copied to the Video-Depth-Anything folder on installation.)
 # Video-Depth-Anything memory usage scales with aspect ratio. If you are using a 3090 with 24Gb memory and video with 16:9 aspect you need to lower the --input_size to 440 or crop the video down. Aspect ratio of 4:3 works well.
 
 example:
-cd Video-Depth-Anything
 python video_metric_convert.py --color_video some_video.mkv
 
 ```
 
-#### unidepth_video.py (rquires installation with  ./install_mvda.sh -unidepth )
+#### unidepth_video.py (rquires installation with  ./install_mvdtoolbox.sh -unidepth )
 _Uses ML to create FOV locked metric depth video from any normal video file._ UniDepth is not made for video so the videos it produces are jittery. However UniDepth has the capability of using FOV as given by the user. Which means it's output tend to be more accurate as a whole. That said UniDepth has been trained with less data than many other models so it struggles with certain types of scenes.
 
 ```bash
-# Create a metric depth video from a normal video (Note that the unidepth_video.py script is copied to the UniDepth folder on installation.)
+# Create a metric depth video from a normal video
 
 cd UniDepth
 python unidepth_video.py --color_video some_video.mkv -xfov 45
 
 ```
 
-#### moge_video.py (rquires installation with  ./install_mvda.sh -moge )
+#### moge_video.py (rquires installation with  ./install_mvdtoolbox.sh -moge )
 _Uses ML to create FOV "locked" metric depth video from any normal video file._ Moge is not made for video so the videos it produces are jittery. 
 
 ```bash
-# Create a metric depth video from a normal video (Note that the moge_video.py script is copied to the MoGe folder on installation.)
+# Create a metric depth video from a normal video
 
-cd MoGe
 python moge_video.py --color_video some_video.mkv -xfov 45
 
 ```
@@ -259,7 +256,7 @@ example:
 python track_points_in_video.py --color_video some_video.mkv
 ```
 
-#### sam_track_video.py (rquires installation with  ./install_mvda.sh -megasam )
+#### sam_track_video.py (rquires installation with  ./install_mvdtoolbox.sh -megasam )
 Use [Mega-sam](https://github.com/mega-sam/mega-sam) to track the camera. Outputs a transfomations.json file. Mega-sam merges traditonal SLAM methods with data from estimated ML depth videos to track the camera.
 
 ```bash
@@ -282,7 +279,6 @@ options:
   --yfov YFOV           fov in deg in the y-direction, calculated from aspectratio and xfov in not given
   
 example:
-cd mega-sam
 python sam_track_video.py --yfov 50 --color_video ~/somevideo.mp4 --depth_video ~/somevideo.mp4_depth.mkv
 ```
 
@@ -339,23 +335,25 @@ cd metric_depth_video_toolbox
 
 # on linux
 sudo apt-get install -y libgl1
-./install_mvda.sh
+./install_mvdtoolbox.sh
 pip install open3d numpy opencv-python
 
 #if you want to use Mega-sam camera tracking
-./install_mvda.sh -megasam
+./install_mvdtoolbox.sh -megasam
 
 #if you want to use paralax ML infill
-./install_mvda.sh -stereocrafter
+./install_mvdtoolbox.sh -stereocrafter
 
 #if you want to use 3d camera tracking and 3d reconstruction
-./install_mvda.sh -madpose
+./install_mvdtoolbox.sh -madpose
 
 #if you want to generate depth maps with unidepth
-./install_mvda.sh -unidepth
+#Unidepth requirments are incompatible with megasam so
+#you can only install one (or use virtual enviroments)
+./install_mvdtoolbox.sh -unidepth
 
 #if you want to generate depth maps with MoGe
-./install_mvda.sh -moge
+./install_mvdtoolbox.sh -moge
 
 
 # If you want to export directly to the avc1 codec using the --compress argument
@@ -373,7 +371,7 @@ export DISPLAY=:2
 pip3.11 install open3d numpy opencv-python
 
 #if you want to use madpose for 3d camera tracking
-./install_mvda.sh -madpose
+./install_mvdtoolbox.sh -madpose
 
 #On Windows (Not tested or "officially" supported, but anecdotally working).
 WindowsInstall.bat

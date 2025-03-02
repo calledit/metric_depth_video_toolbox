@@ -66,8 +66,6 @@ if [[ " $@ " =~ " -moge " ]]; then
 
 	cd ..
 	
-	cp -a src/moge_video.py MoGe/.
-	
 	exit
 fi
 
@@ -88,8 +86,6 @@ if [[ " $@ " =~ " -megasam " ]]; then
 	
 	cd ..
 	
-	cp -a src/sam_track_video.py mega-sam/.
-	
 	exit
 fi
 
@@ -105,8 +101,6 @@ if [[ " $@ " =~ " -unidepth " ]]; then
 	
 	
 	cd ..
-	
-	cp -a src/unidepth_video.py UniDepth/.
 	
 	exit
 fi

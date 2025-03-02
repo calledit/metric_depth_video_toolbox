@@ -9,7 +9,7 @@ import sys
 from types import SimpleNamespace
 
 import torch.nn.functional as F
-sys.path.append("base/droid_slam")
+sys.path.append("mega-sam/base/droid_slam")
 from droid import Droid
 from lietorch import SE3
 
@@ -245,7 +245,7 @@ if __name__ == '__main__':
         if fr_n == 0:
             droid_args = {
                 'image_size': [image.shape[2], image.shape[3]],
-                'weights': "checkpoints/megasam_final.pth",
+                'weights': "mega-sam/checkpoints/megasam_final.pth",
                 'disable_vis': True,
                 'stereo': False,
                 'upsample': False,
@@ -307,7 +307,7 @@ if __name__ == '__main__':
     cam_c2w = SE3(poses_th).inv().matrix().numpy()
 
     with open(out_file, "w") as json_file_handle:
-        tranforms  = np.insert(cam_c2w, 0, np.eye(4))
+        tranforms  = np.insert(cam_c2w, 0, np.eye(4), axis=0)
         json_file_handle.write(json.dumps(tranforms, cls=NumpyEncoder))
 
 

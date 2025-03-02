@@ -22,7 +22,8 @@ import torch
 import cv2
 
 import sys
-sys.path.append("Depth-Anything-V2/metric_depth")
+sys.path.append("Video-Depth-Anything")
+sys.path.append("Video-Depth-Anything/Depth-Anything-V2/metric_depth")
 import metric_dpt_func
 
 from video_depth_anything.video_depth import VideoDepthAnything
@@ -112,7 +113,7 @@ if __name__ == '__main__':
     }
 
     video_depth_anything = VideoDepthAnything(**model_configs['vitl'])
-    video_depth_anything.load_state_dict(torch.load(f'./checkpoints/video_depth_anything_vitl.pth', map_location='cpu'), strict=True)
+    video_depth_anything.load_state_dict(torch.load('Video-Depth-Anything/checkpoints/video_depth_anything_vitl.pth', map_location='cpu'), strict=True)
     video_depth_anything = video_depth_anything.to(DEVICE).eval()
 
     frames, target_fps = read_video_frames(args.color_video, args.max_frames, args.target_fps, args.max_res)

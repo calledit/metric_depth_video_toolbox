@@ -5,7 +5,7 @@ import torch
 import cv2
 
 import sys
-
+sys.path.append("UniDepth")
 from unidepth.models import UniDepthV1, UniDepthV2
 from unidepth.utils import colorize, image_grid
 
