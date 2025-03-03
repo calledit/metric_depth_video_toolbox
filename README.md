@@ -381,7 +381,7 @@ See https://github.com/calledit/metric_depth_video_toolbox/issues/1#issuecomment
 ```
 
 ### Requirements
-The tools that reuire ML models have been tested on machines that support Cuda 12.4 and Torch 2.5.1 on [vast.ai](https://cloud.vast.ai/?ref_id=148636) using "template PyTorch (cuDNN Devel)"
+The tools that reuire ML models have been tested on machines with nvida 3090 cards that support Cuda 12.4 and Torch 2.5.1 on [vast.ai](https://cloud.vast.ai/?ref_id=148636) using "template PyTorch (cuDNN Devel)"
 
 ### Limitations
 Video-Depth-Anything does not take FOV as input and it does not give FOV as output. It is built to try to align all videos to the affine transfomed depth of the first frame.
