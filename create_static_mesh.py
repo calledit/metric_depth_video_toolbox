@@ -11,6 +11,7 @@ import open3d as o3d
 import depth_map_tools
 from skimage import measure
 from scipy.spatial import cKDTree
+from scipy.ndimage import binary_dilation
 
 np.set_printoptions(suppress=True, precision=4)
     
@@ -43,25 +44,10 @@ def remove_small_clusters(mesh, min_triangles=10):
     return mesh
 
 
-def remove_visible_triangles_by_image_mask(mesh, image_mask, intrinsics, extrinsics=None, rendered_depth=None, min_cluster_triangles=10, just_return_index=False):
-    """
-    Removes from the mesh only the closest (visible) triangle per pixel that falls
-    in the masked region (i.e. where image_mask == 255). Optionally, if a rendered depth map 
-    is provided, the candidate triangle whose centroid depth best matches the rendered depth is chosen.
-    After removal, small isolated clusters (with fewer than min_cluster_triangles) are discarded.
-    
-    Parameters:
-      - mesh: An Open3D TriangleMesh.
-      - image_mask: A 2D uint8 numpy array (H x W) where 255 indicates the area to remove.
-      - intrinsics: A 3x3 camera intrinsic matrix.
-      - extrinsics: A 4x4 camera extrinsic matrix (world-to-camera). If None, identity is used.
-      - rendered_depth: (Optional) A 2D numpy array (H x W) with depth values from a previous render.
-      - min_cluster_triangles: Minimum number of triangles a connected cluster must have to be kept.
-      
-    Returns:
-      - new_mesh: A new TriangleMesh with the selected visible triangles in masked pixels removed and
-                  small isolated clusters discarded.
-    """
+def remove_visible_triangles_by_image_mask(mesh, image_mask, intrinsics, extrinsics=None, rendered_depth=None):
+    import numpy as np
+    import open3d as o3d
+
     # Get mesh data.
     vertices = np.asarray(mesh.vertices)    # shape (N, 3)
     triangles = np.asarray(mesh.triangles)    # shape (M, 3)
@@ -73,14 +59,10 @@ def remove_visible_triangles_by_image_mask(mesh, image_mask, intrinsics, extrins
     # --- Compute triangle centroids and project them ---
     centroids = np.mean(vertices[triangles], axis=1)  # (M, 3)
     centroids_h = np.hstack([centroids, np.ones((centroids.shape[0], 1))])  # (M, 4)
-
-    # Transform centroids into camera coordinates.
     centroids_cam = (extrinsics @ centroids_h.T).T[:, :3]  # (M, 3)
-    # Project into image plane.
     proj = (intrinsics @ centroids_cam.T).T  # (M, 3)
     pixel_coords = proj[:, :2] / proj[:, 2:3]  # (M, 2)
     pixel_coords_int = np.round(pixel_coords).astype(int)  # (M, 2)
-    # Depth from the camera for each centroid.
     candidate_depths = centroids_cam[:, 2]
 
     # --- Determine which triangles project inside the image and hit the mask ---
@@ -89,72 +71,71 @@ def remove_visible_triangles_by_image_mask(mesh, image_mask, intrinsics, extrins
     masked = np.zeros(triangles.shape[0], dtype=bool)
     valid_idx = np.where(valid)[0]
     masked[valid_idx] = image_mask[pixel_coords_int[valid_idx, 1],
-                                       pixel_coords_int[valid_idx, 0]]
+                                    pixel_coords_int[valid_idx, 0]]
 
     # --- Candidate triangles (those in masked pixels) ---
     candidate_idx = np.where(masked)[0]
     if candidate_idx.size == 0:
-        # No candidate triangles to remove.
+        # No triangles to remove. Return the original mesh and an identity mapping.
         new_mesh = mesh
+        removed_boundry = np.array([])
+        vertex_mapping = np.arange(vertices.shape[0])
     else:
-        # Get candidate pixel coordinates and depths.
         candidate_pixels = pixel_coords_int[candidate_idx]  # (n_candidates, 2)
-        candidate_depths = candidate_depths[candidate_idx]    # (n_candidates,)
-        # Compute a 1D index for grouping: index = v * W + u.
+        candidate_depths_candidates = candidate_depths[candidate_idx]    # (n_candidates,)
         candidate_pixel_index = candidate_pixels[:, 1] * W + candidate_pixels[:, 0]
 
-        # Compute per-candidate error.
         if rendered_depth is not None:
-            # For each candidate, look up the rendered depth at its pixel.
             candidate_rendered_depth = rendered_depth[candidate_pixels[:, 1], candidate_pixels[:, 0]]
-            candidate_error = np.abs(candidate_depths - candidate_rendered_depth)
+            candidate_error = np.abs(candidate_depths_candidates - candidate_rendered_depth)
         else:
-            candidate_error = candidate_depths
-
-        # --- Group candidates by pixel and select the one with minimum error (vectorized) ---
-        sorted_order = np.argsort(candidate_pixel_index)
-        sorted_pixels = candidate_pixel_index[sorted_order]
-        sorted_error = candidate_error[sorted_order]
-        sorted_candidate_idx = candidate_idx[sorted_order]
-
-        # Group candidates by unique pixel index.
-        unique_pixels, group_start, group_counts = np.unique(sorted_pixels, return_index=True, return_counts=True)
-        # Compute the minimum error per group.
-        min_errors = np.minimum.reduceat(sorted_error, group_start)
-        # Expand the min error to each candidate within the group.
-        group_ids = np.repeat(np.arange(len(group_start)), group_counts)
-        min_errors_per_candidate = min_errors[group_ids]
-        # Flag candidates whose error equals the group's min error.
-        is_min = sorted_error == min_errors_per_candidate
-        # Compute offsets within each group.
-        group_offsets = np.arange(sorted_error.shape[0]) - np.repeat(group_start, group_counts)
-        group_offsets_masked = np.where(is_min, group_offsets, np.inf)
-        first_offsets = np.minimum.reduceat(group_offsets_masked, group_start)
-        selected_sorted_indices = (group_start + first_offsets).astype(int)
-        # Map back to the original triangle indices.
-        remove_indices = sorted_candidate_idx[selected_sorted_indices]
+            candidate_error = candidate_depths_candidates
+            
+        remove_indices = candidate_idx
+        removed_triangle_pixels = candidate_pixels
         
-        #returns a vertex index
-        if just_return_index:
-            ret_triangle_mask = np.zeros(triangles.shape[0], dtype=bool)
-            ret_triangle_mask[remove_indices] = True
-            return np.unique(triangles[ret_triangle_mask])
-
+        # Determine which vertices are in the removed triangles.
+        removed_triangles = triangles[remove_indices]  # shape (R, 3)
+        
+        removed_map = np.column_stack((
+            np.repeat(remove_indices, 3),
+            np.repeat(removed_triangle_pixels[:, 0], 3),
+            np.repeat(removed_triangle_pixels[:, 1], 3),
+            removed_triangles.reshape(-1)
+        ))
+        
+        # This function is assumed to be defined elsewhere:
+        verexes_of_removed_triangels = np.unique(removed_triangles)
+        boundry_vertexes = get_still_used_vertices(mesh, verexes_of_removed_triangels)
+        
+        mask = np.isin(removed_map[:, 3], boundry_vertexes)
+        removed_boundry = removed_map[mask]
+        
         # --- Rebuild the mesh by removing only the selected triangles ---
         keep_triangle_mask = np.ones(triangles.shape[0], dtype=bool)
         keep_triangle_mask[remove_indices] = False
         new_triangles = triangles[keep_triangle_mask]
 
-        new_mesh = o3d.geometry.TriangleMesh()
-        new_mesh.vertices = mesh.vertices  # vertices remain unchanged
-        new_mesh.triangles = o3d.utility.Vector3iVector(new_triangles)
-        if len(mesh.vertex_colors) == vertices.shape[0]:
-            new_mesh.vertex_colors = mesh.vertex_colors
+        # --- Create a mapping from old vertices to new vertices ---
+        # Identify which vertices are used in the new triangles.
+        used_vertices = np.unique(new_triangles)
+        # Build a mapping: for each vertex in the original mesh, assign a new index if used, else -1.
+        vertex_mapping = -np.ones(vertices.shape[0], dtype=int)
+        for new_idx, old_idx in enumerate(used_vertices):
+            vertex_mapping[old_idx] = new_idx
 
-    # --- Final Step: Remove small isolated clusters ---
-    new_mesh = remove_small_clusters(new_mesh, min_triangles=min_cluster_triangles)
+        # Re-index the triangles using the mapping.
+        new_triangles_reindexed = np.array([[vertex_mapping[idx] for idx in tri] for tri in new_triangles])
+        new_vertices = vertices[used_vertices]
+        
+        new_mesh = o3d.geometry.TriangleMesh()
+        new_mesh.vertices = o3d.utility.Vector3dVector(new_vertices)
+        new_mesh.triangles = o3d.utility.Vector3iVector(new_triangles_reindexed)
+        if len(mesh.vertex_colors) == vertices.shape[0]:
+            colors = np.asarray(mesh.vertex_colors)[used_vertices]
+            new_mesh.vertex_colors = o3d.utility.Vector3dVector(colors)
     
-    return new_mesh
+    return new_mesh, removed_boundry, vertex_mapping
 
 def remove_vertices_by_mask(mesh, vertex_mask):
     """
@@ -254,20 +235,32 @@ def remove_vertices_by_color_exact(mesh, target_color):
 def find_edge_pixels(mask):
     """
     Find edge pixels in a 2D boolean mask using 4-connected neighbors.
-    An edge pixel is defined as a True pixel that borders at least one False pixel.
+    Returns a tuple:
+      - first element: a boolean mask for True pixels that border a False pixel,
+      - second element: a boolean mask for False pixels that border a True pixel.
     
     Parameters:
         mask (np.ndarray): A 2D boolean array.
     
     Returns:
-        edge_mask (np.ndarray): A boolean array with True at outer edge positions.
+        (true_edge, false_edge): tuple of two boolean arrays.
     """
-    edge_mask = np.zeros_like(mask, dtype=bool)
-    edge_mask[1:, :] |= mask[1:, :] & ~mask[:-1, :]  # Compare with pixel above.
-    edge_mask[:-1, :] |= mask[:-1, :] & ~mask[1:, :]  # Compare with pixel below.
-    edge_mask[:, 1:] |= mask[:, 1:] & ~mask[:, :-1]    # Compare with pixel to the left.
-    edge_mask[:, :-1] |= mask[:, :-1] & ~mask[:, 1:]    # Compare with pixel to the right.
-    return edge_mask
+    true_edge = np.zeros_like(mask, dtype=bool)
+    false_edge = np.zeros_like(mask, dtype=bool)
+    
+    # For True pixels: check if they border a False pixel.
+    true_edge[1:, :] |= mask[1:, :] & ~mask[:-1, :]  # Compare with pixel above.
+    true_edge[:-1, :] |= mask[:-1, :] & ~mask[1:, :]  # Compare with pixel below.
+    true_edge[:, 1:] |= mask[:, 1:] & ~mask[:, :-1]    # Compare with pixel to the left.
+    true_edge[:, :-1] |= mask[:, :-1] & ~mask[:, 1:]    # Compare with pixel to the right.
+    
+    # For False pixels: check if they border a True pixel.
+    false_edge[1:, :] |= ~mask[1:, :] & mask[:-1, :]   # Compare with pixel above.
+    false_edge[:-1, :] |= ~mask[:-1, :] & mask[1:, :]   # Compare with pixel below.
+    false_edge[:, 1:] |= ~mask[:, 1:] & mask[:, :-1]     # Compare with pixel to the left.
+    false_edge[:, :-1] |= ~mask[:, :-1] & mask[:, 1:]     # Compare with pixel to the right.
+    
+    return true_edge, false_edge
 
 def deduplicate_line(line):
     """
@@ -287,12 +280,56 @@ def deduplicate_line(line):
             dedup.append(pt)
     return np.array(dedup)
 
+def find_corresponding_false_pixel(pt, false_edge_mask, tangent):
+    """
+    For a given true edge pixel pt (row, col) and a tangent vector at that point,
+    return an adjacent false edge pixel that lies to the right of the tangent.
+    
+    The right-hand normal is computed as (tangent[1], -tangent[0]) (when tangent is (dr, dc)).
+    Then, among the 8-connected neighbors of pt, the function picks the neighbor
+    for which the vector (neighbor - pt) has the highest positive dot product with
+    the right-hand normal. If no neighbor lies to the right (i.e. positive dot product),
+    None is returned.
+    
+    Parameters:
+        pt (array-like): (row, col) coordinates of a true pixel.
+        false_edge_mask (np.ndarray): 2D boolean array indicating false edge pixels.
+        tangent (array-like): Tangent vector at pt (derived from the contour order).
+    
+    Returns:
+        np.ndarray or None: (row, col) coordinate of the chosen false edge pixel, or None if not found.
+    """
+    r, c = int(round(pt[0])), int(round(pt[1]))
+    H, W = false_edge_mask.shape
+    tangent = np.array(tangent)
+    if np.linalg.norm(tangent) == 0:
+        return None
+    # Compute right-hand normal: (dcol, -drow) for tangent (drow, dcol)
+    right_normal = np.array([tangent[1], -tangent[0]])
+    right_normal = right_normal / np.linalg.norm(right_normal)
+    
+    # Define 8-connected neighbor offsets.
+    offsets = [(-1, 0), (0, 1), (1, 0), (0, -1),
+               (-1, -1), (-1, 1), (1, 1), (1, -1)]
+    
+    best_dot = -np.inf
+    best_neighbor = None
+    for dr, dc in offsets:
+        nr, nc = r + dr, c + dc
+        if 0 <= nr < H and 0 <= nc < W and false_edge_mask[nr, nc]:
+            vec = np.array([dr, dc])
+            dot = np.dot(vec, right_normal)
+            if dot > best_dot and dot > 0:
+                best_dot = dot
+                best_neighbor = np.array([nr, nc])
+    return best_neighbor
+
 def extract_and_snap_contours(mask):
     """
     Extracts a contour from a binary mask using skimage's find_contours, then snaps
     each subpixel contour coordinate to the nearest outer True pixel in the mask.
-    
-    This is useful if you want an ordered line that lies on the outer True pixels.
+    Also, for each snapped true edge pixel, it finds an adjacent false edge pixel
+    that lies on the right side of the contour's direction.
     
     Parameters:
         mask (np.ndarray): A 2D binary (boolean) array.
@@ -300,48 +337,62 @@ def extract_and_snap_contours(mask):
     Returns:
         snapped_lines (list of np.ndarray): A list of ordered arrays of (row, col)
             coordinates representing the snapped outer edge lines.
+        false_mapping_lines (list of np.ndarray): A list (same length as snapped_lines) of arrays of (row, col)
+            coordinates representing the corresponding false edge pixel for each snapped true edge pixel.
+        edge_mask (np.ndarray): Boolean mask with True at outer edge positions.
+        false_edge_mask (np.ndarray): Boolean mask with True for false edge pixels.
     """
-    # First, get subpixel contours at the interface between 0 and 1.
+    # Get subpixel contours.
     contours = measure.find_contours(mask.astype(float), level=0.5)
     
-    # Compute the edge mask (outer True pixels) using fast numpy slicing.
-    edge_mask = find_edge_pixels(mask)
+    # Compute edge masks.
+    edge_mask, false_edge_mask = find_edge_pixels(mask)
+    # Get coordinates of true edge pixels (for snapping).
     edge_coords = np.argwhere(edge_mask)
-    
-    # Build a KDTree for fast nearest-neighbor lookup.
+    # Build KDTree for fast nearest-neighbor lookup.
     tree = cKDTree(edge_coords)
     
     snapped_lines = []
+    false_mapping_lines = []
+    
     for contour in contours:
         snapped = []
-        for point in contour:
-            # Query the nearest edge pixel; point is in (row, col) format.
+        false_map = []
+        N = len(contour)
+        for i, point in enumerate(contour):
+            # Snap the subpixel point to a true edge pixel.
             _, idx = tree.query(point)
-            snapped.append(edge_coords[idx])
-        # Convert to numpy array and remove any consecutive duplicates.
+            snap_pt = edge_coords[idx]
+            snapped.append(snap_pt)
+            # Compute the tangent vector using the contour order.
+            if i < N - 1:
+                tangent = contour[i+1] - point
+            elif i > 0:
+                tangent = point - contour[i-1]
+            else:
+                tangent = np.array([0, 0])
+            # Find a false edge neighbor on the right side.
+            false_pt = find_corresponding_false_pixel(snap_pt, false_edge_mask, tangent)
+            false_map.append(false_pt if false_pt is not None else [-1, -1])
         snapped_line = deduplicate_line(np.array(snapped))
+        false_line = deduplicate_line(np.array(false_map))
         snapped_lines.append(snapped_line)
+        false_mapping_lines.append(false_line)
     
-    return snapped_lines, edge_mask
-    
+    return snapped_lines, false_mapping_lines, edge_mask, false_edge_mask
 
-def fill_seam(mesh, no_bg_mesh, edge_lines, edge_vertex_indexmesh, max_distance=0.2, max_usage=2, k_candidates=5):
+def project_to_2d(points):
     """
-    Fill the seam between the inserted mesh (no_bg_mesh) and the original mesh using only
-    candidate vertices specified by edge_vertex_indexmesh (indices into mesh).
-    
-    Parameters:
-      mesh (o3d.geometry.TriangleMesh): The original mesh.
-      no_bg_mesh (o3d.geometry.TriangleMesh): The inserted mesh.
-      edge_lines (list of np.ndarray): List of arrays of indices into no_bg_mesh.vertices that define the boundary.
-      edge_vertex_indexmesh (np.array): Array of vertex indices in 'mesh' that are allowed to be used.
-      max_distance (float): Maximum allowed 3D distance from the segment midpoint to a candidate.
-      max_usage (int): Maximum allowed usage count per candidate vertex.
-      k_candidates (int): Number of nearest candidates to consider per query.
-      
-    Returns:
-      o3d.geometry.TriangleMesh: The new mesh with the seam filled.
+    Vectorized projection of 3D points (N,3) to 2D using perspective division.
+    If a point has z == 0, it is left unmodified.
     """
+    # Avoid division by zero:
+    z = points[:, 2:3]
+    z_safe = np.where(z == 0, 1, z)
+    return points[:, :2] / z_safe
+
+def fill_seam(mesh, no_bg_mesh, edge_lines, edge_vertex_indexmesh, new_vert_to_old):
+
     # Number of vertices from the inserted (no_bg_mesh)
     inserted_vertices_len = len(np.asarray(no_bg_mesh.vertices))
     
@@ -383,37 +434,37 @@ def fill_seam(mesh, no_bg_mesh, edge_lines, edge_vertex_indexmesh, max_distance=
             
             v1 = merged_vertices[idx_no_bg1]
             v2 = merged_vertices[idx_no_bg2]
-            midpoint = (v1 + v2) / 2.0
+            chosen_candidate1 = None
+            if idx_no_bg1 in new_vert_to_old:
+                chosen_candidate1 = new_vert_to_old[idx_no_bg1][0] + inserted_vertices_len
+            chosen_candidate2 = None
             
-            # Search for up to k_candidates nearest neighbors from the candidate vertices.
-            [k, idxs, dists] = kdtree.search_knn_vector_3d(midpoint, k_candidates)
-            chosen_candidate = None
-            for j in range(k):
-                candidate_relative_index = idxs[j]  # Index in candidate_vertices.
-                candidate_distance = np.sqrt(dists[j])
-                # Accept candidate if within max_distance and not overused.
-                if candidate_distance < max_distance and usage_counts[candidate_relative_index] < max_usage:
-                    # Map back to the merged mesh index.
-                    chosen_candidate = candidate_indices_in_merged[candidate_relative_index]
-                    usage_counts[candidate_relative_index] += 1
-                    break
-            
-            candidate_selected.append(chosen_candidate)
-            if chosen_candidate is not None:
+            if idx_no_bg2 in new_vert_to_old:
+                chosen_candidate2 = new_vert_to_old[idx_no_bg2][0] + inserted_vertices_len
+            one_or_two = True
+            if chosen_candidate1 is not None:
                 # Create a triangle with the two no_bg_mesh vertices and the candidate.
-                new_triangles.append([idx_no_bg1, idx_no_bg2, chosen_candidate])
+                tri = choose_candidate_facing_camera(idx_no_bg1, idx_no_bg2, chosen_candidate1, merged_vertices)
+                new_triangles.append(tri)
+                #new_triangles.append([idx_no_bg1, idx_no_bg2, chosen_candidate1])
+                #new_triangles.append([idx_no_bg2, idx_no_bg1, chosen_candidate1])
+            elif chosen_candidate2 is not None:
+                # Create a triangle with the two no_bg_mesh vertices and the candidate.
+                tri = choose_candidate_facing_camera(idx_no_bg1, idx_no_bg2, chosen_candidate2, merged_vertices)
+                new_triangles.append(tri)
+                one_or_two = False
+            
+            candidate_selected.append(chosen_candidate2)
+            if chosen_candidate2 is not None and chosen_candidate1 is not None:
+                if one_or_two:
+                    tri = choose_candidate_facing_camera(chosen_candidate2, chosen_candidate1, idx_no_bg1, merged_vertices)
+                    new_triangles.append(tri)
+                    #new_triangles.append([chosen_candidate2, chosen_candidate1, idx_no_bg2])
+                else:
+                    tri = choose_candidate_facing_camera(chosen_candidate2, chosen_candidate1, idx_no_bg2, merged_vertices)
+                    new_triangles.append(tri)
+                    #new_triangles.append([chosen_candidate1, chosen_candidate2, idx_no_bg1])
         
-        # Second pass: For every pair of consecutive segments,
-        # add extra triangles that use the candidate vertices so that an edge from the original mesh is also used.
-        for i in range(len(candidate_selected) - 1):
-            cand1 = candidate_selected[i]
-            cand2 = candidate_selected[i+1]
-            shared_boundary = int(line[i+1])  # The vertex shared by both segments.
-            if cand1 is not None and cand2 is not None:
-                # Add extra triangles bridging the gap.
-                new_triangles.append([shared_boundary, cand1, cand2])
-                new_triangles.append([int(line[i]), cand1, cand2])
-    
     # Combine the new triangles with any existing triangles in new_mesh.
     if len(new_mesh.triangles) > 0:
         existing_triangles = np.asarray(new_mesh.triangles)
@@ -423,11 +474,89 @@ def fill_seam(mesh, no_bg_mesh, edge_lines, edge_vertex_indexmesh, max_distance=
     
     new_mesh.triangles = o3d.utility.Vector3iVector(combined_triangles.tolist())
     
-    # Recompute normals after modifying the mesh.
-    new_mesh.compute_vertex_normals()
-    new_mesh.compute_triangle_normals()
-    
     return new_mesh
+    
+def choose_candidate_facing_camera(v1_idx, v2_idx, candidate_idx, vertices):
+    """
+    Given three vertex indices (v1_idx, v2_idx, candidate_idx) and a vertex list,
+    returns a tuple of indices for the triangle that is oriented to face the camera
+    (assumed to be at (0,0,0)).
+    
+    The function:
+      1. Retrieves the 3D coordinates from the vertex list.
+      2. Computes the centroid of the triangle.
+      3. Computes the triangle's normal using the cross product of (v2 - v1) and (candidate - v1).
+      4. Normalizes the normal.
+      5. Computes the vector from the centroid to the camera (i.e. -centroid) and normalizes it.
+      6. Checks the dot product between the normal and the vector to the camera.
+         If the dot product is positive, the triangle is facing the camera; otherwise, 
+         the function swaps v2 and candidate to flip the normal.
+    
+    Parameters:
+      v1_idx, v2_idx, candidate_idx (int): Vertex indices for the triangle.
+      vertices (np.ndarray): An array of shape (N, 3) containing the 3D coordinates for each vertex.
+      
+    Returns:
+      tuple: A tuple of three vertex indices representing the triangle, ordered so that the face is front‐facing.
+    """
+    v1 = vertices[v1_idx]
+    v2 = vertices[v2_idx]
+    candidate = vertices[candidate_idx]
+    
+    # Form the triangle and compute its centroid.
+    tri = np.array([v1, v2, candidate])
+    centroid = np.mean(tri, axis=0)
+    
+    # Compute the triangle's normal using the given order.
+    normal = np.cross(v2 - v1, candidate - v1)
+    norm_val = np.linalg.norm(normal)
+    if norm_val != 0:
+        normal = normal / norm_val
+    else:
+        # Degenerate triangle; return the original ordering.
+        return (v1_idx, v2_idx, candidate_idx)
+    
+    # Compute the vector from the centroid to the camera (camera at origin).
+    to_camera = -centroid
+    to_camera_norm = np.linalg.norm(to_camera)
+    if to_camera_norm != 0:
+        to_camera = to_camera / to_camera_norm
+    else:
+        # If centroid is at the origin, the orientation is ambiguous.
+        return (v1_idx, v2_idx, candidate_idx)
+    
+    dot = np.dot(normal, to_camera)
+    if dot > 0:
+        # The triangle is already facing the camera.
+        return (v1_idx, v2_idx, candidate_idx)
+    else:
+        # Swap the order of v2 and candidate to flip the normal.
+        return (v1_idx, candidate_idx, v2_idx)
+    
+def get_still_used_vertices(mesh, vertex_list):
+    """
+    Given a mesh and a list/array of vertex indices, returns the subset of those
+    vertices that are still used in any triangle of the mesh.
+    
+    Parameters:
+      mesh (o3d.geometry.TriangleMesh): The mesh to check.
+      vertex_list (array-like): List or array of vertex indices to check.
+    
+    Returns:
+      numpy.ndarray: Array of vertex indices from vertex_list that are still used.
+    """
+    # Get all triangles from the mesh (each triangle is a triplet of vertex indices).
+    triangles = np.asarray(mesh.triangles)
+    
+    # Get unique vertex indices that appear in any triangle.
+    used_vertex_indices = np.unique(triangles)
+    
+    # Find the intersection between used vertices and the given vertex list.
+    still_used = np.intersect1d(vertex_list, used_vertex_indices)
+    
+    return still_used
+    
+    
 
 if __name__ == '__main__':
     
@@ -548,6 +677,8 @@ if __name__ == '__main__':
     
     cameraLines, LastcameraLines = None, None
     frame_n = 0
+    invalid_colors = None
+    invalid_indexs = None
     last30_max_depth = []
     while raw_video.isOpened():
         
@@ -613,7 +744,11 @@ if __name__ == '__main__':
         
         
         
-        green_mesh, _ = depth_map_tools.get_mesh_from_depth_map(depth, cam_matrix, color_frame, projected_mesh, remove_edges = True, mask = mask, invalid_color = invalid_color)
+        green_mesh, invalid_vertex_indices = depth_map_tools.get_mesh_from_depth_map(depth, cam_matrix, color_frame, projected_mesh, remove_edges = True, mask = mask, invalid_color = invalid_color)
+        
+        ref_to_all_col = np.asarray(green_mesh.vertex_colors)
+        org_colors = ref_to_all_col.copy()
+        ref_to_all_col[invalid_vertex_indices] = np.array(invalid_color)
         #clean_mesh, _ = depth_map_tools.get_mesh_from_depth_map(depth, cam_matrix, color_frame, projected_mesh, remove_edges = True, mask = mask)
         
         if transformations is not None:
@@ -622,6 +757,8 @@ if __name__ == '__main__':
         
         if mesh is None:
             mesh = copy.deepcopy(green_mesh)
+            invalid_colors = org_colors
+            invalid_indexs = invalid_vertex_indices
             if not args.render and args.draw_frame == -1:
                 vis.add_geometry(mesh)
             if background_obj is not None:
@@ -639,13 +776,22 @@ if __name__ == '__main__':
             
             
             #parts of the mesh that are invalid will be invalid_color as well as parts in the view that has need been seen before (ie the background)
-            pixels_to_where_vertex_needed, removal_depth_map = depth_map_tools.render([mesh], cam_matrix, depth = -2, extrinsic_matric = transform_from_zero, bg_color = invalid_color)
             
+            mesh.transform(transform_to_zero) #Transform to take a picture from the current camera pos
+            pixels_to_where_vertex_needed, removal_depth_map = depth_map_tools.render([mesh], cam_matrix, depth = -2, bg_color = invalid_color)
+             
             #print("rendered_shape:", pixels_to_where_vertex_needed.shape, "depth_shape", depth.shape)
             
             
             #Create a mask for all vertextes that are green in pixels_to_replace
             pixels_to_where_vertexes_needed_mask = np.all(pixels_to_where_vertex_needed == invalid_color, axis=-1)
+            
+            
+            #Find "Cut" lines (not sure we need this anymore)
+            edge_lines, false_mapping_lines, edge_mask, false_edge_mask  = extract_and_snap_contours(pixels_to_where_vertexes_needed_mask)
+            
+            
+            
             #model_mask = np.full((frame_height, frame_width), 255, dtype=np.uint8)
             #model_mask[pixels_to_replace_mask] = 0
             
@@ -667,17 +813,28 @@ if __name__ == '__main__':
             
             #color_frame[pixels_to_replace_mask] = bg_col
             
-            green_mesh_2, _ = depth_map_tools.get_mesh_from_depth_map(depth, cam_matrix, color_frame, projected_mesh, remove_edges = True, mask = mask, invalid_color = invalid_color)
-            green_mesh_2.transform(transform_to_zero)
+            #Generate mesh from current frame
+            #green_mesh_2, _ = depth_map_tools.get_mesh_from_depth_map(depth, cam_matrix, color_frame, projected_mesh, remove_edges = True, )
+            #green_mesh_2.transform(transform_to_zero)
+            
+            #Mesh from current frame in zero transform state green_mesh
+            green_mesh
             
             
-            edge_lines, edge_mask = extract_and_snap_contours(pixels_to_where_vertexes_needed_mask)
+            
+            
+            #structuring_element = np.ones((3, 3), dtype=bool)
+
+            # Perform binary dilation
+            #expanded_edge_mask = binary_dilation(edge_mask, structure=structuring_element)
             
             
             
+            #Remove all vertexes that are not in the pixels that we are intressted in
+            no_bg_mesh, index_map = remove_vertices_by_mask(green_mesh, pixels_to_where_vertexes_needed_mask.reshape(-1))
             
-            
-            no_bg_mesh, index_map = remove_vertices_by_mask(green_mesh_2, pixels_to_where_vertexes_needed_mask.reshape(-1))
+            #depth_map_tools.draw([no_bg_mesh])
+            #exit(0)
             
             
             #Test to show that we can draw all edge lines red
@@ -688,27 +845,82 @@ if __name__ == '__main__':
             
             # Before we add the new mesh we need to remove the stuff it replaces
             
-            edge_vertex_index = remove_visible_triangles_by_image_mask(mesh, edge_mask, cam_matrix, extrinsics=transform_from_zero, rendered_depth=removal_depth_map, just_return_index=True)
+            #edge_vertex_index = remove_visible_triangles_by_image_mask(mesh, false_edge_mask, cam_matrix, extrinsics=transform_from_zero, rendered_depth=removal_depth_map, just_return_index=True)
             
             
-            print(edge_vertex_index)
+            #print(edge_vertex_index)
             #edge_vertex_index += len(np.asarray(no_bg_mesh.vertices))
             
+            #mesh.transform(transform_to_zero)
+            #no_bg_mesh.transform(transform_to_zero)
+            
+            #Remove triangles that will be replaced by the new mesh
+            mesh, removed_boundry, index_map = remove_visible_triangles_by_image_mask(mesh, ~pixels_to_where_vertexes_needed_mask, cam_matrix)
+            
+            mesh.transform(transform_from_zero) #Untranform from current camera pos back in to zero
+            
+            depth_map_tools.draw([mesh])
+            exit(0)
+            
+            #print(boundary_to_pixels)
+            
+            #still_used_edge_vertex_list = get_still_used_vertices(mesh, edge_vertex_index)
+            #pixels2_boundry_vert = invert_boundary_mapping(boundary_to_pixels, edge_mask)
+            #boundry_vertexes = np.unique(removed_boundry[:, 3])
+            #new_vert_to_old = {}
+            #for row in removed_boundry:
+            #    insert_vert_indexs = row[1] * pixels_to_where_vertexes_needed_mask.shape[1] + row[2]
+            #    if insert_vert_indexs in index_map:
+            #        if insert_vert_indexs not in new_vert_to_old:
+            #            new_vert_to_old[index_map[insert_vert_indexs]] = []
+            #        new_vert_to_old[index_map[insert_vert_indexs]].append(row[3])
+                    
+            #for bv, pixels in boundary_to_pixels.items():
+            #    for p in pixels:
+            #        insert_vert_indexs = p[0] * pixels_to_where_vertexes_needed_mask.shape[1] + p[1]
+            #        if insert_vert_indexs in index_map:
+            #            if insert_vert_indexs not in new_vert_to_old:
+            #                new_vert_to_old[index_map[insert_vert_indexs]] = []
+            #            new_vert_to_old[index_map[insert_vert_indexs]].append(bv)
+            #            #print(p, "=", bv)
+            
+            #print(pixels2_boundry_vert)
+            
+            ofset = 0 #+len(no_bg_mesh.vertices)
             
             
+            #mesh = fill_seam(mesh, no_bg_mesh, edge_lines_vert, boundry_vertexes, new_vert_to_old)
             
+            #mesh, index_map = remove_vertices_by_mask(mesh, pixels_to_where_vertexes_needed_mask.reshape(-1))
             
-            mesh = remove_visible_triangles_by_image_mask(mesh, pixels_to_where_vertexes_needed_mask, cam_matrix, extrinsics=transform_from_zero, rendered_depth=removal_depth_map, min_cluster_triangles=100)
-            
-            
-            mesh = fill_seam(mesh, no_bg_mesh, edge_lines_vert, edge_vertex_index)
+            #mesh.transform(transform_from_zero)
             
             #mesh += no_bg_mesh 
             
             #mesh = fill_seam_with_fan(mesh, edge_lines, pixels_to_where_vertexes_needed_mask.shape)
             
+            
+            #invalid_colors = ref_to_all_col.copy()
+            #invalid_indexs = invalid_vertex_indices
+            
+            new_indices = index_map[invalid_indexs-ofset]
+
+            # Filter out any entries that are -1 (indicating the vertex was removed).
+            valid_mask = new_indices >= 0
+            new_indices_valid = new_indices[valid_mask]
+
+            # Also, get the corresponding colors for the kept vertices.
+            invalid_colors_valid = invalid_colors[invalid_indexs[valid_mask]-ofset]
+
+            # Update the new mesh's vertex colors.
+            ref_to_all_col = np.asarray(mesh.vertex_colors)
+            ref_to_all_col[new_indices_valid] = invalid_colors_valid
+            
             redner_of_replacement_mesh = depth_map_tools.render([mesh], cam_matrix, extrinsic_matric = transform_from_zero, bg_color = np.array([0.0,0.0,0.0]))
             
+            
+            depth_map_tools.draw([mesh])
+            exit(0)
             
             #for line in edge_lines:
             #    redner_of_replacement_mesh[line[:, 0], line[:, 1]] = np.array([1.,0.,0.])
