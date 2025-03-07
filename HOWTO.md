@@ -4,6 +4,7 @@ This guide contains a walkthrogh of how to use the tools in the metric depth vid
 
 ## Part one: generating aligned depth video
 Select a video to work with. This should be a clip, preferably less than 6-7 minutes long (due to GPU memmory usage), and there should not be any cuts in the video. The video should preferably have the same zoom level over the hole clip. Due to GPU memmory constraints in Video-Depth-Anything the aspect ratio is best keept under 16:9.
+If you want to convert an entire movie split it up and do it scene by scene. There are tools that can cut down a movie to its scenes automatically.
 
 I will use [in_office_720p.mp4](https://github.com/calledit/metric_depth_video_toolbox/releases/download/ExampleFiles/in_office_720p.mp4) with two individuals walking in a hallway obtained from pexels.com
 <img width="930" alt="video_in" src="https://github.com/user-attachments/assets/3ff877b1-fa68-4a0c-8089-6ee6d4fccecc" />
