@@ -124,7 +124,7 @@ The result should be a video file named:
 
 
 ### Final step compress and add back audio
-Here we use ffmpeg to extract the original audio and add it back in the video as well as compressing the larege uncompressed video file in to a video format/size that a modern VR headset or other stereo capable device can handle.
+Here we use ffmpeg to extract the original audio and add it back in the video as well as compressing the large uncompressed video file in to a video format/size that a modern VR headset or other stereo capable device can handle.
 ```
 #Extract audio as a wave file
 ffmpeg -i ~/in_office_720p.mp4 ~/in_office_720p.wav
