@@ -109,10 +109,15 @@ We tell stereo_rerender.py to remove all edges as we will use infill to fill the
 ```
 python3.11 stereo_rerender.py --color_video ~/in_office_720p.mp4 --depth_video ~/in_office_720p.mp4_depth.mkv_rescaled.mkv --yfov 40 --infill_mask --remove_edges
 ```
+Raw side by side stero (black where there is paralax):
+<img width="950" alt="sbs" src="https://github.com/user-attachments/assets/672b9703-3215-400e-bb72-54a8f119366a" />
+
+Side stero infill mask. Green, red and blue where there is paralax. Blue represents the edge of a infill area that is furthest from the camera and red is the edge closest to the camera:
+<img width="950" alt="sbs" src="https://github.com/user-attachments/assets/19784521-487d-4c13-9f04-a054a14e287c" />
 
 ### Step 8
 Here we will use ML to add paralax infill using the tool stereo_crafter_infill.py
-Stereocrafter is based on stable defusion so is very slow, so be patient.
+Stereocrafter is based on stable defusion so is very slow, be patient. On a 3090 around 0.2 fps have been observed. That is a minute of video recorded at 30 fps will take 2.5 hours to process. Think of it as a proccess you run over night.
 
 ```
 ./install_mvdtoolbox.sh -stereocrafter #downloads and installs stereocrafter in the right folder
