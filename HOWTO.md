@@ -109,18 +109,28 @@ We tell stereo_rerender.py to remove all edges as we will use infill to fill the
 ```
 python3.11 stereo_rerender.py --color_video ~/in_office_720p.mp4 --depth_video ~/in_office_720p.mp4_depth.mkv_rescaled.mkv --yfov 40 --infill_mask --remove_edges
 ```
+Raw side by side stero (black where there is paralax):
+<img width="950" alt="sbs" src="https://github.com/user-attachments/assets/672b9703-3215-400e-bb72-54a8f119366a" />
+
+Side stero infill mask. Green, red and blue where there is paralax. Blue represents the edge of a infill area that is furthest from the camera and red is the edge closest to the camera:
+<img width="950" alt="sbs" src="https://github.com/user-attachments/assets/19784521-487d-4c13-9f04-a054a14e287c" />
 
 ### Step 8
 Here we will use ML to add paralax infill using the tool stereo_crafter_infill.py
-Stereocrafter is based on stable defusion so is very slow, so be patient.
+Stereocrafter is based on stable defusion so is very slow, be patient. On a 3090 around 0.2 fps have been observed. That is a minute of video recorded at 30 fps will take 2.5 hours to process. Think of it as a proccess you run over night.
 
 ```
 ./install_mvdtoolbox.sh -stereocrafter #downloads and installs stereocrafter in the right folder
 
-python3.11 stereo_crafter_infill.py --sbs_color_video ~/dancing_crop.mp4_depth.mkv_rescaled.mkv_stereo.mkv --sbs_mask_video ~/dancing_crop.mp4_depth.mkv_rescaled.mkv_stereo.mkv_infillmask.mkv
+python3.11 stereo_crafter_infill.py --sbs_color_video ~/in_office_720p.mp4_depth.mkv_rescaled.mkv_stereo.mkv --sbs_mask_video ~/in_office_720p.mp4_depth.mkv_rescaled.mkv_infillmask.mkv
 ```
-The result should be a video file named:
-~/dancing_crop.mp4_depth.mkv_rescaled.mkv_stereo.mkv_infilled.mkv
+The result will be a video file named:
+~/in_office_720p.mp4_depth.mkv_rescaled.mkv_infilled.mkv
+
+As is visible in the image below, stereocrafter does a pretty good job. But it is not perfect the pillar to the right is a good example of where it did not fill in all the way. Increasing the stereocrafter image resolution does sometimes improve the output but it also slows down the process even more.
+
+<img width="950" alt="sbs" src="https://github.com/user-attachments/assets/7d19f74a-2a24-4a17-8581-ce9355cb13ad" />
+
 
 
 ### Final step compress and add back audio
@@ -131,7 +141,7 @@ ffmpeg -i ~/in_office_720p.mp4 ~/in_office_720p.wav
 
 
 #Compress video for viewing on otehr devices and add back audio
-ffmpeg -i ~/dancing_crop.mp4_depth.mkv_rescaled.mkv_stereo.mkv_infilled.mkv -i ~/in_office_720p.wav -c:v libx265 -crf 18 -tag:v hvc1 -pix_fmt yuv420p -c:a aac -map 0:v:0 -map 1:a:0 ~/dancing_crop_final_stero.mp4
+ffmpeg -i ~/in_office_720p.mp4_depth.mkv_rescaled.mkv_infilled.mkv -i ~/in_office_720p.wav -c:v libx265 -crf 18 -tag:v hvc1 -pix_fmt yuv420p -c:a aac -map 0:v:0 -map 1:a:0 ~/in_office_720p_final_stero.mp4
 ```
 
 
