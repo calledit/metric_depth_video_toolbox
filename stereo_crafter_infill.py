@@ -8,11 +8,13 @@ from transformers import CLIPVisionModelWithProjection
 from diffusers import AutoencoderKLTemporalDecoder, UNetSpatioTemporalConditionModel
 
 from StereoCrafter.pipelines.stereo_video_inpainting import StableVideoDiffusionInpaintingPipeline, tensor2vid
+from scipy.ndimage import binary_dilation
 
 import cv2
 
 
-black = np.array([0, 0, 0], dtype=np.uint8)#the paintout model dont understand green screen despite having a mask it need things to be black
+black = np.array([0, 0, 0], dtype=np.uint8)
+blue = np.array([0, 0, 255], dtype=np.uint8)
 pipeline = None
 frame_rate, frame_width, frame_height = None, None, None
 def generate_infilled_frames(input_frames, input_masks):
@@ -81,25 +83,67 @@ def deal_with_frame_chunk(keep_first_three, chunk, out, keep_last_three):
     if not keep_last_three:
         eend -= 3
 
+    proccessed_frames = []
     for j in range(sttart, eend):
         left_img = cv2.resize(np.fliplr(left_frames[j]), (pic_width, frame_height))
         right_img = cv2.resize(right_frames[j], (pic_width, frame_height))
 
 
-        right_org_img = chunk[j][0][:frame_height, pic_width:]
-        left_org_img = chunk[j][0][:frame_height, :pic_width]
+        right_org_img = chunk[j][0][:frame_height, pic_width:].copy()
+        left_org_img = chunk[j][0][:frame_height, :pic_width].copy()
         right_mask = chunk[j][1][:frame_height, pic_width:]
         left_mask = chunk[j][1][:frame_height, :pic_width]
 
+        #we invert the mask here, originaly black is source material ie mask = True, white is area that needs infill ie mask = False
         right_black_mask = np.all(right_mask == black, axis=-1)
         left_black_mask = np.all(left_mask == black, axis=-1)
 
-        #Update the image so that the original takes president
-        left_img[left_black_mask] = left_org_img[left_black_mask]
-        right_img[right_black_mask] = right_org_img[right_black_mask]
+        #We update the org image so it contains the rigthpixels
+        left_org_img[~left_black_mask] = left_img[~left_black_mask]
+        right_org_img[~right_black_mask] = right_img[~right_black_mask]
 
+        #We save this basic image witout blending for use as input to next batch
+        basic_out_image = cv2.hconcat([left_org_img, right_org_img])
+        basic_out_image_uint8 = np.clip(basic_out_image, 0, 255).astype(np.uint8)
+        proccessed_frames.append(basic_out_image_uint8)
+
+        # Apply edge blending
+        # if we dont we get a uggly halo effect around forground objects
+        right_backedge_mask = np.all(right_mask == blue, axis=-1)
+        left_backedge_mask = np.all(left_mask == blue, axis=-1)
+
+        right_backedge_mask = binary_dilation(right_backedge_mask, iterations = 6)
+        left_backedge_mask = binary_dilation(left_backedge_mask, iterations = 6)
+
+        right_mask_float = right_backedge_mask.astype(np.float32)
+        left_mask_float = left_backedge_mask.astype(np.float32)
+
+
+        # Choose a kernel size and sigma for the Gaussian blur (tweak as needed).
+        kernel_size = (15, 15)
+        sigma = 0  # let OpenCV choose based on kernel size
+
+
+        # Apply Gaussian blur to get soft alpha masks.
+        right_alpha = cv2.GaussianBlur(right_mask_float, kernel_size, sigma)
+        left_alpha = cv2.GaussianBlur(left_mask_float, kernel_size, sigma)
+
+        # Expand dimensions to match image shape (H, W, 1).
+        right_alpha = right_alpha[..., np.newaxis]
+        left_alpha = left_alpha[..., np.newaxis]
+
+        # Now blend: use the soft alpha to mix the original image with the existing one.
+        # When alpha is 1, original image takes full weight; when 0, the destination image is preserved.
+        left_img = left_alpha * left_img + (1 - left_alpha) * left_org_img
+        right_img = right_alpha * right_img + (1 - right_alpha) * right_org_img
+
+        # Finally, concatenate the blended images.
         out_image = cv2.hconcat([left_img, right_img])
-        out.write(cv2.cvtColor(out_image, cv2.COLOR_RGB2BGR))
+
+        out_image_uint8 = np.clip(out_image, 0, 255).astype(np.uint8)
+        out.write(cv2.cvtColor(out_image_uint8, cv2.COLOR_RGB2BGR))
+
+    return proccessed_frames
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Video Crafter infill script')
@@ -186,20 +230,32 @@ if __name__ == '__main__':
         ret, mask_frame = mask_video.read()
         mask_frame = cv2.cvtColor(mask_frame, cv2.COLOR_BGR2RGB)
 
-        bg_color_infill_detect = np.array([0, 255, 0], dtype=np.uint8)
-        bg_mask = np.all(rgb == bg_color_infill_detect, axis=-1)
+        #bg_color_infill_detect = np.array([0, 255, 0], dtype=np.uint8)
+        #bg_mask = np.all(rgb == bg_color_infill_detect, axis=-1)
         #img_mask = np.zeros((frame_height, frame_width), dtype=np.uint8)
-        rgb[bg_mask] = black
+        #rgb[bg_mask] = black
 
         frame_buffer.append([rgb, mask_frame])
 
         if len(frame_buffer) >= frames_chunk:
-            deal_with_frame_chunk(first_chunk, frame_buffer, out, last_chunk)
+            proccessed_frames = deal_with_frame_chunk(first_chunk, frame_buffer, out, last_chunk)
+
+            # the first 3 frames are not used (unless this is the first chunk), and the last 3 frames are not used
             if first_chunk:
                 #keep overlap
                 first_chunk = False
-            frame_buffer = [frame_buffer[-6], frame_buffer[-5], frame_buffer[-4], frame_buffer[-3], frame_buffer[-2], frame_buffer[-1]]#reset but keep overlapp
-        
+            frame_buffer = [
+                # have tried priming with previously generated frames: (proccessed_frames[-5], frame_buffer[-5][1])
+                # It does not genrerate great results
+
+                (proccessed_frames[-6], frame_buffer[-6][1]),# we prime the next round with some frames
+                (proccessed_frames[-5], frame_buffer[-5][1]),
+                (proccessed_frames[-4], frame_buffer[-4][1]),
+                frame_buffer[-3],# the last 3 frames tend to be pretty bad so we dont prime with them
+                frame_buffer[-2],
+                frame_buffer[-1],
+            ]#reset but keep overlapp
+
         if frame_n == args.max_frames:
             break
 

@@ -85,6 +85,179 @@ def convert_to_equirectangular(image, input_fov=100):
     return equirect_img
 
 
+def mark_depth_transitions_old_slow(boolean_mask, depth_map):
+    """
+    For each row in the boolean mask, finds segments where the mask is True.
+    For each segment, compares the depth values at the transition edges.
+    Marks:
+      - The closer edge with red (255, 0, 0)
+      - The further edge with blue (0, 0, 255)
+      - The interior of True segments with green (0, 255, 0)
+      - All False pixels as black (0, 0, 0)
+      
+    Parameters:
+      boolean_mask (np.ndarray): 2D boolean array, shape (H, W)
+      depth_map (np.ndarray): 2D array (H, W) with depth values.
+      
+    Returns:
+      np.ndarray: Color image (H, W, 3) with the markings.
+    """
+    H, W = boolean_mask.shape
+    # Define colors (RGB)
+    red   = np.array([255, 0, 0], dtype=np.uint8)
+    blue  = np.array([0, 0, 255], dtype=np.uint8)
+    green = np.array([0, 255, 0], dtype=np.uint8)
+    black = np.array([0, 0, 0], dtype=np.uint8)
+    
+    # Start with a black output image.
+    result = np.zeros((H, W, 3), dtype=np.uint8)
+    
+    # Mark all True pixels as green by default.
+    result[boolean_mask] = green
+    
+    # Process each row separately.
+    for i in range(H):
+        row_mask = boolean_mask[i]
+        row_depth = depth_map[i]
+        # Convert boolean to int (0, 1) and compute difference to find transitions.
+        row_int = row_mask.astype(np.int32)
+        diff = np.diff(row_int)
+        
+        # Find transition indices: 
+        start_indices = np.where(diff == 1)[0] +1
+        end_indices   = np.where(diff == -1)[0]
+        
+        # If the row starts with True, then add index 0 as a start.
+        if row_mask[0]:
+            start_indices = np.insert(start_indices, 0, 0)
+        # If the row ends with True, then add the last index as an end.
+        if row_mask[-1]:
+            end_indices = np.append(end_indices, W - 1)
+        
+        # Make sure we have matching pairs (if not, skip row)
+        if start_indices.size != end_indices.size:
+            continue
+        
+        # Process each segment in the row.
+        for s, e in zip(start_indices, end_indices):
+            
+            #Ignore single pixels
+            if s == e:
+                continue
+            
+            #Check the depth just outside of the edges as it is more reliable
+            start_depth_chek_location = max(s - 2, 0)
+            end_depth_chek_location = min(e + 2, W-1)
+            
+            # Get the depth values just outside of the boundaries.
+            depth_s = row_depth[start_depth_chek_location]
+            depth_e = row_depth[end_depth_chek_location]
+            # Compare: lower depth is closer.
+            if depth_s < depth_e:
+                result[i, s] = red   # start is closer
+                result[i, e] = blue  # end is further
+            else:
+                result[i, s] = blue  # start is further
+                result[i, e] = red   # end is closer
+    return result
+
+
+def mark_depth_transitions(boolean_mask, depth_map):
+    """
+    This function tries to determine what side of an edge is closer or further away from the camera.
+    Which is usefull info to have when doing paralax infill.
+    This is something that could be calculated exactly but, that would probably require more processing power.
+    Or use of a diffrent 3D library than open3D. So this function asumes that all pixels only move in x direction due to paralax.
+    Which is true for the exact height center of the image as that is how we move the camera but it is a rough estimation of pixels
+    Further up or down....
+    
+    For each row in the boolean mask, finds segments where the mask is True.
+    For each segment, compares depth values at points slightly outside the segment edges:
+      - Closer edge is marked red (255, 0, 0)
+      - Further edge is marked blue (0, 0, 255)
+      - The interior of infill areas is marked green (0, 255, 0)
+      - Non infill pixels are black (0, 0, 0)
+    
+    Parameters:
+      boolean_mask (np.ndarray): 2D boolean array, shape (H, W)
+      depth_map (np.ndarray): 2D float array, shape (H, W) with depth values.
+      
+    Returns:
+      np.ndarray: Color image (H, W, 3) with the markings.
+    """
+    H, W = boolean_mask.shape
+
+    # Define colors (RGB)
+    red   = np.array([255, 0, 0], dtype=np.uint8)
+    blue  = np.array([0, 0, 255], dtype=np.uint8)
+    green = np.array([0, 255, 0], dtype=np.uint8)
+    black = np.array([0, 0, 0], dtype=np.uint8)
+    
+    # Start with a black output image.
+    result = np.zeros((H, W, 3), dtype=np.uint8)
+    # Mark all True pixels as green.
+    result[boolean_mask] = green
+
+    # Convert mask to integer (0/1) and compute diff along each row.
+    mask_int = boolean_mask.astype(np.int8)
+    diff = np.diff(mask_int, axis=1)  # shape (H, W-1)
+
+    # Find indices of transitions:
+    # diff == 1: transition from False->True, so segment start (actual index = col + 1)
+    start_rows, start_cols = np.where(diff == 1)
+    start_cols = start_cols + 1  # adjust to actual start
+
+    # diff == -1: transition from True->False, so segment end (actual index = col)
+    end_rows, end_cols = np.where(diff == -1)
+
+    # Rows starting with True: add (row, 0) as start.
+    first_true = np.where(boolean_mask[:, 0])[0]
+    start_rows = np.concatenate([first_true, start_rows])
+    start_cols = np.concatenate([np.zeros(first_true.shape, dtype=int), start_cols])
+
+    # Rows ending with True: add (row, W-1) as end.
+    last_true = np.where(boolean_mask[:, -1])[0]
+    end_rows = np.concatenate([end_rows, last_true])
+    end_cols = np.concatenate([end_cols, np.full(last_true.shape, W - 1, dtype=int)])
+
+    # To pair transitions per row, group by row.
+    # Process only rows that have at least one transition.
+    unique_rows = np.unique(np.concatenate([start_rows, end_rows]))
+    for r in unique_rows:
+        # Get all start and end indices for this row.
+        s_mask = start_rows == r
+        e_mask = end_rows == r
+        s_cols = start_cols[s_mask]
+        e_cols = end_cols[e_mask]
+        # Only process if we have a matching pair per segment.
+        n_segments = min(len(s_cols), len(e_cols))
+        if n_segments == 0:
+            continue
+        s_cols = s_cols[:n_segments]
+        e_cols = e_cols[:n_segments]
+        
+        # Compute check positions: 2 pixels to the left of s (clamped to 0) 
+        # and 2 pixels to the right of e (clamped to W-1)
+        s_checks = np.maximum(s_cols - 2, 0)
+        e_checks = np.minimum(e_cols + 2, W - 1)
+        
+        # Get depth values at the check positions.
+        depth_s = depth_map[r, s_checks]
+        depth_e = depth_map[r, e_checks]
+        
+        # Compare depths: lower depth is considered closer.
+        # For each segment, mark the closer edge red and the further edge blue.
+        closer_at_start = depth_s < depth_e
+        # For segments where start is closer:
+        result[r, s_cols[closer_at_start]] = red
+        result[r, e_cols[closer_at_start]] = blue
+        # For segments where end is closer:
+        result[r, s_cols[~closer_at_start]] = blue
+        result[r, e_cols[~closer_at_start]] = red
+
+    return result
+
+
 if __name__ == '__main__':
     
     # Setup arguments
@@ -93,8 +266,8 @@ if __name__ == '__main__':
     
     parser.add_argument('--depth_video', type=str, help='video file to use as input', required=True)
     parser.add_argument('--color_video', type=str, help='video file to use as color input', required=False)
-    parser.add_argument('--xfov', type=int, help='fov in deg in the x-direction, calculated from aspectratio and yfov in not given', required=False)
-    parser.add_argument('--yfov', type=int, help='fov in deg in the y-direction, calculated from aspectratio and xfov in not given', required=False)
+    parser.add_argument('--xfov', type=float, help='fov in deg in the x-direction, calculated from aspectratio and yfov in not given', required=False)
+    parser.add_argument('--yfov', type=float, help='fov in deg in the y-direction, calculated from aspectratio and xfov in not given', required=False)
     parser.add_argument('--max_depth', default=20, type=int, help='the max depth that the input video uses', required=False)
     parser.add_argument('--transformation_file', type=str, help='file with scene transformations from the aligner', required=False)
     parser.add_argument('--transformation_lock_frame', default=0, type=int, help='the frame that the transfomrmation will use as a base', required=False)
@@ -255,6 +428,7 @@ if __name__ == '__main__':
             if infill_mask_video is not None:
                 bg_color = np.array([0.0, 1.0, 0.0])
                 bg_color_infill_detect = np.array([0, 255, 0], dtype=np.uint8)
+                black = np.array([0, 0, 0], dtype=np.uint8)
                 
             
             
@@ -296,7 +470,7 @@ if __name__ == '__main__':
                     print("clearing up pointcloud")
                     
                     # perspective_aware_down_sample makes sense when you are looking in the same direction, techically a normal down_sample function would be better. But it is to slow.
-                    bg_cloud = depth_map_tools.perspective_aware_down_sample(bg_cloud, 0.003)#1 cubic cm
+                    bg_cloud = depth_map_tools.perspective_aware_down_sample(bg_cloud, 0.003)
                 
                     bg_points  = np.asarray(bg_cloud.points)
                     bg_point_colors = np.asarray(bg_cloud.colors)
@@ -341,18 +515,26 @@ if __name__ == '__main__':
             
                 #move mesh for left eye render
                 mesh.translate([-left_shift, 0.0, 0.0])
-                left_image = (depth_map_tools.render([mesh], render_cam_matrix, bg_color = bg_color)*255).astype(np.uint8)
+                left_image, left_depth = depth_map_tools.render([mesh], render_cam_matrix, depth = -2, bg_color = bg_color)
+                left_image = (left_image*255).astype(np.uint8)
                 
                 if infill_mask_video is not None:
+                    #bg_mask = np.all(left_image == bg_color_infill_detect, axis=-1)
                     bg_mask = np.all(left_image == bg_color_infill_detect, axis=-1)
-                    left_img_mask = np.zeros((frame_height, frame_width), dtype=np.uint8)
-                    left_img_mask[bg_mask] = 255
+                    left_image[bg_mask] = black
+                    left_img_mask = mark_depth_transitions(bg_mask, left_depth)
+                    
+                    #left_img_mask = np.zeros((frame_height, frame_width), dtype=np.uint8)
+                    #left_img_mask[bg_mask] = 255
+                    
+                    #result_bgr = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
+                    #cv2.imwrite("output.png", result_bgr)
+                    #exit(0)
                     
             
                 touchly_left_depth = None
                 #Touchly1 requires a left eye depthmap XXX use dual rendering here to speed things upp
                 if args.touchly0:
-                    left_depth = depth_map_tools.render([mesh], render_cam_matrix, True)
                     left_depth8bit = np.rint(np.minimum(left_depth, args.touchly_max_depth)*(255/args.touchly_max_depth)).astype(np.uint8)
                     left_depth8bit[left_depth8bit == 0] = 255 # Any pixel at zero depth needs to move back is is non rendered depth buffer(ie things on the side of the mesh)
                     left_depth8bit = 255 - left_depth8bit #Touchly uses reverse depth
@@ -363,12 +545,15 @@ if __name__ == '__main__':
         
                 #move mesh for right eye render
                 mesh.translate([-right_shift, 0.0, 0.0])
-                right_image = (depth_map_tools.render([mesh], render_cam_matrix, bg_color = bg_color)*255).astype(np.uint8)
+                right_image, right_depth = depth_map_tools.render([mesh], render_cam_matrix, depth = -2, bg_color = bg_color)
+                right_image = (right_image*255).astype(np.uint8)
                 
                 if infill_mask_video is not None:
                     bg_mask = np.all(right_image == bg_color_infill_detect, axis=-1)
-                    right_img_mask = np.zeros((frame_height, frame_width), dtype=np.uint8)
-                    right_img_mask[bg_mask] = 255
+                    
+                    right_image[bg_mask] = black
+                    
+                    right_img_mask = mark_depth_transitions(bg_mask, right_depth)
             
                 imgs = [left_image, right_image]
                 if touchly_left_depth is not None:

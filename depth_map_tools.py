@@ -151,11 +151,19 @@ def pnpSolve_ransac(t3d_points_new_frame, mkpts2, cam_mat, distCoeffs = None, re
 def reject_outliers(data, m=1):
     return abs(data - np.mean(data)) < m * np.std(data)
 
-def pts_2_pcd(points, colors = None):
-    pcd = o3d.geometry.PointCloud()
-    pcd.points = o3d.utility.Vector3dVector(points)
-    if colors is not None:
-        pcd.colors = o3d.utility.Vector3dVector(colors)
+def pts_2_pcd(points, colors = None, ids = None):
+    if ids is None:
+        pcd = o3d.geometry.PointCloud()
+        pcd.points = o3d.utility.Vector3dVector(points)
+        if colors is not None:
+            pcd.colors = o3d.utility.Vector3dVector(colors)
+    else:
+        pcd = o3d.t.geometry.PointCloud()
+        pcd.point["positions"] = o3d.core.Tensor(points, dtype=o3d.core.float32)
+        if colors is not None:
+            pcd.point["colors"] = o3d.core.Tensor((np.array(colors) * 255).astype(np.uint8), dtype=o3d.core.uint8) # o3d.core.Tensor(colors, dtype=o3d.core.float32)
+        if ids is not None:
+            pcd.point["ids"] = o3d.core.Tensor(np.array(ids).reshape(-1, 1), dtype=o3d.core.int32)
     return pcd
 
 def project_3d_points_to_2d(t3d_points, cam_mat, distCoeffs = np.array([0,0,0,0])):
@@ -188,29 +196,31 @@ def project_2d_points_to_3d(points, depth, camera_matrix, distCoeffs = None):
     return np.array(points_3d)
 
 
-def get_mesh_from_depth_map(depth_map, cam_mat, color_frame = None, inp_mesh = None, remove_edges = False, mask = None):
-    points, height, width = create_point_cloud_from_depth(depth_map, cam_mat, True)
+def get_mesh_from_depth_map(depth_map, cam_mat, color_frame = None, inp_mesh = None, remove_edges = False, mask = None,
+                                 invalid_color=None, of_by_one = True):
+    points, height, width = create_point_cloud_from_depth(depth_map, cam_mat, of_by_one)
 
     # Create mesh from point cloud
-    mesh, used_indices = create_mesh_from_point_cloud(points, height, width, color_frame, inp_mesh, remove_edges, mask = mask)
+    mesh, used_indices = create_mesh_from_point_cloud(points, height, width, color_frame, inp_mesh, remove_edges, mask = mask, invalid_color = invalid_color)
     return mesh, used_indices
 
 def create_point_cloud_from_depth(depth_image, intrinsics, of_by_one = False):
     height, width = depth_image.shape
     x, y = np.meshgrid(np.arange(width), np.arange(height))
 
-    #Here we fix a of by one error caused by the fact that this function fills in the area betwen each vertex
+    # Here we fix a of by one error caused by the fact that this function fills in the area betwen each vertex
     if of_by_one:
+        # should probably solve in a better way. Should probably just use openGL or whatever.
         x = x.astype(np.float32)
         y = y.astype(np.float32)
         x *= (width+1)/width
         y *= (height+1)/height
 
 
-    z = depth_image  # Assuming depth is in millimeters
+
+    z = depth_image 
     x3d = (x - intrinsics[0][2]) * z / intrinsics[0][0]  # (x - cx) * z / fx
     y3d = (y - intrinsics[1][2]) * z / intrinsics[1][1]  # (y - cy) * z / fy
-
 
     points = np.stack((x3d, y3d, z), axis=-1).reshape(-1, 3)
 
@@ -272,8 +282,10 @@ def create_mesh_from_point_cloud(points, height, width,
                                  image_frame=None,
                                  inp_mesh=None,
                                  remove_edges=False,
-                                 mask = None,
-                                 angle_threshold_deg=85):
+                                 mask=None,
+                                 angle_threshold_deg=85,
+                                 invalid_color=None,
+                                 background_edge_mask_expandansions=0):
     """
     Creates an Open3D TriangleMesh from a grid-organized point cloud while
     filtering out triangles whose orientation relative to the camera is too oblique.
@@ -285,14 +297,19 @@ def create_mesh_from_point_cloud(points, height, width,
       - height: The number of rows in the grid.
       - width: The number of columns in the grid.
       - image_frame: (Optional) An image whose colors will be mapped to the mesh vertices.
-      - camera_intrinsic_matrix: (Not used here; points are assumed to be already projected.)
       - inp_mesh: (Optional) An existing mesh to update.
       - remove_edges: If True, triangles with normals that deviate too far from the view vector are removed.
+      - mask: (Optional) A mask image; when provided, it is used to filter out cells.
       - angle_threshold_deg: The maximum allowed angle (in degrees) between a triangle’s normal and 
                              the view vector. Triangles with an angle larger than this threshold are discarded.
+      - invalid_color: (Optional) If provided (as a 3-element color in [0,1]), triangles failing the
+                       edge/mask tests are not removed. Instead, the vertices belonging to these
+                       triangles are colored with this value.
     
     Returns:
       - mesh: The resulting Open3D TriangleMesh.
+      - used_indices: The indices of vertices that are used in valid triangles. In the case when
+                      invalid_color is provided, all vertices are considered used.
     """
     # Reshape points into a (N, 3) array of vertices.
     vertices = points.reshape(-1, 3)
@@ -304,9 +321,8 @@ def create_mesh_from_point_cloud(points, height, width,
     if image_frame is not None:
         colors = np.array(image_frame).reshape(-1, 3) / 255.0
 
-    
-    # If no mesh exists or if we need to remove edges, compute the triangles.
-    if inp_mesh is None or remove_edges:
+    # If no mesh exists or if we need to remove edges or apply the mask, compute the triangles.
+    if inp_mesh is None or remove_edges or mask is not None:
         if inp_mesh is None:
             mesh = o3d.geometry.TriangleMesh()
         else:
@@ -319,7 +335,7 @@ def create_mesh_from_point_cloud(points, height, width,
         #    tri1: (i, j), (i+1, j), (i+1, j+1)
         #    tri2: (i, j), (i+1, j+1), (i, j+1)
         grid_i, grid_j = np.meshgrid(np.arange(height - 1), np.arange(width - 1), indexing='ij')
-        grid_i = grid_i.ravel()  # Flatten to 1D arrays (num_cells,)
+        grid_i = grid_i.ravel()
         grid_j = grid_j.ravel()
     
         idx1 = grid_i * width + grid_j
@@ -336,16 +352,23 @@ def create_mesh_from_point_cloud(points, height, width,
             mesh.vertices = o3d.utility.Vector3dVector(vertices)
             if colors is not None:
                 mesh.vertex_colors = o3d.utility.Vector3dVector(colors)
-        
-        ref_to_all_tri = np.asarray(mesh.triangles)
-        ref_to_all_vert = np.asarray(mesh.vertices)
-        ref_to_all_col = np.asarray(mesh.vertex_colors)
-        if inp_mesh is not None:
+        else:
+            ref_to_all_tri = np.asarray(mesh.triangles)
+            ref_to_all_vert = np.asarray(mesh.vertices)
             ref_to_all_tri[:] = triangles_all[:]
             ref_to_all_vert[:] = vertices[:]
             if colors is not None:
+                ref_to_all_col = np.asarray(mesh.vertex_colors)
                 ref_to_all_col[:] = colors[:]
         
+        # Get references to underlying arrays.
+        ref_to_all_tri = np.asarray(mesh.triangles)
+        ref_to_all_vert = np.asarray(mesh.vertices)
+        if colors is not None:
+            ref_to_all_col = np.asarray(mesh.vertex_colors)
+        else:
+            ref_to_all_col = None
+
         # --- Filter triangles based on the triangle angle relative to the camera ---
         if remove_edges or mask is not None:
             invalid_mask = None
@@ -356,64 +379,114 @@ def create_mesh_from_point_cloud(points, height, width,
                 cos_threshold = np.cos(np.radians(angle_threshold_deg))
             
                 normals = np.cross(v2 - v1, v3 - v1)            # shape (N, 3)
-                view    = - (v1 + v2 + v3)/3.0                  # same shape (N, 3) as centers
-                dot     = np.einsum('ij,ij->i', normals, view)  # dot products
+                view    = - (v1 + v2 + v3) / 3.0                  # centers of triangles
+                dot     = np.einsum('ij,ij->i', normals, view)
                 len_n   = np.sqrt(np.einsum('ij,ij->i', normals, normals))
                 len_v   = np.sqrt(np.einsum('ij,ij->i', view, view))
-                cosines = dot / (len_n * len_v + 1e-15)         # +1e-15 to avoid div-by-zero
-
+                cosines = dot / (len_n * len_v + 1e-15)
                 invalid_mask = (cosines < cos_threshold)
+                
+                # Here we remove extra triangles on the lower side of each edge. Should in theory
+                # help with colors from the forground leaching in to the background. (an issue that is visible as
+                # a halo around forground objects when using ML infill). In practise it causes to much glitching so is disabled.
+                for it in range(background_edge_mask_expandansions):
+                    # For the invalid triangles, extract the depth (z-coordinate) of each vertex.
+                    depth_v1 = v1[invalid_mask][:, 2]
+                    depth_v2 = v2[invalid_mask][:, 2]
+                    depth_v3 = v3[invalid_mask][:, 2]
+
+                    # Stack the depths so that each row corresponds to one invalid triangle.
+                    depths = np.stack([depth_v1, depth_v2, depth_v3], axis=1)
+
+                    # Determine which vertex (0, 1, or 2) in each invalid triangle has the maximum depth.
+                    furthest_vertex_per_triangle = np.argmax(depths, axis=1)
+
+                    # Map back to the global vertex indices using triangles_all.
+                    invalid_indices = np.nonzero(invalid_mask)[0]  # indices into triangles_all for invalid triangles
+                    furthest_vertex_indices = triangles_all[invalid_indices, furthest_vertex_per_triangle]
+
+                    # --- New Step: Mark any triangle that uses any of these furthest vertices as invalid ---
+                    # Create a set of unique furthest vertex indices.
+                    furthest_vertices_set = np.unique(furthest_vertex_indices)
+
+                    # Mark all triangles that use any vertex in furthest_vertices_set.
+                    additional_invalid_mask = np.isin(triangles_all, furthest_vertices_set).any(axis=1)
+
+                    # Optionally, combine the original invalid_mask with the additional mask.
+                    invalid_mask = invalid_mask | additional_invalid_mask
+                
             
             if mask is not None:
                 mask = mask > 128
-                
-                #cell_mask = mask[:-1, :-1] & mask[1:, :-1] & mask[:-1, 1:] & mask[1:, 1:]
-                
-                
-                #mask_flat = mask.flatten()
-                #cell_mask = np.stack([mask_flat, mask_flat, mask_flat], axis=1)
-                #triangle_mask = np.vstack([cell_mask, cell_mask])
-                
-                
                 cell_mask = mask[:-1, :-1] & mask[1:, :-1] & mask[:-1, 1:] & mask[1:, 1:]
-                
-                # Then each cell corresponds to two triangles:
                 cell_mask_flat = cell_mask.ravel()
-                # Duplicate for both triangles in each grid cell:
-                #triangle_mask = np.repeat(cell_mask_flat, 2)
                 triangle_mask = np.concatenate([cell_mask_flat, cell_mask_flat])
-                
                 if invalid_mask is not None:
-                    invalid_mask = invalid_mask | triangle_mask
+                    invalid_mask = invalid_mask | (~triangle_mask)
                 else:
-                    invalid_mask = (~triangle_mask)
-                
-            ref_to_all_tri[invalid_mask] = np.array([0,0,0])
-            
-            # 1) Identify which rows are *not* all zero:
-            valid_mask = np.logical_not(invalid_mask)
+                    invalid_mask = ~triangle_mask
 
-            # 2) Boolean mask to track used vertices
-            num_vertices = ref_to_all_vert.shape[0]  # or known from your logic
-            is_used = np.zeros(num_vertices, dtype=bool)
-
-            # 3) Mark vertices in valid triangles
-            is_used[ ref_to_all_tri[valid_mask].ravel() ] = True
-
-            # 4) Extract the used indices
-            used_indices = np.where(is_used)[0]
-    
-    # If we already have an input mesh and we are not removing edges, simply update vertices.
+            if invalid_color is None:
+                # Old behavior: remove invalid triangles by setting their indices to [0,0,0]
+                ref_to_all_tri[invalid_mask] = np.array([0, 0, 0])
+                # Compute used indices from the valid triangles only.
+                valid_mask = np.logical_not(invalid_mask)
+                num_vertices = ref_to_all_vert.shape[0]
+                is_used = np.zeros(num_vertices, dtype=bool)
+                is_used[ ref_to_all_tri[valid_mask].ravel() ] = True
+                used_indices = np.where(is_used)[0]
+            else:
+                # New behavior: keep all triangles, but return them vertices of invalid triangles.
+                # Ensure a vertex_colors array exists.
+                if ref_to_all_col is None:
+                    # Initialize vertex colors to white if not provided.
+                    ref_to_all_col = np.ones((ref_to_all_vert.shape[0], 3))
+                    mesh.vertex_colors = o3d.utility.Vector3dVector(ref_to_all_col)
+                # Get indices of vertices in invalid triangles.
+                invalid_triangles = ref_to_all_tri[invalid_mask]
+                invalid_vertex_indices = np.unique(invalid_triangles)
+                return mesh, invalid_vertex_indices
     else:
+        # If we already have an input mesh and we are not removing edges, simply update vertices.
         mesh = inp_mesh
         ref_to_all_vert = np.asarray(mesh.vertices)
         ref_to_all_vert[:] = vertices[:]
         if colors is not None:
             ref_to_all_col = np.asarray(mesh.vertex_colors)
             ref_to_all_col[:] = colors[:]
-    
+        used_indices = np.arange(vertices.shape[0])
     
     return mesh, used_indices
+    
+def encode_data_as_rgb(data, frame_width, frame_height, bit16 = False):
+    # View the uint32 as raw bytes: shape (H, W, 4)
+    save_bytes = data.view(np.uint8).reshape(frame_height, frame_width, 4)
+    
+    if bit16:
+        R = (save_bytes[:, :, 3])# if 16 bit Most significant bits in R and G channel (duplicated in 16bit for visulization)
+        G = (save_bytes[:, :, 3])
+        B = (save_bytes[:, :, 2]) # Least significant bit in blue channel
+    else:#24 bif format is absolute or mabye it depends on input format like int32 is one thing sanf float32 another
+        R = (save_bytes[:, :, 2])
+        G = (save_bytes[:, :, 1])
+        B = (save_bytes[:, :, 0])
+    
+    return np.dstack((R, G, B))
+    
+def decode_rgb_as_data(rgb, frame_width, frame_height, bit16 = False):
+    # View the uint32 as raw bytes: shape (H, W, 4)
+    data = np.zeros((frame_height, frame_width), dtype=np.uint32)
+    depth_unit = data.view(np.uint8).reshape((frame_height, frame_width, 4))
+    if bit16:
+        depth_unit[..., 3] = rgb[..., 0]
+        depth_unit[..., 2] = rgb[..., 2]
+    else:
+        depth_unit[..., 0] = rgb[..., 2]
+        depth_unit[..., 1] = rgb[..., 0]
+        depth_unit[..., 2] = rgb[..., 1]
+    
+    return data
+
 
 vis = None
 v_h = None
