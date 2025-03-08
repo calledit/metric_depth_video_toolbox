@@ -117,7 +117,7 @@ Stereocrafter is based on stable defusion so is very slow, so be patient.
 ```
 ./install_mvdtoolbox.sh -stereocrafter #downloads and installs stereocrafter in the right folder
 
-python3.11 stereo_crafter_infill.py --sbs_color_video ~/dancing_crop.mp4_depth.mkv_rescaled.mkv_stereo.mkv --sbs_mask_video ~/dancing_crop.mp4_depth.mkv_rescaled.mkv_infillmask.mkv
+python3.11 stereo_crafter_infill.py --sbs_color_video ~/dancing_crop.mp4_depth.mkv_rescaled.mkv_stereo.mkv --sbs_mask_video ~/dancing_crop.mp4_depth.mkv_rescaled.mkv_stereo.mkv_infillmask.mkv
 ```
 The result should be a video file named:
 ~/dancing_crop.mp4_depth.mkv_rescaled.mkv_stereo.mkv_infilled.mkv
