@@ -643,9 +643,7 @@ if __name__ == '__main__':
         frames[frame_n] = np.array(frames[frame_n])
         
         depth = np.zeros((frame_height, frame_width), dtype=np.uint32)
-        
         depth_unit = depth.view(np.uint8).reshape((frame_height, frame_width, 4))
-        
         depth_unit[..., 3] = ((rgb[..., 0].astype(np.uint32) + rgb[..., 1]).astype(np.uint32) / 2)
         depth_unit[..., 2] = rgb[..., 2]
         
@@ -779,6 +777,7 @@ if __name__ == '__main__':
         
         points = []
         points_i = []
+        points_ids = []
         colors = []
         messured_points = {}
         messured_points_3d = {}
@@ -807,6 +806,7 @@ if __name__ == '__main__':
             
                 print("Global id:", global_id," nr observations:", len(com_poses), traig_text, "depth map avg:", mon_dep)
                 points.append(mon_dep)
+                points_ids.append(global_id)
                 points_i.append(intersection_point)
                 
                 for k, frame_n in enumerate(global_3d_points[global_id][3]):
@@ -833,19 +833,19 @@ if __name__ == '__main__':
         alembic_point_cloud_colors = colors
         
         print("Creating and saving pcd files")
-        pcd = depth_map_tools.pts_2_pcd(np.array(points), colors)
-        o3d.io.write_point_cloud(args.depth_video + "_avgmonodepth.ply", pcd)
+        pcd = depth_map_tools.pts_2_pcd(np.array(points), colors, points_ids)
+        o3d.t.io.write_point_cloud(args.depth_video + "_avgmonodepth.ply", pcd)
         pcd_i = None
         if args.use_triangulated_points:
-            pcd_i = depth_map_tools.pts_2_pcd(np.array(points_i), colors)
-            o3d.io.write_point_cloud(args.depth_video + "_triangulated.ply", pcd_i)
+            pcd_i = depth_map_tools.pts_2_pcd(np.array(points_i), colors, points_ids)
+            o3d.t.io.write_point_cloud(args.depth_video + "_triangulated.ply", pcd_i)
 
         
         
         if args.show_scene_point_clouds:
             print("Showing pointclouds")
             if args.show_both_point_clouds and args.use_triangulated_points:
-                depth_map_tools.draw([pcd, pcd_i])
+                depth_map_tools.draw([depth_map_tools.pts_2_pcd(np.array(points), colors), depth_map_tools.pts_2_pcd(np.array(points_i), colors)])
             else:
                 depth_map_tools.draw([depth_map_tools.pts_2_pcd(np.array(alembic_point_cloud), colors)])
         
