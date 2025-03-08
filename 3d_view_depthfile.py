@@ -124,6 +124,7 @@ if __name__ == '__main__':
                 codec = cv2.VideoWriter_fourcc(*"FFV1")
             out = cv2.VideoWriter(output_file, codec, frame_rate, (frame_width, frame_height))
     mesh = None
+    projected_mesh = None
     
     cameraLines, LastcameraLines = None, None
     frame_n = 0
@@ -179,16 +180,20 @@ if __name__ == '__main__':
         
         mesh_ret, _ = depth_map_tools.get_mesh_from_depth_map(depth, cam_matrix, color_frame, mesh, remove_edges = args.remove_edges, mask = mask)
         
+        if transformations is not None:
+            mesh_ret.transform(transform_to_zero)
+        
         if mesh is None:
             if not args.render and args.draw_frame == -1:
                 vis.add_geometry(mesh_ret)
             if background_obj is not None:
                 vis.add_geometry(background_obj)
+
         mesh = mesh_ret
         
         
-        if transformations is not None:
-            mesh.transform(transform_to_zero)
+        
+        
         
         to_draw = [mesh]
         if cameraLines is not None:
