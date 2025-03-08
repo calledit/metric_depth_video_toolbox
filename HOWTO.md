@@ -122,10 +122,15 @@ Stereocrafter is based on stable defusion so is very slow, be patient. On a 3090
 ```
 ./install_mvdtoolbox.sh -stereocrafter #downloads and installs stereocrafter in the right folder
 
-python3.11 stereo_crafter_infill.py --sbs_color_video ~/dancing_crop.mp4_depth.mkv_rescaled.mkv_stereo.mkv --sbs_mask_video ~/dancing_crop.mp4_depth.mkv_rescaled.mkv_stereo.mkv_infillmask.mkv
+python3.11 stereo_crafter_infill.py --sbs_color_video ~/in_office_720p.mp4_depth.mkv_rescaled.mkv_stereo.mkv --sbs_mask_video ~/in_office_720p.mp4_depth.mkv_rescaled.mkv_infillmask.mkv
 ```
-The result should be a video file named:
-~/dancing_crop.mp4_depth.mkv_rescaled.mkv_stereo.mkv_infilled.mkv
+The result will be a video file named:
+~/in_office_720p.mp4_depth.mkv_rescaled.mkv_infilled.mkv
+
+As is visible in the image below, stereocrafter does a pretty good job. But it is not perfect the pillar to the right is a good example of where it did not fill in all the way. Increasing the stereocrafter image resolution does sometimes improve the output but it also slows down the process even more.
+
+<img width="950" alt="sbs" src="https://github.com/user-attachments/assets/7d19f74a-2a24-4a17-8581-ce9355cb13ad" />
+
 
 
 ### Final step compress and add back audio
