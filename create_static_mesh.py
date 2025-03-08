@@ -45,6 +45,116 @@ def remove_small_clusters(mesh, min_triangles=10):
 import numpy as np
 import open3d as o3d
 
+def get_triangle_per_pixel(mesh, intrinsics, mask):
+    """
+    For every pixel (u,v) in `mask` that is True, this function computes the ray
+    from the camera (assumed at 0,0,0) through that pixel using the provided intrinsics,
+    casts the ray against the provided mesh, and returns the triangle (vertex coordinates)
+    that was hit.
+
+    Parameters:
+      mesh (o3d.geometry.TriangleMesh): The input mesh.
+      intrinsics (o3d.camera.PinholeCameraIntrinsic): The camera intrinsic parameters.
+      mask (np.ndarray): A boolean mask with shape (height, width). True indicates pixels of interest.
+
+    Returns:
+      dict: A dictionary mapping pixel coordinates (row, col) to the triangle vertices (np.ndarray of shape (3,3)).
+            Pixels where the ray did not hit any triangle are omitted.
+    """
+    # Create a raycasting scene and add the mesh converted to tensor format.
+    scene = o3d.t.geometry.RaycastingScene()
+    tmesh = o3d.t.geometry.TriangleMesh.from_legacy(mesh)
+    mesh_id = scene.add_triangles(tmesh)
+
+    # Extract camera intrinsic parameters.
+    # The intrinsic matrix is assumed to be in the form:
+    # [ [fx,  0, cx],
+    #   [ 0, fy, cy],
+    #   [ 0,  0,  1] ]
+    fx = intrinsics[0, 0]
+    fy = intrinsics[1, 1]
+    cx = intrinsics[0, 2]
+    cy = intrinsics[1, 2]
+
+    height, width = mask.shape
+
+    # Get the pixel indices (row, col) where mask is True.
+    pixel_indices = np.argwhere(mask)  # shape (N, 2), where each row is (row, col)
+
+    if pixel_indices.shape[0] == 0:
+        return {}
+
+    # For each pixel, compute the corresponding ray direction.
+    # In pixel coordinates, u = col and v = row.
+    u = pixel_indices[:, 1].astype(np.float32)
+    v = pixel_indices[:, 0].astype(np.float32)
+    
+    # Back-project the pixel into camera space.
+    # For a pixel (u, v), the corresponding direction is:
+    #   [ (u - cx) / fx, (v - cy) / fy, 1 ]
+    x = (u - cx) / fx
+    y = (v - cy) / fy
+    z = np.ones_like(x)
+    directions = np.stack([x, y, z], axis=1)
+
+    # Normalize the direction vectors.
+    norms = np.linalg.norm(directions, axis=1, keepdims=True)
+    directions = directions / norms
+
+    # All rays originate at the camera center (0,0,0).
+    origins = np.zeros_like(directions)
+
+    # Create a (N, 6) array where each row is [origin, direction]
+    rays = np.concatenate([origins, directions], axis=1)
+
+    # Convert to Open3D tensor.
+    rays_tensor = o3d.core.Tensor(rays, dtype=o3d.core.Dtype.Float32)
+    
+    # Cast the rays.
+    ans = scene.cast_rays(rays_tensor)
+    # ans is a dictionary containing fields like:
+    #   "t_hit": distance to hit (np.inf if no hit)
+    #   "primitive_ids": the index of the hit triangle (-1 if no hit)
+    
+    # Convert the results to NumPy arrays.
+    t_hits = np.asarray(ans['t_hit']).flatten()
+    primitive_ids = np.asarray(ans['primitive_ids']).flatten()
+
+    # Prepare the result dictionary.
+    pixel_to_triangle = {}
+    
+    # Get mesh vertices and triangles (indices) as NumPy arrays.
+    vertices = np.asarray(mesh.vertices)
+    triangles = np.asarray(mesh.triangles)
+
+    triangles_hit = []
+    # For each ray (pixel) with a valid hit, record the triangle vertices.
+    for idx, (pix, t_hit, prim_id) in enumerate(zip(pixel_indices, t_hits, primitive_ids)):
+        # Skip rays that did not hit any triangle.
+        if t_hit > 100000 or prim_id < 0:
+            continue
+        
+        #print(prim_id)
+        # Get the triangle
+        tri_idx = int(prim_id.item())
+        
+        companion = tri_idx
+        if tri_idx % 2 == 0:
+            companion += 1
+        else:
+            companion -= 1
+            
+        # Retrieve the actual vertex positions.
+        #tri_vertices = vertices[tri_idx]
+        # Use the pixel (row, col) tuple as the key.
+        #insert_vert_indexs = pix[0] * mask.shape[1] + pix[1]
+        #pixel_to_triangle[insert_vert_indexs] = tri_idx
+        triangles_hit.append(tri_idx)
+        triangles_hit.append(companion)
+
+    return pixel_to_triangle, np.array(triangles_hit)
+
+
 def remove_visible_triangles_by_image_mask(mesh, image_mask, intrinsics, extrinsics=None,
                                              rendered_depth=None, color_filter=None):
     """
@@ -127,6 +237,9 @@ def remove_visible_triangles_by_image_mask(mesh, image_mask, intrinsics, extrins
     # For each removed triangle, we associate the triangle index, the representative masked pixel, and the triangle vertex indices.
     removed_triangles = triangles[removal_full_indices]  # shape (R, 3)
     rep_pixels = representative_pixel[candidate_removal_indices]  # shape (R, 2)
+    
+    
+    #TODO: Issue the pixels represent the triangle corners
     removed_boundry = np.column_stack((
         np.repeat(removal_full_indices, 3),
         np.repeat(rep_pixels[:, 0], 3),
@@ -134,11 +247,6 @@ def remove_visible_triangles_by_image_mask(mesh, image_mask, intrinsics, extrins
         removed_triangles.reshape(-1)
     ))
     
-    # Assume get_still_used_vertices is defined elsewhere.
-    verexes_of_removed_triangles = np.unique(removed_triangles)
-    boundry_vertexes = get_still_used_vertices(mesh, verexes_of_removed_triangles)
-    mask_removed = np.isin(removed_boundry[:, 3], boundry_vertexes)
-    removed_boundry = removed_boundry[mask_removed]
 
     # Remove the triangles that meet the removal criteria.
     keep_triangle_mask = np.ones(triangles.shape[0], dtype=bool)
@@ -151,6 +259,12 @@ def remove_visible_triangles_by_image_mask(mesh, image_mask, intrinsics, extrins
     new_mesh.triangles = o3d.utility.Vector3iVector(new_triangles)
     if len(mesh.vertex_colors) == vertices.shape[0]:
         new_mesh.vertex_colors = mesh.vertex_colors
+        
+    # Find boundry vertexes
+    verexes_of_removed_triangles = np.unique(removed_triangles)
+    boundry_vertexes = get_still_used_vertices(new_mesh, verexes_of_removed_triangles)
+    mask_removed = np.isin(removed_boundry[:, 3], boundry_vertexes)
+    removed_boundry = removed_boundry[mask_removed]
 
     # The vertex mapping remains the identity since no vertices are removed.
     vertex_mapping = np.arange(vertices.shape[0])
@@ -158,93 +272,16 @@ def remove_visible_triangles_by_image_mask(mesh, image_mask, intrinsics, extrins
     return new_mesh, removed_boundry, vertex_mapping
 
 
-def remove_visible_triangles_by_image_mask_cent(mesh, image_mask, intrinsics, extrinsics=None,
-                                             rendered_depth=None, color_filter=None):
-    """
-    Removes triangles from the mesh if their centroid projects onto a masked pixel,
-    but only considers for removal those triangles whose vertices are all green 
-    (or match the provided color_filter). This green check is used solely to speed up
-    the removal decision; the output mesh still contains all original vertices.
+def remove_triangles(mesh, remove_triangles):
 
-    Args:
-        mesh: an Open3D TriangleMesh with vertices, triangles, and vertex_colors.
-        image_mask: a 2D boolean array (H x W) indicating which pixels are masked.
-        intrinsics: the camera intrinsics (3x3 matrix).
-        extrinsics: the camera extrinsics (4x4 matrix); defaults to identity.
-        rendered_depth: optional depth map for comparing depths.
-        color_filter: a 3-element array (e.g. [0, 1, 0] for green). If None, defaults to green.
-
-    Returns:
-        new_mesh: the modified mesh with triangles removed.
-        removed_boundry: an array with details about the removed triangles.
-        vertex_mapping: an identity mapping (all original vertices are retained).
-    """
-    import numpy as np
-    import open3d as o3d
 
     # Get original mesh data.
     all_vert_cols = np.asarray(mesh.vertex_colors)  # shape (N, 3)
     vertices = np.asarray(mesh.vertices)            # shape (N, 3)
     triangles = np.asarray(mesh.triangles)          # shape (M, 3)
-    H, W = image_mask.shape
+    
 
-    if extrinsics is None:
-        extrinsics = np.eye(4)
-
-    # Define the color filter for green if not provided.
-    if color_filter is None:
-        color_filter = np.array([0, 1, 0])
-
-    # Create a boolean mask for vertices that match the color_filter (green).
-    green_mask = np.all(all_vert_cols == color_filter, axis=1)
-
-    # Identify candidate triangles: only those whose all three vertices are green.
-    candidate_triangle_mask = np.all(green_mask[triangles], axis=1)
-    candidate_triangle_indices = np.where(candidate_triangle_mask)[0]
-
-    # For candidate triangles, compute centroids using the original vertices.
-    candidate_triangles = triangles[candidate_triangle_mask]
-    centroids = np.mean(vertices[candidate_triangles], axis=1)  # shape (K, 3)
-
-    centroids_h = np.hstack([centroids, np.ones((centroids.shape[0], 1))])  # (K, 4)
-    centroids_cam = (extrinsics @ centroids_h.T).T[:, :3]  # (K, 3)
-    proj = (intrinsics @ centroids_cam.T).T  # (K, 3)
-    pixel_coords = proj[:, :2] / (proj[:, 2:3] + 1e-8)
-    pixel_coords_int = np.round(pixel_coords).astype(int)
-    candidate_depths = centroids_cam[:, 2]
-
-    # Determine which candidate triangles project inside the image.
-    valid = ((pixel_coords_int[:, 0] >= 0) & (pixel_coords_int[:, 0] < W) &
-             (pixel_coords_int[:, 1] >= 0) & (pixel_coords_int[:, 1] < H))
-    masked = np.zeros(candidate_triangles.shape[0], dtype=bool)
-    valid_idx = np.where(valid)[0]
-    masked[valid_idx] = image_mask[pixel_coords_int[valid_idx, 1],
-                                    pixel_coords_int[valid_idx, 0]]
-
-    # Among candidate triangles (fully green), mark for removal those that hit the mask.
-    candidate_removal_indices = np.where(masked)[0]
-    # Map these candidate removal indices back to indices in the full triangle list.
-    removal_full_indices = candidate_triangle_indices[candidate_removal_indices]
-
-    # Construct a removed_boundry array (using similar format as before).
-    candidate_pixels = pixel_coords_int[candidate_removal_indices]  # (R, 2)
-    removed_triangles = triangles[removal_full_indices]  # shape (R, 3)
-    removed_map = np.column_stack((
-        np.repeat(removal_full_indices, 3),
-        np.repeat(candidate_pixels[:, 0], 3),
-        np.repeat(candidate_pixels[:, 1], 3),
-        removed_triangles.reshape(-1)
-    ))
-    # Assume get_still_used_vertices is defined elsewhere.
-    verexes_of_removed_triangles = np.unique(removed_triangles)
-    boundry_vertexes = get_still_used_vertices(mesh, verexes_of_removed_triangles)
-    mask_removed = np.isin(removed_map[:, 3], boundry_vertexes)
-    removed_boundry = removed_map[mask_removed]
-
-    # Remove the candidate triangles from the full set.
-    keep_triangle_mask = np.ones(triangles.shape[0], dtype=bool)
-    keep_triangle_mask[removal_full_indices] = False
-    new_triangles = triangles[keep_triangle_mask]
+    new_triangles = triangles[np.array(remove_triangles)]
 
     # Build the new mesh using all original vertices (i.e. not pruning any vertices).
     new_mesh = o3d.geometry.TriangleMesh()
@@ -252,11 +289,9 @@ def remove_visible_triangles_by_image_mask_cent(mesh, image_mask, intrinsics, ex
     new_mesh.triangles = o3d.utility.Vector3iVector(new_triangles)
     if len(mesh.vertex_colors) == vertices.shape[0]:
         new_mesh.vertex_colors = mesh.vertex_colors
+    
 
-    # Since the vertex array is unchanged, the mapping is simply the identity.
-    vertex_mapping = np.arange(vertices.shape[0])
-
-    return new_mesh, removed_boundry, vertex_mapping
+    return new_mesh
     
     
 def remove_vertices_by_mask(mesh, vertex_mask):
@@ -529,13 +564,13 @@ def fill_seam(mesh, no_bg_mesh, edge_lines, edge_vertex_indexmesh, new_vert_to_o
     # The candidate vertices are only those specified by edge_vertex_indexmesh in the original mesh.
     # In new_mesh, the original mesh vertices start at index 'inserted_vertices_len',
     # so adjust the candidate indices accordingly.
-    candidate_indices_in_merged = edge_vertex_indexmesh + inserted_vertices_len
-    candidate_vertices = merged_vertices[candidate_indices_in_merged]
+    #candidate_indices_in_merged = edge_vertex_indexmesh + inserted_vertices_len
+    #candidate_vertices = merged_vertices[candidate_indices_in_merged]
     
     # Build a KDTree only on the candidate vertices.
-    pcd = o3d.geometry.PointCloud()
-    pcd.points = o3d.utility.Vector3dVector(candidate_vertices)
-    kdtree = o3d.geometry.KDTreeFlann(pcd)
+    #pcd = o3d.geometry.PointCloud()
+    #pcd.points = o3d.utility.Vector3dVector(candidate_vertices)
+    #kdtree = o3d.geometry.KDTreeFlann(pcd)
     
     new_triangles = []
     # Create a usage counter for each candidate vertex.
@@ -547,6 +582,10 @@ def fill_seam(mesh, no_bg_mesh, edge_lines, edge_vertex_indexmesh, new_vert_to_o
         line = np.asarray(line).flatten()
         # List to hold the selected candidate (original mesh) vertex for each edge segment.
         candidate_selected = []
+        
+        
+        
+        triangulate_linesets(lineset1, lineset2, mapping)
         
         # First pass: for each consecutive pair along the no_bg_mesh boundary,
         # compute the midpoint and choose a candidate from the candidate set.
@@ -772,6 +811,79 @@ def separate_triangles_per_face_color_by_pixel(
 
     return new_mesh, old_to_new_vertex_map
 
+def triangulate_linesets(lineset1, lineset2, mapping):
+    """
+    Triangulate two parallel linesets based on a correspondence mapping.
+
+    Parameters:
+      lineset1: open3d.geometry.LineSet or array-like (Nx3) 
+                representing the first set of points.
+      lineset2: open3d.geometry.LineSet or array-like (Mx3) 
+                representing the second set of points.
+      mapping: list of tuples (i, j) where i is an index in lineset1 and 
+               j is an index in lineset2. The mapping list should be ordered 
+               along the curves. One point in lineset1 can correspond to multiple
+               points in lineset2.
+
+    Returns:
+      mesh: open3d.geometry.TriangleMesh created by triangulating the two linesets.
+    """
+
+    # If the input is a LineSet, extract its points; otherwise, assume it's array-like.
+    if isinstance(lineset1, o3d.geometry.LineSet):
+        pts1 = np.asarray(lineset1.points)
+    else:
+        pts1 = np.asarray(lineset1)
+        
+    if isinstance(lineset2, o3d.geometry.LineSet):
+        pts2 = np.asarray(lineset2.points)
+    else:
+        pts2 = np.asarray(lineset2)
+        
+    # Combine points into one vertex array.
+    # Points from lineset2 are offset by the length of pts1.
+    vertices = np.vstack((pts1, pts2))
+    offset = pts1.shape[0]  # number of vertices in the first lineset
+    
+    # Map each (i, j) to global vertex indices in the combined array.
+    # For each tuple, i remains the same and j is shifted by the offset.
+    mapped_indices = [(i, offset + j) for i, j in mapping]
+    
+    triangles = []
+    
+    # Iterate over consecutive mapping pairs to create triangles.
+    for k in range(len(mapped_indices) - 1):
+        i1, j1 = mapped_indices[k]
+        i2, j2 = mapped_indices[k + 1]
+        
+        # If both indices are identical, skip (degenerate case)
+        if i1 == i2 and j1 == j2:
+            continue
+        # If the same point in lineset1 is used consecutively,
+        # create one triangle connecting that point with the two points from lineset2.
+        elif i1 == i2:
+            triangles.append([i1, j1, j2])
+        # If the same point in lineset2 is used consecutively,
+        # create one triangle connecting that point with the two points from lineset1.
+        elif j1 == j2:
+            triangles.append([i1, j1, i2])
+        else:
+            # In the general case, we treat the two consecutive mappings as forming a quad
+            # that we split into two triangles:
+            # Triangle 1: (lineset1[i1], lineset2[j1], lineset2[j2])
+            # Triangle 2: (lineset1[i1], lineset2[j2], lineset1[i2])
+            triangles.append([i1, j1, j2])
+            triangles.append([i1, j2, i2])
+    
+    # Create and populate the TriangleMesh.
+    mesh = o3d.geometry.TriangleMesh()
+    mesh.vertices = o3d.utility.Vector3dVector(vertices)
+    mesh.triangles = o3d.utility.Vector3iVector(np.array(triangles))
+    
+    # Optionally compute normals for better visualization.
+    mesh.compute_vertex_normals()
+    
+    return mesh
 
 if __name__ == '__main__':
     
@@ -984,7 +1096,9 @@ if __name__ == '__main__':
             
             transform_from_zero = np.linalg.inv(transform_to_zero)
             
-            
+            ref_to_all_col = np.asarray(mesh.vertex_colors)
+            org_colors = ref_to_all_col.copy()
+            invalid_colors = org_colors 
             
             
             #parts of the mesh that are invalid will be invalid_color as well as parts in the view that has need been seen before (ie the background)
@@ -994,30 +1108,21 @@ if __name__ == '__main__':
              
             
             #Create a mask for all vertextes that are green in pixels_to_replace
-            pixels_to_where_vertexes_needed_mask = np.all(pixels_to_where_vertex_needed == invalid_color, axis=-1)
+            #print(pixels_to_where_vertex_needed.shape)
+            pixels_to_where_vertexes_needed_mask = pixels_to_where_vertex_needed[:, :, 1] > 0.98 #np.all(pixels_to_where_vertex_needed[:, :, 1] > 0.95, axis=-1)
+            #print(pixels_to_where_vertexes_needed_mask.shape)
             
             
             #Find "Cut" lines (not sure we need this anymore)
-            edge_lines, false_mapping_lines, edge_mask, false_edge_mask  = extract_and_snap_contours(pixels_to_where_vertexes_needed_mask)
-            
-            
-            print("rendered_shape:", pixels_to_where_vertex_needed.shape, "depth_shape", depth.shape, "mask:", pixels_to_where_vertexes_needed_mask.shape)
             
             
             
-            
-            #Remove all vertexes that are not in the pixels that we are intressted in
-            no_bg_mesh, index_map = remove_vertices_by_mask(green_mesh, pixels_to_where_vertexes_needed_mask.reshape(-1))
             
             #depth_map_tools.draw([no_bg_mesh])
             #exit(0)
             
             
-            #Test to show that we can draw all edge lines red
-            edge_lines_vert = []
-            for line in edge_lines:
-                vert_indexs = line[:, 0] * pixels_to_where_vertexes_needed_mask.shape[1] + line[:, 1]
-                edge_lines_vert.append(np.array(index_map[vert_indexs]))
+            
             
             # Before we add the new mesh we need to remove the stuff it replaces
             
@@ -1027,42 +1132,109 @@ if __name__ == '__main__':
             # before continuing this  )
             mesh, removed_boundry, index_map = remove_visible_triangles_by_image_mask(mesh, pixels_to_where_vertexes_needed_mask, cam_matrix, rendered_depth=removal_depth_map, color_filter=invalid_color)
             
+            boundry_vertexes = np.unique(removed_boundry[:, 3])
+            ref_to_col = np.asarray(mesh.vertex_colors)
+            ref_to_col[boundry_vertexes] = invalid_colors[boundry_vertexes]
+            
+            pixels_to_where_vertex_needed2 = depth_map_tools.render([mesh], cam_matrix, depth = False, bg_color = invalid_color)
+            
+            pixels_to_where_vertexes_needed2_mask = pixels_to_where_vertex_needed2[:, :, 1] > 0.98
+            
+            green_mesh_col = np.asarray(green_mesh.vertex_colors)
+            krem_mask = ~np.all(green_mesh_col == invalid_color, axis=1)
+            
+            no_bg_mesh, index_map_green = remove_vertices_by_mask(green_mesh, pixels_to_where_vertexes_needed2_mask.reshape(-1) & krem_mask)
+            #no_bg_mesh.transform(transform_from_zero) #Transform to take a picture from the current camera pos
+            
+            #triangles, triangle_ids = get_triangle_per_pixel(mesh, cam_matrix, pixels_to_where_vertexes_needed_mask)
+            
+            #mesh = remove_triangles(mesh, triangle_ids)
+            
+            #depth_map_tools.draw([mesh, no_bg_mesh])
+            #exit(0)
+            
+            
+            #edge_lines, false_mapping_lines, edge_mask, false_edge_mask  = extract_and_snap_contours(pixels_to_where_vertexes_needed2_mask)
+            
+            
+            #print("rendered_shape:", pixels_to_where_vertex_needed.shape, "depth_shape", depth.shape, "mask:", pixels_to_where_vertexes_needed_mask.shape)
+            
+            
+            
+            #print(triangles)
+            #exit(0)
+            
+            #boundry_vertexes = np.unique(removed_boundry[:, 3])
+            #new_vert_to_old = {}
+            #for pos in triangles:
+            #    row = triangles[pos]
+            #    
+            #    pixel_2_vertex = np.intersect1d(row, boundry_vertexes)
+            #    
+            #    #insert_vert_indexs = row[1] * pixels_to_where_vertexes_needed_mask.shape[1] + row[2]
+            #    #print(row[1], row[2])
+            #    #if insert_vert_indexs in index_map:
+            #    if pos not in new_vert_to_old:
+            #        new_vert_to_old[pos] = []
+            #    new_vert_to_old[pos].append(pixel_2_vertex[0])
+            #print(new_vert_to_old)
+             
+            # Color beoundry vertextes red for debuging
+            
+            
             mesh.transform(transform_to_zero) #Untranform from current camera pos back in to zero
             
+            #green_mesh_col = np.asarray(green_mesh.vertex_colors)
+            #krem_mask = ~np.all(green_mesh_col == invalid_color, axis=1)
+            ##Remove all vertexes that are not in the pixels that we are intressted in
+            #no_bg_mesh, index_map_green = remove_vertices_by_mask(green_mesh, pixels_to_where_vertexes_needed_mask.reshape(-1))
+            #  & krem_mask
             
-            boundry_vertexes = np.unique(removed_boundry[:, 3])
-            new_vert_to_old = {}
-            for row in removed_boundry:
-                insert_vert_indexs = row[1] * pixels_to_where_vertexes_needed_mask.shape[1] + row[2]
-                if insert_vert_indexs in index_map:
-                    if insert_vert_indexs not in new_vert_to_old:
-                        new_vert_to_old[index_map[insert_vert_indexs]] = []
-                    new_vert_to_old[index_map[insert_vert_indexs]].append(row[3])
-                    
             
-            ofset = 0+len(no_bg_mesh.vertices)
             
+            #no_ng_col = np.asarray(no_bg_mesh.vertex_colors)
+            
+            
+            #Test to show that we can draw all edge lines red
+            #edge_lines_vert = []
+            #for line in edge_lines:
+            #    vert_indexs = line[:, 0] * pixels_to_where_vertexes_needed_mask.shape[1] + line[:, 1]
+            #    line_in_no_bg_mesh = np.array(index_map_green[vert_indexs])
+            #    edge_lines_vert.append(line_in_no_bg_mesh)
+            #    no_ng_col[line_in_no_bg_mesh] = np.array([1.,0.,0.])
+            #    for x in vert_indexs:
+            #        if x not in new_vert_to_old:
+            #            continue
+            #            print("pixel did not map to vertex in mesh")#raise Exception
+            #        else:
+            #            ref_to_col[new_vert_to_old[x][0]] = np.array([0.0,0.,1.])
+            #        
+            #depth_map_tools.draw([mesh])
+            #exit(0)
+            #
+            #ofset = 0+len(no_bg_mesh.vertices)
+            #
             mesh = no_bg_mesh + mesh
             #mesh = fill_seam(mesh, no_bg_mesh, edge_lines_vert, boundry_vertexes, new_vert_to_old)
             
             
-            new_indices = index_map[invalid_indexs]+ofset
+            #new_indices = index_map_green[invalid_indexs]+ofset
 
             # Filter out any entries that are -1 (indicating the vertex was removed).
-            valid_mask = new_indices >= ofset
-            new_indices_valid = new_indices[valid_mask]
+            #valid_mask = new_indices >= ofset
+            #new_indices_valid = new_indices[valid_mask]
 
             # Also, get the corresponding colors for the kept vertices.
-            invalid_colors_valid = invalid_colors[invalid_indexs[valid_mask]]
+            #invalid_colors_valid = invalid_colors[invalid_indexs[valid_mask]]
 
             # Update the new mesh's vertex colors.
-            ref_to_all_col = np.asarray(mesh.vertex_colors)
+            #ref_to_all_col = np.asarray(mesh.vertex_colors)
             #Reset colors
             #ref_to_all_col[new_indices_valid] = invalid_colors_valid
             
-            redner_of_replacement_mesh = depth_map_tools.render([mesh], cam_matrix, extrinsic_matric = transform_from_zero, bg_color = np.array([0.0,0.0,0.0]))
+            #redner_of_replacement_mesh = depth_map_tools.render([mesh], cam_matrix, extrinsic_matric = transform_from_zero, bg_color = np.array([0.0,0.0,0.0]))
             
-            depth_map_tools.draw([mesh])
+            #depth_map_tools.draw([mesh])
             #depth_map_tools.draw([mesh, no_bg_mesh])
             #exit(0)
             
