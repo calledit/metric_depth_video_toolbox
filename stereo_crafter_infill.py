@@ -20,8 +20,7 @@ frame_rate, frame_width, frame_height = None, None, None
 def generate_infilled_frames(input_frames, input_masks):
 
     input_frames = torch.tensor(input_frames).permute(0, 3, 1, 2).float()/255.0
-    mask_frames = torch.tensor(input_masks).permute(0, 3, 1, 2).float()/255.0
-    frames_mask = mask_frames.mean(dim=1, keepdim=True)
+    frames_mask = torch.tensor(input_masks).permute(0, 1, 2).float()/255.0
 
     video_latents = pipeline(
         frames=input_frames.clone(),
@@ -58,17 +57,16 @@ def deal_with_frame_chunk(keep_first_three, chunk, out, keep_last_three):
 
     #some issues but looks ok (a bit faster is good)
     new_width = 1024
-    new_height = 576
-    #new_height = 768
+    new_height = 768
 
 
 
     input_frames_i_right = np.array([np.array(cv2.resize(row[0][:frame_height, pic_width:], (new_width, new_height))) for row in chunk])
-    mask_frames_i_right = np.array([np.array(cv2.resize(row[1][:frame_height, pic_width:], (new_width, new_height))) for row in chunk])
+    mask_frames_i_right = np.array([np.array(cv2.resize(np.all(row[1][:frame_height, pic_width:] != black, axis=-1).astype(np.uint8)*255, (new_width, new_height), interpolation = cv2.INTER_NEAREST)) for row in chunk])
 
     #The model has only been trained on right shifted images so it works better if we flip the left ones first so they look like they are right eye images
     input_frames_i_left = np.array([np.fliplr(np.array(cv2.resize(row[0][:frame_height, :pic_width], (new_width, new_height)))) for row in chunk])
-    mask_frames_i_left = np.array([np.fliplr(np.array(cv2.resize(row[1][:frame_height, :pic_width], (new_width, new_height)))) for row in chunk])
+    mask_frames_i_left = np.array([np.fliplr(np.array(cv2.resize(np.all(row[1][:frame_height, :pic_width] != black, axis=-1).astype(np.uint8)*255, (new_width, new_height), interpolation = cv2.INTER_NEAREST))) for row in chunk])
 
     print("generating left side images")
     left_frames = generate_infilled_frames(input_frames_i_left, mask_frames_i_left)
