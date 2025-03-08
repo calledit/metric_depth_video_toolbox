@@ -141,7 +141,7 @@ ffmpeg -i ~/in_office_720p.mp4 ~/in_office_720p.wav
 
 
 #Compress video for viewing on otehr devices and add back audio
-ffmpeg -i ~/dancing_crop.mp4_depth.mkv_rescaled.mkv_stereo.mkv_infilled.mkv -i ~/in_office_720p.wav -c:v libx265 -crf 18 -tag:v hvc1 -pix_fmt yuv420p -c:a aac -map 0:v:0 -map 1:a:0 ~/dancing_crop_final_stero.mp4
+ffmpeg -i ~/in_office_720p.mp4_depth.mkv_rescaled.mkv_infilled.mkv -i ~/in_office_720p.wav -c:v libx265 -crf 18 -tag:v hvc1 -pix_fmt yuv420p -c:a aac -map 0:v:0 -map 1:a:0 ~/in_office_720p_final_stero.mp4
 ```
 
 
