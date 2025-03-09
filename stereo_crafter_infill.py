@@ -66,27 +66,27 @@ def deal_with_frame_chunk(keep_first_three, chunk, out, keep_last_three):
     left_mask_input = []
     for img_and_mask in chunk:
         
-        #Left mask
+        #Right mask
         org_img_mask = img_and_mask[1][:frame_height, pic_width:]
-        img_mask_true_paralax = ~np.all(org_img_mask == black, axis=-1)
-        img_mask_resized = np.array(cv2.resize(img_mask_true_paralax.astype(np.uint8)*255, (new_width, new_height)) > 0).astype(np.uint8)*255
-        left_mask_input.append(img_mask_resized)
-        
-        #left image
-        org_img = img_and_mask[0][:frame_height, pic_width:]
-        img_resized = cv2.resize(org_img, (new_width, new_height))
-        left_input.append(img_resized)
-        
-        #Right mask (fliplr)
-        org_img_mask = np.fliplr(img_and_mask[1][:frame_height, :pic_width])
         img_mask_true_paralax = ~np.all(org_img_mask == black, axis=-1)
         img_mask_resized = np.array(cv2.resize(img_mask_true_paralax.astype(np.uint8)*255, (new_width, new_height)) > 0).astype(np.uint8)*255
         right_mask_input.append(img_mask_resized)
         
-        #Right image (fliplr)
-        org_img = np.fliplr(img_and_mask[0][:frame_height, :pic_width])
+        #Right image
+        org_img = img_and_mask[0][:frame_height, pic_width:]
         img_resized = cv2.resize(org_img, (new_width, new_height))
         right_input.append(img_resized)
+        
+        #Left mask (fliplr)
+        org_img_mask = np.fliplr(img_and_mask[1][:frame_height, :pic_width])
+        img_mask_true_paralax = ~np.all(org_img_mask == black, axis=-1)
+        img_mask_resized = np.array(cv2.resize(img_mask_true_paralax.astype(np.uint8)*255, (new_width, new_height)) > 0).astype(np.uint8)*255
+        left_mask_input.append(img_mask_resized)
+        
+        #Left image (fliplr)
+        org_img = np.fliplr(img_and_mask[0][:frame_height, :pic_width])
+        img_resized = cv2.resize(org_img, (new_width, new_height))
+        left_input.append(img_resized)
         
     right_mask_input = np.array(right_mask_input)
     left_mask_input = np.array(left_mask_input)
