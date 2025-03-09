@@ -59,19 +59,46 @@ def deal_with_frame_chunk(keep_first_three, chunk, out, keep_last_three):
     new_width = 1024
     new_height = 768
 
+    right_input = []
+    left_input = []
+    
+    right_mask_input = []
+    left_mask_input = []
+    for img_and_mask in chunk:
+        
+        #Left mask
+        org_img_mask = img_and_mask[1][:frame_height, pic_width:]
+        img_mask_true_paralax = ~np.all(org_img_mask == black, axis=-1)
+        img_mask_resized = np.array(cv2.resize(img_mask_true_paralax.astype(np.uint8)*255, (new_width, new_height)) > 0).astype(np.uint8)*255
+        left_mask_input.append(img_mask_resized)
+        
+        #left image
+        org_img = img_and_mask[0][:frame_height, pic_width:]
+        img_resized = cv2.resize(org_img, (new_width, new_height))
+        left_input.append(img_resized)
+        
+        #Right mask (fliplr)
+        org_img_mask = np.fliplr(img_and_mask[1][:frame_height, :pic_width])
+        img_mask_true_paralax = ~np.all(org_img_mask == black, axis=-1)
+        img_mask_resized = np.array(cv2.resize(img_mask_true_paralax.astype(np.uint8)*255, (new_width, new_height)) > 0).astype(np.uint8)*255
+        right_mask_input.append(img_mask_resized)
+        
+        #Right image (fliplr)
+        org_img = np.fliplr(img_and_mask[0][:frame_height, :pic_width])
+        img_resized = cv2.resize(org_img, (new_width, new_height))
+        right_input.append(img_resized)
+        
+    right_mask_input = np.array(right_mask_input)
+    left_mask_input = np.array(left_mask_input)
+    
+    right_input = np.array(right_input)
+    left_input = np.array(left_input)
 
-
-    input_frames_i_right = np.array([np.array(cv2.resize(row[0][:frame_height, pic_width:], (new_width, new_height))) for row in chunk])
-    mask_frames_i_right = np.array([np.array(cv2.resize(np.all(row[1][:frame_height, pic_width:] != black, axis=-1).astype(np.uint8)*255, (new_width, new_height), interpolation = cv2.INTER_NEAREST)) for row in chunk])
-
-    #The model has only been trained on right shifted images so it works better if we flip the left ones first so they look like they are right eye images
-    input_frames_i_left = np.array([np.fliplr(np.array(cv2.resize(row[0][:frame_height, :pic_width], (new_width, new_height)))) for row in chunk])
-    mask_frames_i_left = np.array([np.fliplr(np.array(cv2.resize(np.all(row[1][:frame_height, :pic_width] != black, axis=-1).astype(np.uint8)*255, (new_width, new_height), interpolation = cv2.INTER_NEAREST))) for row in chunk])
-
+    #TODO: Investigate why the masks almost dont do anything at all, i can invert the mask and get almost the same result
     print("generating left side images")
-    left_frames = generate_infilled_frames(input_frames_i_left, mask_frames_i_left)
+    left_frames = generate_infilled_frames(left_input, left_mask_input)
     print("generating right side images")
-    right_frames = generate_infilled_frames(input_frames_i_right, mask_frames_i_right)
+    right_frames = generate_infilled_frames(right_input, right_mask_input)
 
     sttart = 0
     if not keep_first_three:
