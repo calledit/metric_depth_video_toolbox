@@ -537,7 +537,10 @@ if __name__ == '__main__':
                 
                 bg_mask = np.all(left_image == bg_color_infill_detect, axis=-1)
                 left_img_mask = mark_depth_transitions(bg_mask, left_depth)
-                left_image = infill_from_deep_side(left_image, left_img_mask, 'left')
+                if infill_mask_video is not None:
+                    left_image[bg_mask] = black
+                #else:
+                #    left_image = infill_from_deep_side(left_image, left_img_mask, 'left')
                     
             
                 touchly_left_depth = None
@@ -558,7 +561,10 @@ if __name__ == '__main__':
                 
                 bg_mask = np.all(right_image == bg_color_infill_detect, axis=-1)
                 right_img_mask = mark_depth_transitions(bg_mask, right_depth)
-                right_image = infill_from_deep_side(right_image, right_img_mask, 'right')
+                if infill_mask_video is not None:
+                    right_image[bg_mask] = black
+                #else:
+                    #right_image = infill_from_deep_side(right_image, right_img_mask, 'right')
             
                 imgs = [left_image, right_image]
                 if touchly_left_depth is not None:
