@@ -85,80 +85,97 @@ def convert_to_equirectangular(image, input_fov=100):
     return equirect_img
 
 
-def mark_depth_transitions_old_slow(boolean_mask, depth_map):
+def infill_from_deep_side(image, mask, sample_side='right'):
     """
-    For each row in the boolean mask, finds segments where the mask is True.
-    For each segment, compares the depth values at the transition edges.
-    Marks:
-      - The closer edge with red (255, 0, 0)
-      - The further edge with blue (0, 0, 255)
-      - The interior of True segments with green (0, 255, 0)
-      - All False pixels as black (0, 0, 0)
-      
+    For each row in the image, infill segments marked in the mask with the color sampled
+    from the deeper side (blue side). The mask is assumed to have:
+      - Blue pixels: [0, 0, 255] marking the deeper edge.
+      - Red  ([255, 0, 0]) and Green ([0, 255, 0]) marking the infill region.
+      - Black: [0, 0, 0] elsewhere.
+    
+    For each contiguous segment (where mask is non-black) in a row, the function:
+      1. Searches for blue marker pixels in the segment.
+      2. If blue markers exist, uses their position to decide the infill candidate.
+         - If a blue marker is at the left or right boundary, the candidate color is
+           sampled from the pixel just outside the segment.
+         - Otherwise, the first blue marker is used (and its right neighbor is chosen).
+      3. If no blue marker exists (i.e. only a single green pixel), the candidate color
+         is sampled from the right or left side of the segment, depending on the `sample_side`
+         argument.
+      4. Fills the segment with the candidate color.
+    
     Parameters:
-      boolean_mask (np.ndarray): 2D boolean array, shape (H, W)
-      depth_map (np.ndarray): 2D array (H, W) with depth values.
+      image (np.ndarray): Input image (H, W, 3) of type uint8.
+      mask (np.ndarray): Marking mask (H, W, 3) of type uint8.
+      sample_side (str): "right" (default) or "left". Used when no blue pixel is found.
       
     Returns:
-      np.ndarray: Color image (H, W, 3) with the markings.
+      np.ndarray: The resulting image after infilling.
     """
-    H, W = boolean_mask.shape
-    # Define colors (RGB)
-    red   = np.array([255, 0, 0], dtype=np.uint8)
-    blue  = np.array([0, 0, 255], dtype=np.uint8)
-    green = np.array([0, 255, 0], dtype=np.uint8)
+    result = image.copy()
+    H, W, _ = image.shape
+
+    # Define colors.
     black = np.array([0, 0, 0], dtype=np.uint8)
-    
-    # Start with a black output image.
-    result = np.zeros((H, W, 3), dtype=np.uint8)
-    
-    # Mark all True pixels as green by default.
-    result[boolean_mask] = green
-    
-    # Process each row separately.
+    blue  = np.array([0, 0, 255], dtype=np.uint8)
+
+    # Create a binary infill region: True where the mask is not black.
+    infill_region = np.any(mask != 0, axis=-1)  # shape (H, W)
+
     for i in range(H):
-        row_mask = boolean_mask[i]
-        row_depth = depth_map[i]
-        # Convert boolean to int (0, 1) and compute difference to find transitions.
-        row_int = row_mask.astype(np.int32)
-        diff = np.diff(row_int)
-        
-        # Find transition indices: 
-        start_indices = np.where(diff == 1)[0] +1
-        end_indices   = np.where(diff == -1)[0]
-        
-        # If the row starts with True, then add index 0 as a start.
-        if row_mask[0]:
-            start_indices = np.insert(start_indices, 0, 0)
-        # If the row ends with True, then add the last index as an end.
-        if row_mask[-1]:
-            end_indices = np.append(end_indices, W - 1)
-        
-        # Make sure we have matching pairs (if not, skip row)
-        if start_indices.size != end_indices.size:
+        row_infill = infill_region[i]
+        if not np.any(row_infill):
             continue
-        
-        # Process each segment in the row.
-        for s, e in zip(start_indices, end_indices):
+
+        # Compute contiguous segments in the row.
+        row_int = row_infill.astype(np.int32)
+        d = np.diff(row_int)  # length W-1
+
+        # A segment starts where diff == 1 (and at index 0 if the row starts True).
+        seg_starts = list(np.where(d == 1)[0] + 1)
+        if row_infill[0]:
+            seg_starts = [0] + seg_starts
+
+        # A segment ends where diff == -1 (and at W-1 if the row ends True).
+        seg_ends = list(np.where(d == -1)[0])
+        if row_infill[-1]:
+            seg_ends = seg_ends + [W - 1]
+
+        # Process each segment.
+        for start, end in zip(seg_starts, seg_ends):
+            # Extract this segment from the mask.
+            segment_mask = mask[i, start:end+1]  # shape (segment_length, 3)
+            # Identify blue pixels in the segment.
+            is_blue = np.all(segment_mask == blue, axis=-1)
+            blue_indices = np.where(is_blue)[0]
             
-            #Ignore single pixels
-            if s == e:
-                continue
-            
-            #Check the depth just outside of the edges as it is more reliable
-            start_depth_chek_location = max(s - 2, 0)
-            end_depth_chek_location = min(e + 2, W-1)
-            
-            # Get the depth values just outside of the boundaries.
-            depth_s = row_depth[start_depth_chek_location]
-            depth_e = row_depth[end_depth_chek_location]
-            # Compare: lower depth is closer.
-            if depth_s < depth_e:
-                result[i, s] = red   # start is closer
-                result[i, e] = blue  # end is further
+            if blue_indices.size == 0:
+                # No blue pixel exists, so sample from the specified side.
+                if sample_side == 'right':
+                    candidate_idx = end + 1 if end < W - 1 else end
+                else:  # sample_side == 'left'
+                    candidate_idx = start - 1 if start > 0 else start
             else:
-                result[i, s] = blue  # start is further
-                result[i, e] = red   # end is closer
+                # Use blue markers if present.
+                # Check if the blue marker is at one of the boundaries.
+                if 0 in blue_indices:
+                    # Blue is at the left edge of the segment.
+                    candidate_idx = start - 1 if start > 0 else start
+                elif (end - start) in blue_indices:
+                    # Blue is at the right edge.
+                    candidate_idx = end + 1 if end < W - 1 else end
+                else:
+                    # Otherwise, choose the first blue marker in the segment.
+                    b_rel = blue_indices[0]  # relative index inside segment
+                    candidate_idx = start + b_rel + 1
+                    if candidate_idx >= W:
+                        candidate_idx = start + b_rel - 1 if (start + b_rel - 1) >= 0 else start + b_rel
+
+            # Sample the candidate color from the original image.
+            candidate_color = image[i, candidate_idx]
+            # Fill the entire segment with the candidate color.
+            result[i, start:end+1] = candidate_color
+
     return result
 
 
@@ -518,18 +535,9 @@ if __name__ == '__main__':
                 left_image, left_depth = depth_map_tools.render([mesh], render_cam_matrix, depth = -2, bg_color = bg_color)
                 left_image = (left_image*255).astype(np.uint8)
                 
-                if infill_mask_video is not None:
-                    #bg_mask = np.all(left_image == bg_color_infill_detect, axis=-1)
-                    bg_mask = np.all(left_image == bg_color_infill_detect, axis=-1)
-                    left_image[bg_mask] = black
-                    left_img_mask = mark_depth_transitions(bg_mask, left_depth)
-                    
-                    #left_img_mask = np.zeros((frame_height, frame_width), dtype=np.uint8)
-                    #left_img_mask[bg_mask] = 255
-                    
-                    #result_bgr = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
-                    #cv2.imwrite("output.png", result_bgr)
-                    #exit(0)
+                bg_mask = np.all(left_image == bg_color_infill_detect, axis=-1)
+                left_img_mask = mark_depth_transitions(bg_mask, left_depth)
+                left_image = infill_from_deep_side(left_image, left_img_mask, 'left')
                     
             
                 touchly_left_depth = None
@@ -548,12 +556,9 @@ if __name__ == '__main__':
                 right_image, right_depth = depth_map_tools.render([mesh], render_cam_matrix, depth = -2, bg_color = bg_color)
                 right_image = (right_image*255).astype(np.uint8)
                 
-                if infill_mask_video is not None:
-                    bg_mask = np.all(right_image == bg_color_infill_detect, axis=-1)
-                    
-                    right_image[bg_mask] = black
-                    
-                    right_img_mask = mark_depth_transitions(bg_mask, right_depth)
+                bg_mask = np.all(right_image == bg_color_infill_detect, axis=-1)
+                right_img_mask = mark_depth_transitions(bg_mask, right_depth)
+                right_image = infill_from_deep_side(right_image, right_img_mask, 'right')
             
                 imgs = [left_image, right_image]
                 if touchly_left_depth is not None:
