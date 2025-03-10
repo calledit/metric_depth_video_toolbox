@@ -4,7 +4,7 @@ FOV is the x and the y angles of the light cone that the camera captures. It is 
 FOV may be talked about as:
 - Lens Focal Length combined with sensor size (55 mm is a common focal length which with a 35mm sensor gives xfov: 36.2 and yfov: 24.6). The relationship is FOV_x=2arctan(sensor_width/2*focal_length).
 - Camera intrinsics a 3x3 matrix with fx, fy, cx, and cy. (cx and cy are not really part of fov but describes the image center point for cases when the image has been cropped so that the camera center no longer aligns with the image center). fx and fy is focal length in the unit of pixles.
-- Diagnoal FOV
+- xFOV, yFOV or Diagnoal FOV. Values in degrees or radians.
 
 A table of common conversions is available here: https://www.nikonians.org/reviews/fov-tables
 
