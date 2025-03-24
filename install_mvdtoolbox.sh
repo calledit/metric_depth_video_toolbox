@@ -98,7 +98,8 @@ if [[ " $@ " =~ " -unidepth " ]]; then
 	pip install timm wandb xformers
 	wget https://raw.githubusercontent.com/AbdBarho/xformers-wheels/refs/heads/main/xformers/components/attention/nystrom.py
 	sed -i 's/from xformers\.components\.attention import NystromAttention/from nystrom import NystromAttention/g' unidepth/layers/nystrom_attention.py
-	
+
+ 	cd unidepth/ops/knn;bash compile.sh;cd ../../../
 	
 	cd ..
 	
