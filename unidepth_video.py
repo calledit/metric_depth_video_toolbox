@@ -125,7 +125,6 @@ if __name__ == '__main__':
 
     cam_matrix = compute_camera_matrix(args.xfov, args.yfov, frame_width, frame_height).astype(np.float32)
     cam_matrix_torch = torch.from_numpy(cam_matrix)
-    camera = Pinhole(K=cam_matrix_torch.unsqueeze(0))
 
     model = UniDepthV2.from_pretrained(f"lpiccinelli/unidepth-v2-vitl14").to(DEVICE)
     model.interpolation_mode = "bilinear"
@@ -146,7 +145,7 @@ if __name__ == '__main__':
         rgb = cv2.cvtColor(raw_frame, cv2.COLOR_BGR2RGB)
         rgb_torch = torch.from_numpy(rgb).permute(2, 0, 1)
 
-        predictions = model.infer(rgb_torch, camera)
+        predictions = model.infer(rgb_torch, cam_matrix_torch)
         depths.append(predictions["depth"].squeeze().cpu().numpy())
         pred_intrinsic = predictions["intrinsics"].squeeze().cpu().numpy()
         fovx, fovy = fov_from_camera_matrix(pred_intrinsic)
