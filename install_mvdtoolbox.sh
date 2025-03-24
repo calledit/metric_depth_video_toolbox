@@ -120,6 +120,7 @@ cd ..
 #install Depth-Anything-V2
 git clone https://github.com/DepthAnything/Depth-Anything-V2
 cd Depth-Anything-V2
+git checkout 0cf983c30f4d7ff7eaa14cf0cd6f0b4c90c36cc1
 pip install -r requirements.txt
 
 cd metric_depth
