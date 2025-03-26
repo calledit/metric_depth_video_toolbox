@@ -195,6 +195,25 @@ def project_2d_points_to_3d(points, depth, camera_matrix, distCoeffs = None):
     # Convert the result to a numpy array for easier use
     return np.array(points_3d)
 
+def convert_mesh_to_pcd(mesh, included_points, input_pcd):
+    ref_to_mesh_vert = np.asarray(mesh.vertices)
+    ref_to_mesh_cols = np.asarray(mesh.vertex_colors)
+    
+    mask = np.ones(len(ref_to_mesh_vert), dtype=bool)
+    mask[included_points] = False
+    #We simply move non visble vertexs away since removing them is so slow in open3d
+    ref_to_mesh_vert[mask] = np.array([-0.2, -0.2, -0.2])
+    
+    if input_pcd is None:
+        input_pcd = pts_2_pcd(ref_to_mesh_vert, ref_to_mesh_cols)
+    else:
+        
+        ref_to_pcd_vert = np.asarray(input_pcd.points)
+        ref_to_pcd_cols = np.asarray(input_pcd.colors)
+        ref_to_pcd_vert[:] = ref_to_mesh_vert[:]
+        ref_to_pcd_cols[:] = ref_to_mesh_cols[:]
+    
+    return input_pcd
 
 def get_mesh_from_depth_map(depth_map, cam_mat, color_frame = None, inp_mesh = None, remove_edges = False, mask = None,
                                  invalid_color=None, of_by_one = True):
@@ -352,6 +371,7 @@ def create_mesh_from_point_cloud(points, height, width,
             mesh.vertices = o3d.utility.Vector3dVector(vertices)
             if colors is not None:
                 mesh.vertex_colors = o3d.utility.Vector3dVector(colors)
+            used_indices = np.arange(vertices.shape[0])
         else:
             ref_to_all_tri = np.asarray(mesh.triangles)
             ref_to_all_vert = np.asarray(mesh.vertices)

@@ -292,6 +292,8 @@ if __name__ == '__main__':
     parser.add_argument('--max_frames', default=-1, type=int, help='quit after max_frames nr of frames', required=False)
     parser.add_argument('--touchly0', action='store_true', help='Render as touchly0 format. ie. stereo video with 3d ', required=False)
     parser.add_argument('--vr180', action='store_true', help='Render as vr180 format. ie. stereo video at 180 deg ', required=False)
+    parser.add_argument('--render_as_pointcloud', action='store_true', help='Render as point cloud instead of as mesh', required=False)
+    
     
     parser.add_argument('--touchly1', action='store_true', help='Render as touchly1 format. ie. mono video with 3d', required=False)
     parser.add_argument('--touchly_max_depth', default=5, type=float, help='the max depth that touchly is cliped to', required=False)
@@ -404,7 +406,8 @@ if __name__ == '__main__':
     
     left_shift = -(args.pupillary_distance/1000)/2
     right_shift = +(args.pupillary_distance/1000)/2
-
+    
+    draw_mesh = None
     frame_n = 0
     last_mesh = None
     while raw_video.isOpened():
@@ -453,13 +456,22 @@ if __name__ == '__main__':
                 transform_to_zero = np.array(transformations[frame_n-1])
             else:
                 transform_to_zero = np.eye(4)
+            
+            of_by_one = True
+            if args.render_as_pointcloud:
+                of_by_one = False
                 
             mesh, used_indices = depth_map_tools.get_mesh_from_depth_map(depth, cam_matrix, color_frame, last_mesh, remove_edges = (args.infill_mask | args.remove_edges))
             last_mesh = mesh
             
+            if args.render_as_pointcloud:
+                draw_mesh = depth_map_tools.convert_mesh_to_pcd(mesh, used_indices, draw_mesh)
+                #TODO:move points that is vertices back to their real position
+            else:
+                draw_mesh = mesh
             
             if transformations is not None:
-                mesh.transform(transform_to_zero)
+                draw_mesh.transform(transform_to_zero)
             
             if mask_video is not None:
                 
@@ -507,7 +519,7 @@ if __name__ == '__main__':
                 mesh = bg_cloud
                 
             if args.touchly1:
-                color_transformed, touchly_depth = depth_map_tools.render([mesh], render_cam_matrix, -2, bg_color = bg_color)
+                color_transformed, touchly_depth = depth_map_tools.render([draw_mesh], render_cam_matrix, -2, bg_color = bg_color)
                 color_transformed = (color_transformed*255).astype(np.uint8)
                 
                 
@@ -531,13 +543,14 @@ if __name__ == '__main__':
             else:
             
                 #move mesh for left eye render
-                mesh.translate([-left_shift, 0.0, 0.0])
-                left_image, left_depth = depth_map_tools.render([mesh], render_cam_matrix, depth = -2, bg_color = bg_color)
+                draw_mesh.translate([-left_shift, 0.0, 0.0])
+                left_image, left_depth = depth_map_tools.render([draw_mesh], render_cam_matrix, depth = -2, bg_color = bg_color)
                 left_image = (left_image*255).astype(np.uint8)
                 
-                bg_mask = np.all(left_image == bg_color_infill_detect, axis=-1)
-                left_img_mask = mark_depth_transitions(bg_mask, left_depth)
                 if infill_mask_video is not None:
+                    bg_mask = np.all(left_image == bg_color_infill_detect, axis=-1)
+                    left_img_mask = mark_depth_transitions(bg_mask, left_depth)
+                
                     left_image[bg_mask] = black
                 #else:
                 #    left_image = infill_from_deep_side(left_image, left_img_mask, 'left')
@@ -552,16 +565,17 @@ if __name__ == '__main__':
                     touchly_left_depth = np.repeat(left_depth8bit[..., np.newaxis], 3, axis=-1)
             
                 #Move mesh back to center
-                mesh.translate([left_shift, 0.0, 0.0])
+                draw_mesh.translate([left_shift, 0.0, 0.0])
         
                 #move mesh for right eye render
-                mesh.translate([-right_shift, 0.0, 0.0])
-                right_image, right_depth = depth_map_tools.render([mesh], render_cam_matrix, depth = -2, bg_color = bg_color)
+                draw_mesh.translate([-right_shift, 0.0, 0.0])
+                right_image, right_depth = depth_map_tools.render([draw_mesh], render_cam_matrix, depth = -2, bg_color = bg_color)
                 right_image = (right_image*255).astype(np.uint8)
                 
-                bg_mask = np.all(right_image == bg_color_infill_detect, axis=-1)
-                right_img_mask = mark_depth_transitions(bg_mask, right_depth)
                 if infill_mask_video is not None:
+                    bg_mask = np.all(right_image == bg_color_infill_detect, axis=-1)
+                    right_img_mask = mark_depth_transitions(bg_mask, right_depth)
+                
                     right_image[bg_mask] = black
                 #else:
                     #right_image = infill_from_deep_side(right_image, right_img_mask, 'right')

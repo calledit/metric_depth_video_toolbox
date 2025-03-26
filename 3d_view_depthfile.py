@@ -25,6 +25,7 @@ if __name__ == '__main__':
     parser.add_argument('--yfov', type=int, help='fov in deg in the y-direction, calculated from aspectratio and xfov in not given', required=False)
     parser.add_argument('--max_depth', default=20, type=int, help='the max depth that the video uses', required=False)
     parser.add_argument('--render', action='store_true', help='Render to video insted of GUI', required=False)
+    parser.add_argument('--render_as_pointcloud', action='store_true', help='Render as point cloud instead of as mesh', required=False)
     parser.add_argument('--remove_edges', action='store_true', help='Tries to remove edges that was not visible in image(it is a bit slow)', required=False)
     parser.add_argument('--show_camera', action='store_true', help='Shows lines representing the camera frustrum', required=False)
     parser.add_argument('--background_ply', type=str, help='PLY file that will be included in the scene', required=False)
@@ -123,8 +124,7 @@ if __name__ == '__main__':
                 output_file = args.depth_video + "_render.mkv"
                 codec = cv2.VideoWriter_fourcc(*"FFV1")
             out = cv2.VideoWriter(output_file, codec, frame_rate, (frame_width, frame_height))
-    mesh = None
-    projected_mesh = None
+    mesh, draw_mesh = None, None
     
     cameraLines, LastcameraLines = None, None
     frame_n = 0
@@ -177,25 +177,38 @@ if __name__ == '__main__':
                 last30_max_depth.pop(0)
             cameraLines = o3d.geometry.LineSet.create_camera_visualization(view_width_px=frame_width, view_height_px=frame_height, intrinsic=cam_matrix, extrinsic=np.eye(4), scale=roll_depth)
             cameraLines.transform(transform_to_zero)
+            
+        of_by_one = True
+        if args.render_as_pointcloud:
+            of_by_one = False
         
-        mesh_ret, _ = depth_map_tools.get_mesh_from_depth_map(depth, cam_matrix, color_frame, mesh, remove_edges = args.remove_edges, mask = mask)
+        mesh_ret, included_points = depth_map_tools.get_mesh_from_depth_map(depth, cam_matrix, color_frame, mesh, remove_edges = args.remove_edges, mask = mask, of_by_one = of_by_one)
+        
         
         if transformations is not None:
             mesh_ret.transform(transform_to_zero)
         
+        add_geom = False
         if mesh is None:
-            if not args.render and args.draw_frame == -1:
-                vis.add_geometry(mesh_ret)
-            if background_obj is not None:
-                vis.add_geometry(background_obj)
+            add_geom = True
 
         mesh = mesh_ret
         
         
+        if args.render_as_pointcloud:
+            draw_mesh = depth_map_tools.convert_mesh_to_pcd(mesh, included_points, draw_mesh)
+            #TODO:move points that is vertices back to their real position
+        else:
+            draw_mesh = mesh
+        
+        if add_geom:
+            if not args.render and args.draw_frame == -1:
+                vis.add_geometry(draw_mesh)
+            if background_obj is not None:
+                vis.add_geometry(background_obj)
         
         
-        
-        to_draw = [mesh]
+        to_draw = [draw_mesh]
         if cameraLines is not None:
             to_draw.append(cameraLines)
             
@@ -214,11 +227,11 @@ if __name__ == '__main__':
                     vis.remove_geometry(LastcameraLines, reset_bounding_box = False)
                 vis.add_geometry(cameraLines, reset_bounding_box = False)
                 LastcameraLines = cameraLines
-            vis.update_geometry(mesh)
+            vis.update_geometry(draw_mesh)
         
         
         # Set Camera position
-        lookat = mesh.get_center()
+        lookat = draw_mesh.get_center()
         if args.tx != -99.0:
             lookat[0] = args.tx
         if args.ty != -99.0:
