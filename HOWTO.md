@@ -99,7 +99,7 @@ python3.11 3d_view_depthfile.py --color_video ~/in_office_720p.mp4 --depth_video
 <img width="339" alt="in_the_clouds" src="https://github.com/user-attachments/assets/bf0e8edd-c234-4563-ac8e-e434ce76bf13" />
 
 ## Part two: generating side by side stereo video
-Now that we have our rescaled depth video we can create stereo video (technically you dont need to rescale the depth video to create stero video but the end result will end up slightly better if you do rescale it first)
+Now that we have our rescaled depth video we can create stereo video (technically you dont need to do step 2 - 7, the end result will end up slightly better if you do them since you can the use the rescaled depth instead of the raw depth from the monocular depth model)
 
 ### Step 7 
 
@@ -136,7 +136,7 @@ As is visible in the image below, stereocrafter does a pretty good job. If you l
 ### Final step compress and add back audio
 Here we use ffmpeg to extract the original audio and add it back in the video as well as compressing the large uncompressed video file in to a video format/size that a modern VR headset or other stereo capable device can handle.
 ```
-#Extract audio as a wave file (if you have audio this example video actually does not)
+#Extract audio as a wave file (if you have audio. The example video actually does not have any audio)
 ffmpeg -i ~/in_office_720p.mp4 ~/in_office_720p.wav
 
 
