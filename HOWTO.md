@@ -117,7 +117,7 @@ Side stero infill mask. Green, red and blue where there is paralax. Blue represe
 
 ### Step 8
 Here we will use ML to add paralax infill using the tool stereo_crafter_infill.py
-Stereocrafter is based on stable defusion so is very slow, be patient. On a 3090 around 0.2 fps have been observed. That is a minute of video recorded at 30 fps will take 2.5 hours to process. Think of it as a proccess you run over night.
+Stereocrafter is based on stable defusion so is slow, be patient.
 
 ```
 ./install_mvdtoolbox.sh -stereocrafter #downloads and installs stereocrafter in the right folder
@@ -127,21 +127,21 @@ python3.11 stereo_crafter_infill.py --sbs_color_video ~/in_office_720p.mp4_depth
 The result will be a video file named:
 ~/in_office_720p.mp4_depth.mkv_rescaled.mkv_infilled.mkv
 
-As is visible in the image below, stereocrafter does a pretty good job. But it is not perfect the pillar to the right is a good example of where it did not fill in all the way. Increasing the stereocrafter image resolution does sometimes improve the output but it also slows down the process even more.
+As is visible in the image below, stereocrafter does a pretty good job. If you look hard enogh you will find discrepancies. These discrepancies are however not that bad and since the focus tends to be on things that are not the infilled areas a viewer may not notice them.
 
-<img width="950" alt="sbs" src="https://github.com/user-attachments/assets/7d19f74a-2a24-4a17-8581-ce9355cb13ad" />
+<img width="950" alt="sbs" src="https://github.com/user-attachments/assets/4ee8b7d9-82ad-4007-8764-712b383572dd" />
 
 
 
 ### Final step compress and add back audio
 Here we use ffmpeg to extract the original audio and add it back in the video as well as compressing the large uncompressed video file in to a video format/size that a modern VR headset or other stereo capable device can handle.
 ```
-#Extract audio as a wave file
+#Extract audio as a wave file (if you have audio this example video actually does not)
 ffmpeg -i ~/in_office_720p.mp4 ~/in_office_720p.wav
 
 
-#Compress video for viewing on otehr devices and add back audio
-ffmpeg -i ~/in_office_720p.mp4_depth.mkv_rescaled.mkv_infilled.mkv -i ~/in_office_720p.wav -c:v libx265 -crf 18 -tag:v hvc1 -pix_fmt yuv420p -c:a aac -map 0:v:0 -map 1:a:0 ~/in_office_720p_final_stero.mp4
+#Compress video for viewing on other devices and add back audio
+ffmpeg -i ~/in_office_720p.mp4_depth.mkv_rescaled.mkv_stereo.mkv_infilled.mkv -i ~/in_office_720p.wav -c:v libx265 -crf 18 -tag:v hvc1 -pix_fmt yuv420p -c:a aac -map 0:v:0 -map 1:a:0 ~/in_office_720p_final_stero.mp4
 ```
 
 
