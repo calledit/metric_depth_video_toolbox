@@ -12,13 +12,13 @@ from scipy.ndimage import binary_dilation
 
 import cv2
 
-
+num_inference_steps = 3#More steps look better but is slower
 black = np.array([0, 0, 0], dtype=np.uint8)
 blue = np.array([0, 0, 255], dtype=np.uint8)
 pipeline = None
 frame_rate, frame_width, frame_height = None, None, None
 def generate_infilled_frames(input_frames, input_masks):
-
+    global num_inference_steps
     input_frames = torch.tensor(input_frames).permute(0, 3, 1, 2).float()/255.0
     frames_mask = torch.tensor(input_masks).permute(0, 1, 2).float()/255.0
 
@@ -35,7 +35,7 @@ def generate_infilled_frames(input_frames, input_masks):
         fps=frame_rate,
         motion_bucket_id=127,
         noise_aug_strength=0.0,
-        num_inference_steps=8,
+        num_inference_steps=num_inference_steps,
     ).frames[0]
 
     video_latents = video_latents.unsqueeze(0)
@@ -55,7 +55,7 @@ def deal_with_frame_chunk(keep_first_three, chunk, out, keep_last_three):
 
     #Looks like shit at 512 x 512 but looks quite good at 1024 x 1024
 
-    #some issues but looks ok (a bit faster is good)
+    #1024x768 looks good enogh a okay tradeof betwen looks and speed
     new_width = 1024
     new_height = 768
 
@@ -172,11 +172,15 @@ def deal_with_frame_chunk(keep_first_three, chunk, out, keep_last_three):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Video Crafter infill script')
-    parser.add_argument('--sbs_color_video', type=str, required=True, help='side by side stereo video')
+    parser.add_argument('--sbs_color_video', type=str, required=True, help='side by side stereo video renderd with point clouds in the masked area')
     parser.add_argument('--sbs_mask_video', type=str, required=True, help='side by side stereo video mask')
     parser.add_argument('--max_frames', default=-1, type=int, help='quit after max_frames nr of frames', required=False)
-
+    parser.add_argument('--num_inference_steps', default=3, type=int, help='Numer of defussion steps more look better but is slower', required=False)
+    
+    
     args = parser.parse_args()
+    
+    num_inference_steps = args.num_inference_steps
 
     DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
 
