@@ -3,6 +3,9 @@
 This guide contains a walkthrogh of how to use the tools in the metric depth video toolbox.
 
 ## Part one: generating rescaled metric depth video, camera tracking data and points clouds
+
+_You can skip step 2 - 6 if you just want a basic 3D stereo video._
+
 Select a video to work with. This should be a clip, preferably less than 6-7 minutes long (due to GPU memmory usage), and there should not be any cuts in the video. The video should preferably have the same zoom level over the hole clip. Due to GPU memmory constraints in Video-Depth-Anything the aspect ratio is best keept under 16:9.
 If you want to convert an entire movie split it up and do it scene by scene. There are tools that can cut down a movie to its scenes automatically.
 
