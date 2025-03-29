@@ -65,7 +65,7 @@ if [[ " $@ " =~ " -depthcrafter " ]]; then
 
 	cd DepthCrafter
 	
-	apt install ffmpeg
+	#apt install ffmpeg
 	
 	pip install diffusers transformers mediapy decord accelerate
 	

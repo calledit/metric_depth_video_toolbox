@@ -77,7 +77,7 @@ def compute_scale_and_shift_full(prediction, target, mask = None):
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description='Stereo crafter metric')
+    parser = argparse.ArgumentParser(description='Depthcrafter metric prompt')
     parser.add_argument('--color_video', type=str, required=True)
     parser.add_argument('--depth_video', type=str, required=True, help='reference metric depth video used to obtain conversion constants, can be created with any image depth model')
     parser.add_argument('--max_frames', type=int, default=-1, help='maximum length of the input video, -1 means no limit')
@@ -158,6 +158,52 @@ if __name__ == "__main__":
     if raw_video is not None:
         raw_video.release()
 
+    latents = None
+    use_depth_prompting = True
+    if use_depth_prompting:
+        print("create initial prompt depth latents")
+        with torch.no_grad():
+
+            needs_upcasting = (
+                pipe.vae.dtype == torch.float16 and pipe.vae.config.force_upcast
+            )
+            if needs_upcasting:
+                pipe.vae.to(dtype=torch.float32)
+
+            from diffusers.utils.torch_utils import randn_tensor
+            shape = (1, 40, 4, 72, 96)
+            latents = randn_tensor(shape)
+            latents = latents * pipe.scheduler.init_noise_sigma
+
+
+            inv_depth_ref_frames = []
+            for i in range(0, min(args.max_frames, len(depth_ref_frames))):
+
+                print("frame: ", i)
+
+                ref_depth = depth_ref_frames[i]
+
+                # only use as refernce if valid, when all depth values are zero that means this frame is not suposed to be used
+                if np.all(ref_depth == 0):
+                    continue
+
+                inv_depth_ref = 1/ref_depth
+                inv_depth_refx3 = np.stack((inv_depth_ref,)*3, axis=-1)
+
+                #convert np depth to torch depth
+                frame = torch.from_numpy(inv_depth_refx3.transpose(2, 0, 1))
+                frame = frame * 2.0 - 1.0
+                frame = frame.unsqueeze(0)
+                frame = frame.to(DEVICE)
+
+                frame_latents = pipe.vae.encode(frame).latent_dist.mode()
+
+                #This probably wont work since latent has other shape
+                latents[:, i, :, :, :] = frame_latents
+
+            if needs_upcasting:
+                pipe.vae.to(dtype=torch.float16)
+
 
     print("Run the depthcrafter net")
     # inference the depth map using the DepthCrafter pipeline
@@ -171,13 +217,14 @@ if __name__ == "__main__":
             num_inference_steps=5,
             window_size=110,
             overlap=25,
+            latents=latents,
             track_time=True,
         ).frames[0]
         # convert the three-channel output to a single channel depth map
         depths = res.sum(-1) / res.shape[-1]
 
-        
-    
+
+
     # Recover scale and shift
     targets = []
     sources = []
