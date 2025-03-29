@@ -2,7 +2,8 @@
 
 This guide contains a walkthrogh of how to use the tools in the metric depth video toolbox.
 
-## Part one: generating rescaled metric depth video, camera tracking data and points clouds
+## Part one: generating metric depth video
+
 Select a video to work with. This should be a clip, preferably less than 6-7 minutes long (due to GPU memmory usage), and there should not be any cuts in the video. The video should preferably have the same zoom level over the hole clip. Due to GPU memmory constraints in Video-Depth-Anything the aspect ratio is best keept under 16:9.
 If you want to convert an entire movie split it up and do it scene by scene. There are tools that can cut down a movie to its scenes automatically.
 
@@ -34,6 +35,10 @@ View result in 3D:
 ```
 python3.11 3d_view_depthfile.py --color_video ~/in_office_720p.mp4 --depth_video ~/in_office_720p.mp4_depth.mkv --yfov 40
 ````
+
+## Part two: generating rescaled metric depth video, camera tracking data and points clouds
+
+_You can skip step 2 - 6 if you just want a basic 3D stereo video._
 
 ### Step 2
 Generate a mask video from the source video
@@ -98,8 +103,10 @@ python3.11 3d_view_depthfile.py --color_video ~/in_office_720p.mp4 --depth_video
 ```
 <img width="339" alt="in_the_clouds" src="https://github.com/user-attachments/assets/bf0e8edd-c234-4563-ac8e-e434ce76bf13" />
 
-## Part two: generating side by side stereo video
-Now that we have our rescaled depth video we can create stereo video (technically you dont need to rescale the depth video to create stero video but the end result will end up slightly better if you do rescale it first)
+## Part three: generating side by side stereo video
+Now that we have our depth video we can create stereo video.
+
+_Technically you dont need to do step 2 - 6, the end result will end up slightly better if you do them since you can the use the rescaled depth instead of the raw depth from the monocular depth model._
 
 ### Step 7 
 
@@ -136,7 +143,7 @@ As is visible in the image below, stereocrafter does a pretty good job. If you l
 ### Final step compress and add back audio
 Here we use ffmpeg to extract the original audio and add it back in the video as well as compressing the large uncompressed video file in to a video format/size that a modern VR headset or other stereo capable device can handle.
 ```
-#Extract audio as a wave file (if you have audio this example video actually does not)
+#Extract audio as a wave file (if you have audio. The example video actually does not have any audio)
 ffmpeg -i ~/in_office_720p.mp4 ~/in_office_720p.wav
 
 
