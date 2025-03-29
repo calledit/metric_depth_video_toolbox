@@ -2,6 +2,9 @@
 
 pip install open3d numpy opencv-python
 
+#Stuff required for Depth-Anything and other third party tools
+pip install einops easydict imageio xformers==0.0.29 tqdm
+
 
 #install support for madpose for accurate camera tracking
 if [[ " $@ " =~ " -madpose " ]]; then
@@ -95,7 +98,7 @@ if [[ " $@ " =~ " -unidepth " ]]; then
 
 	cd UniDepth
 	
-	pip install timm wandb xformers
+	pip install timm wandb
 	wget https://raw.githubusercontent.com/AbdBarho/xformers-wheels/refs/heads/main/xformers/components/attention/nystrom.py
 	sed -i 's/from xformers\.components\.attention import NystromAttention/from nystrom import NystromAttention/g' unidepth/layers/nystrom_attention.py
 
@@ -111,7 +114,7 @@ fi
 git clone https://github.com/DepthAnything/Video-Depth-Anything
 cd Video-Depth-Anything
 git checkout 0cf983c30f4d7ff7eaa14cf0cd6f0b4c90c36cc1
-pip install -r requirements.txt
+#pip install -r requirements.txt
 
 mkdir checkpoints
 cd checkpoints
@@ -122,7 +125,7 @@ cd ..
 #install Depth-Anything-V2
 git clone https://github.com/DepthAnything/Depth-Anything-V2
 cd Depth-Anything-V2
-pip install -r requirements.txt
+#pip install -r requirements.txt
 
 cd metric_depth
 mkdir checkpoints
