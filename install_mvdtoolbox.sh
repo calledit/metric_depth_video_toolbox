@@ -59,6 +59,22 @@ if [[ " $@ " =~ " -stereocrafter " ]]; then
 	
 fi
 
+#install support for depthcrafter for defusion based depth
+if [[ " $@ " =~ " -depthcrafter " ]]; then
+	git clone https://github.com/Tencent/DepthCrafter
+
+	cd DepthCrafter
+	
+	apt install ffmpeg
+	
+	pip install diffusers transformers mediapy decord accelerate
+	
+	
+	exit
+	
+fi
+
+
 #install support for Moge
 if [[ " $@ " =~ " -moge " ]]; then
 	git clone https://github.com/microsoft/MoGe
