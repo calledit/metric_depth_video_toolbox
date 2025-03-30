@@ -98,7 +98,6 @@ def save_24bit(frames, output_video_path, fps, max_depth_arg):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Video Depth Anything Unidepth video converter')
     parser.add_argument('--color_video', type=str, required=True)
-    parser.add_argument('--output_dir', type=str, default='./outputs')
     parser.add_argument('--max_len', type=int, default=-1, help='maximum length of the input video, -1 means no limit')
     parser.add_argument('--target_fps', type=int, default=-1, help='target fps of the input video, -1 means the original fps')
     parser.add_argument('--max_depth', default=20, type=int, help='the max depth that the video uses', required=False)
@@ -107,9 +106,9 @@ if __name__ == '__main__':
 
     args = parser.parse_args()
 
+    use_fov = True
     if args.xfov is None and args.yfov is None:
-        print("Either --xfov or --yfov is required.")
-        exit(0)
+        use_fov = False
 
     DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
 
@@ -123,9 +122,11 @@ if __name__ == '__main__':
     raw_video = cv2.VideoCapture(args.color_video)
     frame_width, frame_height = int(raw_video.get(cv2.CAP_PROP_FRAME_WIDTH)), int(raw_video.get(cv2.CAP_PROP_FRAME_HEIGHT))
     frame_rate = raw_video.get(cv2.CAP_PROP_FPS)
-
-    cam_matrix = compute_camera_matrix(args.xfov, args.yfov, frame_width, frame_height).astype(np.float32)
-    fovx, fovy = fov_from_camera_matrix(cam_matrix)
+    
+    fovx = None
+    if use_fov:
+        cam_matrix = compute_camera_matrix(args.xfov, args.yfov, frame_width, frame_height).astype(np.float32)
+        fovx, fovy = fov_from_camera_matrix(cam_matrix)
 
     model = MoGeModel.from_pretrained('Ruicheng/moge-vitl').to(DEVICE).eval()
 
@@ -149,9 +150,6 @@ if __name__ == '__main__':
         output = model.infer(image_tensor, fov_x=fovx)
         depths.append(output['depth'].cpu().numpy())
 
-    video_name = os.path.basename(args.color_video)
-    if not os.path.exists(args.output_dir):
-        os.makedirs(args.output_dir)
-
-    output_video_path = os.path.join(args.output_dir, os.path.splitext(video_name)[0]+'_depth.mkv')
+    
+    output_video_path = args.color_video+'_depth.mkv'
     save_24bit(np.array(depths), output_video_path, frame_rate, args.max_depth)
