@@ -437,6 +437,7 @@ if __name__ == '__main__':
         depth_unit[..., 2] = rgb[..., 2]
         depth = depth.astype(np.float32)/((255**4)/MODEL_maxOUTPUT_depth)
         
+        edge_pcd = None
         
         if transformations is None and args.touchly1: #Fast path we can skip the full render pass
             depth8bit = np.rint(np.minimum(depth, args.touchly_max_depth)*(255/args.touchly_max_depth)).astype(np.uint8)
@@ -473,7 +474,7 @@ if __name__ == '__main__':
             mesh, used_indices = depth_map_tools.get_mesh_from_depth_map(depth, cam_matrix, color_frame, last_mesh, remove_edges = remove_edges, of_by_one = of_by_one)
             last_mesh = mesh
             
-            edge_pcd = None
+            
             # If there are not points in the infill areas the infill models get confused.
             # So we add points in the infill area
             if not args.dont_place_points_in_edges and remove_edges:
@@ -486,7 +487,9 @@ if __name__ == '__main__':
                 edge_points[:, 0] *= (frame_width-1)/frame_width
                 edge_points[:, 1] *= (frame_height-1)/frame_height
                 
-                edge_pcd = depth_map_tools.pts_2_pcd(edge_points, edge_colors)
+                #Only draw edge points if there is more than 1 of them
+                if len(edge_points) > 1:
+                    edge_pcd = depth_map_tools.pts_2_pcd(edge_points, edge_colors)
                 
             
             if args.render_as_pointcloud:

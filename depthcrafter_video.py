@@ -17,23 +17,30 @@ def save_24bit(frames, output_video_path, fps, max_depth_arg):
     """
     Saves depth maps encoded in the R, G and B channels of a video (to increse accuracy as when compared to gray scale)
     """
-    height = frames.shape[1]
-    width = frames.shape[2]
 
-    out = cv2.VideoWriter(output_video_path, cv2.VideoWriter_fourcc(*"FFV1"), fps, (width, height))
 
-    max_depth = frames.max()
-    print("max metric depth: ", max_depth)
 
     MODEL_maxOUTPUT_depth = max_depth_arg ### pick a value slitght above max metric depth to save the depth in th video file nicly
     # if you pick a high value you will lose resolution
 
-    # incase you did not pick a absolute value we max out (this mean each video will have depth relative to max_depth)
-    # (if you want to use the video as a depth souce a absolute value is prefrable)
-    if MODEL_maxOUTPUT_depth < max_depth:
-        print("warning: output depth is deeper than max_depth. The depth will be clipped")
+    if isinstance(frames, np.ndarray):
+        height = frames.shape[1]
+        width = frames.shape[2]
+        max_depth = frames.max()
+        print("max metric depth: ", max_depth)
+        # incase you did not pick a absolute value we max out (this mean each video will have depth relative to max_depth)
+        # (if you want to use the video as a depth souce a absolute value is prefrable)
+        if MODEL_maxOUTPUT_depth < max_depth:
+            print("warning: output depth is deeper than max_depth. The depth will be clipped")
+        nr_frames = frames.shape[0]
+    else:
+        nr_frames = len(frames)
+        height = frames[0].shape[0]
+        width = frames[0].shape[1]
 
-    for i in range(frames.shape[0]):
+    out = cv2.VideoWriter(output_video_path, cv2.VideoWriter_fourcc(*"FFV1"), fps, (width, height))
+
+    for i in range(nr_frames):
         depth = frames[i]
         scaled_depth = (((255**4)/MODEL_maxOUTPUT_depth)*depth.astype(np.float64)).astype(np.uint32)
 
@@ -48,6 +55,7 @@ def save_24bit(frames, output_video_path, fps, max_depth_arg):
         out.write(bgr24bit)
 
     out.release()
+
 
 def compute_scale_and_shift_full(prediction, target, mask = None):
     # system matrix: A = [[a_00, a_01], [a_10, a_11]]
@@ -82,7 +90,9 @@ if __name__ == "__main__":
     parser.add_argument('--depth_video', type=str, required=True, help='reference metric depth video used to obtain conversion constants, can be created with any image depth model')
     parser.add_argument('--max_frames', type=int, default=-1, help='maximum length of the input video, -1 means no limit')
     parser.add_argument('--max_depth', default=20, type=int, help='the max depth that the video uses', required=False)
-    parser.add_argument('--max_res', type=int, default=1024)
+    parser.add_argument('--max_res', type=int, default=768)
+    parser.add_argument('--use_depth_prompting', default=False, action='store_true', help='Prompts depthcrafter with depth from the reference', required=False)
+
 
     args = parser.parse_args()
 
@@ -159,8 +169,7 @@ if __name__ == "__main__":
         raw_video.release()
 
     latents = None
-    use_depth_prompting = True
-    if use_depth_prompting:
+    if args.use_depth_prompting:
         print("create initial prompt depth latents")
         with torch.no_grad():
 
@@ -171,7 +180,11 @@ if __name__ == "__main__":
                 pipe.vae.to(dtype=torch.float32)
 
             from diffusers.utils.torch_utils import randn_tensor
-            shape = (1, 40, 4, 72, 96)
+            #TODO: FIX BUG if there is more than 110 frames the latents will bu used on subseqvent batches to
+            nr_frames = min(len(depth_ref_frames), 110)
+            if nr_frames > 110:
+                raise ValueError("Due to implementation details videos longer than 110 frames cant be prompted")
+            shape = (1, nr_frames, 4, 72, 96)
             latents = randn_tensor(shape)
             latents = latents * pipe.scheduler.init_noise_sigma
 
@@ -236,29 +249,41 @@ if __name__ == "__main__":
         if np.all(ref_depth == 0):
             continue
 
+        #nothing can be 0 depth from the camera that must be some type of error set it max distance
+        ref_depth[ref_depth == 0.0] = args.max_depth
+
         inv_metric_depth = 1/ref_depth
 
         targets.append(inv_metric_depth)
         sources.append(depths[i])
 
-    scale, shift = compute_scale_and_shift_full(np.concatenate(sources), np.concatenate(targets))
+    depth_ref_frames = None
+    src = np.concatenate(sources)
+    sources = None
+    trg = np.concatenate(targets)
+    targets = None
+
+    scale, shift = compute_scale_and_shift_full(src, trg)
     print("scale:", scale, "shift:", shift)
+    trg, src = None, None
 
     out_depths = []
     for i in range(0, len(depths)):
 
-        print("---- frame ", i, " ---")
 
         norm_inv = depths[i]
 
         #Convert from inverse rel depth to inverse metric depth
         inverse_reconstructed_metric_depth = (norm_inv * scale) + shift
+        inverse_reconstructed_metric_depth[ inverse_reconstructed_metric_depth == 0.0] = 1e-4
 
-        reconstructed_metric_depth = 1/inverse_reconstructed_metric_depth
+        reconstructed_metric_depth = np.clip(1/inverse_reconstructed_metric_depth, 0 , args.max_depth)
 
-        out_depths.append(cv2.resize(reconstructed_metric_depth, (frame_width, frame_height), interpolation=cv2.INTER_LINEAR))
+        reconstructed_metric_depth = np.nan_to_num(reconstructed_metric_depth, nan=args.max_depth)
 
-    depths = np.array(out_depths)
+        out_depths.append(np.clip(cv2.resize(reconstructed_metric_depth, (frame_width, frame_height), interpolation=cv2.INTER_LINEAR), 0 , args.max_depth))
+
+    depths = None
+    print("Save depth file")
     output_video_path = args.color_video + "_depthcrafter_depth.mkv"
-
-    save_24bit(depths, output_video_path, frame_rate, args.max_depth)
+    save_24bit(out_depths, output_video_path, frame_rate, args.max_depth)

@@ -148,7 +148,10 @@ if __name__ == '__main__':
         image_tensor = torch.tensor(rgb / 255, dtype=torch.float32, device=DEVICE).permute(2, 0, 1)
 
         output = model.infer(image_tensor, fov_x=fovx)
-        depths.append(output['depth'].cpu().numpy())
+        
+        dpth = output['depth'].cpu().numpy()
+        dpth = np.nan_to_num(dpth, nan=args.max_depth)#nan is the sky or somthing like that
+        depths.append(dpth)
 
     
     output_video_path = args.color_video+'_depth.mkv'

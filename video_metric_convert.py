@@ -98,7 +98,6 @@ if __name__ == '__main__':
     parser.add_argument('--color_video', type=str, required=True)
     parser.add_argument('--depth_video', type=str, required=False, help='reference metric depth video')
     parser.add_argument('--input_size', type=int, default=518)
-    parser.add_argument('--max_res', type=int, default=1440)
     parser.add_argument('--max_frames', type=int, default=-1, help='maximum length of the input video, -1 means no limit')
     parser.add_argument('--target_fps', type=int, default=-1, help='target fps of the input video, -1 means the original fps')
     parser.add_argument('--max_depth', default=20, type=int, help='the max depth that the video uses', required=False)
@@ -116,11 +115,11 @@ if __name__ == '__main__':
     video_depth_anything.load_state_dict(torch.load('Video-Depth-Anything/checkpoints/video_depth_anything_vitl.pth', map_location='cpu'), strict=True)
     video_depth_anything = video_depth_anything.to(DEVICE).eval()
 
-    frames, target_fps = read_video_frames(args.color_video, args.max_frames, args.target_fps, args.max_res)
+    frames, target_fps = read_video_frames(args.color_video, args.max_frames, args.target_fps, 99999999)
 
     ref_frames = None
     if args.depth_video is not None:
-        ref_frames, _ = read_video_frames(args.depth_video, 32, args.target_fps, args.max_res)
+        ref_frames, _ = read_video_frames(args.depth_video, 32, args.target_fps, 99999999)
 
     height = frames.shape[1]
     width = frames.shape[2]

@@ -80,7 +80,7 @@ if [[ " $@ " =~ " -moge " ]]; then
 	git clone https://github.com/microsoft/MoGe
 
 	cd MoGe
-	
+	git checkout dd158c05461f2353287a182afb2adf0fda46436f
 	pip install -r requirements.txt
 
 	cd ..
