@@ -175,7 +175,7 @@ if __name__ == '__main__':
     parser.add_argument('--sbs_color_video', type=str, required=True, help='side by side stereo video renderd with point clouds in the masked area')
     parser.add_argument('--sbs_mask_video', type=str, required=True, help='side by side stereo video mask')
     parser.add_argument('--max_frames', default=-1, type=int, help='quit after max_frames nr of frames', required=False)
-    parser.add_argument('--num_inference_steps', default=3, type=int, help='Numer of defussion steps more look better but is slower', required=False)
+    parser.add_argument('--num_inference_steps', default=3, type=int, help='Numer of defussion steps. More look better but is slower', required=False)
     
     
     args = parser.parse_args()

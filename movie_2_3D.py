@@ -82,21 +82,20 @@ if __name__ == '__main__':
         scene_video_file = os.path.join(args.output_dir, 'scene_'+str(scene['Scene Number'])+'.mkv')
         write_frames_to_file(raw_video, int(scene['Length (frames)']), scene_video_file, frame_rate, frame_width, frame_height)
 
+        scene_depth_video_file = scene_video_file + "_depth.mkv"
         #Generate scene depth file
         if depth_engine == 'depthcrafter':
             #to use depth crafter we first need a metric reference. We use moge as it is the most robust metric depth model avalibe right now
-            single_frame_depth_video_file = scene_video_file + "_depth.mkv"
+            single_frame_depth_video_file = scene_video_file + "_single_frame_depth.mkv"
             if not os.path.exists(single_frame_depth_video_file):
                 subprocess.run(python+" moge_video.py --color_video "+scene_video_file, shell=True)
             
             assert is_valid_video(single_frame_depth_video_file), "Could not generate metric reference video file for depthcrafter"
 
-            scene_depth_video_file = scene_video_file + "_depthcrafter_depth.mkv"
             if not os.path.exists(scene_depth_video_file):
                 subprocess.run(python+" depthcrafter_video.py --color_video "+scene_video_file+" --depth_video "+single_frame_depth_video_file, shell=True)
 
         else:
-            scene_depth_video_file = scene_video_file + "_depth.mkv"
             if not os.path.exists(scene_depth_video_file):
                 subprocess.run(python+" video_metric_convert.py --color_video "+scene_video_file, shell=True)
         
