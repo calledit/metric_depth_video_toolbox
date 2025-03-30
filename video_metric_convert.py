@@ -1,20 +1,3 @@
-# Copyright (2025) Bytedance Ltd. and/or its affiliates
-
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-
-#     http://www.apache.org/licenses/LICENSE-2.0
-
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
-
-
-# Also copyright Me, for the parts i wrote.
-
 import argparse
 import numpy as np
 import os
@@ -29,33 +12,39 @@ import metric_dpt_func
 from video_depth_anything.video_depth import VideoDepthAnything
 from utils.dc_utils import read_video_frames, save_video
 
-
-def save_24bit(frames, output_video_path, fps, max_depth_arg):
+def save_24bit(frames, output_video_path, fps, max_depth_arg, rescale_width, rescale_height):
     """
     Saves depth maps encoded in the R, G and B channels of a video (to increse accuracy as when compared to gray scale)
     """
-    height = frames.shape[1]
-    width = frames.shape[2]
 
-    out = cv2.VideoWriter(output_video_path, cv2.VideoWriter_fourcc(*"FFV1"), fps, (width, height))
 
-    max_depth = frames.max()
-    print("max metric depth: ", max_depth)
 
     MODEL_maxOUTPUT_depth = max_depth_arg ### pick a value slitght above max metric depth to save the depth in th video file nicly
     # if you pick a high value you will lose resolution
 
-    # incase you did not pick a absolute value we max out (this mean each video will have depth relative to max_depth)
-    # (if you want to use the video as a depth souce a absolute value is prefrable)
-    if MODEL_maxOUTPUT_depth < max_depth:
-        print("warning: output depth is deeper than max_depth. The depth will be clipped")
+    if isinstance(frames, np.ndarray):
+        height = frames.shape[1]
+        width = frames.shape[2]
+        max_depth = frames.max()
+        print("max metric depth: ", max_depth)
+        # incase you did not pick a absolute value we max out (this mean each video will have depth relative to max_depth)
+        # (if you want to use the video as a depth souce a absolute value is prefrable)
+        if MODEL_maxOUTPUT_depth < max_depth:
+            print("warning: output depth is deeper than max_depth. The depth will be clipped")
+        nr_frames = frames.shape[0]
+    else:
+        nr_frames = len(frames)
+        height = frames[0].shape[0]
+        width = frames[0].shape[1]
 
-    for i in range(frames.shape[0]):
-        depth = frames[i]
+    out = cv2.VideoWriter(output_video_path, cv2.VideoWriter_fourcc(*"FFV1"), fps, (rescale_width, rescale_height))
+
+    for i in range(nr_frames):
+        depth = cv2.resize(frames[i], (rescale_width, rescale_height), interpolation=cv2.INTER_LINEAR)
         scaled_depth = (((255**4)/MODEL_maxOUTPUT_depth)*depth.astype(np.float64)).astype(np.uint32)
 
         # View the depth as raw bytes: shape (H, W, 4)
-        depth_bytes = scaled_depth.view(np.uint8).reshape(height, width, 4)
+        depth_bytes = scaled_depth.view(np.uint8).reshape(rescale_height, rescale_width, 4)
 
 
         R = (depth_bytes[:, :, 3]) # Most significant bits in R and G channel (duplicated to reduce compression artifacts)
@@ -115,15 +104,21 @@ if __name__ == '__main__':
     video_depth_anything.load_state_dict(torch.load('Video-Depth-Anything/checkpoints/video_depth_anything_vitl.pth', map_location='cpu'), strict=True)
     video_depth_anything = video_depth_anything.to(DEVICE).eval()
 
-    frames, target_fps = read_video_frames(args.color_video, args.max_frames, args.target_fps, 99999999)
+    size_frame, target_fps = read_video_frames(args.color_video, 1, args.target_fps, 99999999)
+    height = size_frame.shape[1]
+    width = size_frame.shape[2]
+    rat = min(height, width) / max(height, width)
+    siz = args.input_size/rat
+
+    frames, target_fps = read_video_frames(args.color_video, args.max_frames, args.target_fps, siz)
 
     ref_frames = None
     if args.depth_video is not None:
-        ref_frames, _ = read_video_frames(args.depth_video, 32, args.target_fps, 99999999)
+        ref_frames, _ = read_video_frames(args.depth_video, 32, args.target_fps, siz)
 
-    height = frames.shape[1]
-    width = frames.shape[2]
     depths, fps = video_depth_anything.infer_video_depth(frames, target_fps, input_size=args.input_size, device=DEVICE)
+
+    nr_frames = len(frames)
 
     max_depth = depths.max()
 
@@ -134,7 +129,7 @@ if __name__ == '__main__':
 
     #We only do the first 32 as that is enogh and video_depth_anything.infer_video_depth tries to align everything to frame 0 anyway
     print("Use 32 first frames to calculate metric conversion constants")
-    for i in range(0, min(32, len(frames))):
+    for i in range(0, min(32, nr_frames)):
 
 
 
@@ -157,14 +152,17 @@ if __name__ == '__main__':
         targets.append(inv_metric_depth)
         sources.append(norm_inv)
 
+    frames = None
 
     scale, shift = compute_scale_and_shift_full(np.concatenate(sources), np.concatenate(targets))
+
+    targets, sources = None, None
 
 
 
     print("scale:", scale, "shift:", shift)
 
-    for i in range(0, len(frames)):
+    for i in range(0, nr_frames):
 
         print("---- frame ", i, " ---")
 
@@ -180,4 +178,4 @@ if __name__ == '__main__':
 
 
     output_video_path = args.color_video+'_depth.mkv'
-    save_24bit(depths, output_video_path, fps, args.max_depth)
+    save_24bit(depths, output_video_path, fps, args.max_depth, width, height)
