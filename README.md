@@ -35,19 +35,19 @@ See [USAGE.md](https://github.com/calledit/metric_depth_video_toolbox/blob/main/
 
 ### Camera tracking
 There are multiple that support camera tracking:
-sam_track_video.py a tool based on [Mega-sam](https://github.com/mega-sam/mega-sam) it uses a combination of machine learning and depth maps to track the camera.
 
-track_points_in_video.py uses cotracker3 to track 2D points over full length videos. These tracked points can be used for camera tracking and 3d reconstruction.
-
-align_3d_points.py is a tool that can extract camera movment from depth video and tracked 2d points. It offers three difrrent algorithms. 
-1. Madpose PnPSolver [madpose library](https://github.com/MarkYu98/madpose). Better than traditonal PnPSolve, but suffers to long term drift as it is a fram 2 frame solution.
-2. SVD based rotational solver asuming the camera is stationary and only tracking rotation. If the camera is trully still this is the best option.
-3. Iterative camera movmenet untill best fitt. Offers better tracking than madpose and is very fast.
+- [sam_track_video.py](sam_track_video.py) a tool based on [Mega-sam](https://github.com/mega-sam/mega-sam) it uses a combination of machine learning and depth maps to track the camera.
+- [track_points_in_video.py](track_points_in_video.py) uses cotracker3 to track 2D points over full length videos. These tracked points can be used for camera tracking and 3d reconstruction.
+- [align_3d_points.py](align_3d_points.py) is a tool that can extract camera movment from depth video and tracked 2d points. It offers three difrrent algorithms. 
+    1. Madpose PnPSolver [madpose library](https://github.com/MarkYu98/madpose). Better than traditonal PnPSolve, but suffers to long term drift as it is a fram 2 frame solution.
+    2. SVD based rotational solver asuming the camera is stationary and only tracking rotation. If the camera is trully still this is the best option.
+    3. Iterative camera movmenet untill best fitt. Offers better tracking than madpose and is very fast.
 
 
 ### Data export
-convert_metric_depth_video_to_other_format.py is a tool that can take data and export the data in to standard formats that can be used in external tools like blender.
-It can export to:
+[convert_metric_depth_video_to_other_format.py](convert_metric_depth_video_to_other_format.py) is a tool that can take data and export the data in to standard formats that can be used in external tools like blender.
+
+**Supported export data:**
 - video frames to .ply point clouds.
 - video frames to .obj model files
 - Camera tracking data in to alembic camera tracking files .abc
@@ -55,26 +55,24 @@ It can export to:
 - Depth video in to 16 and 8 bit greyscale format.
 
 ### Stereo rendering
-stereo_rerender.py can render color video together with depth video in to side by side 3d stereo video with paralax infill masks.
-
-stereo_crafter_infill.py fills in the missing paralax areas in side by side 3d stereo video using stable video diffusion.
-
-movie_2_3D.py is a automated 3D converter, that splits up a movie in to scenes and automaticly converts each scene in to 3d then stitches everything together again.
+- [stereo_rerender.py](stereo_rerender.py) can render color video together with depth video in to side by side 3d stereo video with paralax infill masks.
+- [stereo_crafter_infill.py](stereo_crafter_infill.py) fills in the missing paralax areas in side by side 3d stereo video using stable video diffusion.
+- [movie_2_3D.py](movie_2_3D.py) is a automated 3D converter, that splits up a movie in to scenes and automaticly converts each scene in to 3d then stitches everything together again.
 
 ### Depth estimation
 There are varoius tools for doing depth estimation in the toolbox.
-- video_metric_convert.py Converts video in to metric depth video using the Depth-Anything series of machine learning models.
-- moge_video.py Converts a video in to metric depth video using MoGe.
-- unidepth_video.py Converts a video in to metric depth video using UniDepth.
-- depthcrafter_video.py Converts video in to metric depth video using depthcrafter and a metric depth reference video.
+- [video_metric_convert.py](video_metric_convert.py) Converts video in to metric depth video using the Depth-Anything series of machine learning models.
+- [moge_video.py](moge_video.py) Converts a video in to metric depth video using MoGe.
+- [unidepth_video.py](unidepth_video.py) Converts a video in to metric depth video using UniDepth.
+- [depthcrafter_video.py](depthcrafter_video.py) Converts video in to metric depth video using depthcrafter and a metric depth reference video.
 
 ### Viewing 3d video
-3d_view_depthfile.py is a 3d viewer that can be used to either view 3d video in a open3d window. Or to render 3d video from novel perspectives in to new video.
+[3d_view_depthfile.py](3d_view_depthfile.py) is a 3d viewer that can be used to either view 3d video in a open3d window. Or to render 3d video from novel perspectives in to new video.
 
 
 ### Masking tools
-create_video_mask.sh Creates a mask vidoo that masks of all humans in a video.
-apply_inpainting.sh Removes logos or overlays from video using ML inpanting.
+- [create_video_mask.sh](create_video_mask.sh) Creates a mask vidoo that masks of all humans in a video.
+- [apply_inpainting.sh](apply_inpainting.sh) Removes logos or overlays from video using ML inpanting.
 
 ## RGB encoded metric 3D depth video format
 The rgb encoded video depth format is a normal video file with RGB values(that has to be saved as lossless video). Where the _red_ and _green_ channels represent the upper 8 bits of the depth (duplicated to make visualization easy), the _blue_ channel represent
@@ -97,42 +95,23 @@ cd metric_depth_video_toolbox
 # on linux
 sudo apt-get install -y libgl1
 ./install_mvdtoolbox.sh
-pip install open3d numpy opencv-python
 
-#if you want to use Mega-sam camera tracking
+#Optional (only required for some tools)
 ./install_mvdtoolbox.sh -megasam
-
-#if you want to use paralax ML infill
 ./install_mvdtoolbox.sh -stereocrafter
-
-#if you want to use 3d camera tracking and 3d reconstruction
 ./install_mvdtoolbox.sh -madpose
-
-#if you want to generate depth maps with unidepth
-#Unidepth requirments are incompatible with megasam so
-#you can only install one (or use virtual enviroments)
 ./install_mvdtoolbox.sh -unidepth
-
-#if you want to generate depth maps with MoGe
 ./install_mvdtoolbox.sh -moge
 
-
-# If you want to export directly to the avc1 codec using the --compress argument
-echo https://swiftlane.com/blog/generating-mp4s-using-opencv-python-with-the-avc1-codec/
-
-# if using headless linux
+# if using headless linux you need to start a virtual x11 server
 apt-get install xvfb
-# then run before using the tools (ie. start a virtual x11 server)
 Xvfb :2 &
 export DISPLAY=:2
 
-# on OSX (OSX only supports post processing of depth videos not generation of them. As the ML models need CUDA)
-
-# First setup any required venv (open3d requires python3.11 on OSX (as of 2025)))
+# OSX (OSX only supports post processing of depth videos not generation of them. As the ML models need CUDA)
+# (open3d requires python3.11 on OSX (as of 2025)))
 pip3.11 install open3d numpy opencv-python
 
-#if you want to use madpose for 3d camera tracking
-./install_mvdtoolbox.sh -madpose
 
 #On Windows (Not tested or "officially" supported, but anecdotally working).
 WindowsInstall.bat
