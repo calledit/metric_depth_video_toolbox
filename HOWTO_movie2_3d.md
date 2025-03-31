@@ -53,6 +53,7 @@ It should look something like this:
 
 ### step 2 
 *This step is optional*
+
 At this point we might want to look at the Scenes.html file and decide what scenes are credits or other visuals that are not pure camera shots.
 The reason we are interested in this is that the metric depth video toolbox supports multiple depth models (As of writing this depthcrafter and video-depth-anything is supported). Video-depth-anything is faster and better at most normal camera shots, whereas depthcrafter is better at handling things like credits or other visuals that are not filmed with a camera.
 
@@ -64,12 +65,15 @@ When you are done save the CSV file.
 
 ## Part two: converting the movie
 
-This is mostly a wating game you can run a few test scenes by using the argument --end_scene 4 or you can start directly. Progress is saved continuously (But it you abort the process the last scene will need to be removed and be redone)
+This is mostly a waiting game you can run a few test scenes by using the argument --end_scene 4 or you can start directly. Progress is saved continuously (But it you abort the process the last scene that was left unfinished will need to be removed and be redone)
 
 ```
 python3.11 movie_2_3D.py --scene_file ~/Starship.Troopers-Scenes.csv --color_video ~/Starship.Troopers.mp4 
 ```
 
 When this is all done you will have video scene files for all scenes and two final result files:
-- a Starship.Troopers.mp4_stereo3d.mp4 that can be sent to most consumer elecrtonics.
+- a Starship.Troopers.mp4_stereo3d.mp4 that can be sent to most consumer electronics.
 - a Starship.Troopers.mp4_stereo3d.mkv which is a lossless video file.
+
+The result of the first 3 minutes of the example can be seen here:
+https://www.youtube.com/watch?v=NzI8Js6aYiI
