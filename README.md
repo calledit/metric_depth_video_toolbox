@@ -34,11 +34,11 @@ See [HOWTO_movie2_3d.md](https://github.com/calledit/metric_depth_video_toolbox/
 See [USAGE.md](https://github.com/calledit/metric_depth_video_toolbox/blob/main/USAGE.md) Info on each tool and the arguments it can take.
 
 ### Camera tracking
-There are multiple that support camera tracking:
+There are multiple tracking tools that support camera tracking:
 
-- [sam_track_video.py](sam_track_video.py) a tool based on [Mega-sam](https://github.com/mega-sam/mega-sam) it uses a combination of machine learning and depth maps to track the camera.
+- [sam_track_video.py](sam_track_video.py) a tool based on [Mega-sam](https://github.com/mega-sam/mega-sam) it uses a combination of machine learning and depth maps to track the camera in 3d space.
 - [track_points_in_video.py](track_points_in_video.py) uses cotracker3 to track 2D points over full length videos. These tracked points can be used for camera tracking and 3d reconstruction.
-- [align_3d_points.py](align_3d_points.py) is a tool that can extract camera movment from depth video and tracked 2d points. It offers three difrrent algorithms. 
+- [align_3d_points.py](align_3d_points.py) is a tool that can extract 3d camera movment from depth video and tracked 2d points. It offers three difrrent algorithms. 
     1. Madpose PnPSolver [madpose library](https://github.com/MarkYu98/madpose). Better than traditonal PnPSolve, but suffers to long term drift as it is a fram 2 frame solution.
     2. SVD based rotational solver asuming the camera is stationary and only tracking rotation. If the camera is trully still this is the best option.
     3. Iterative camera movmenet untill best fitt. Offers better tracking than madpose and is very fast.
@@ -67,11 +67,11 @@ There are varoius tools for doing depth estimation in the toolbox.
 - [depthcrafter_video.py](depthcrafter_video.py) Converts video in to metric depth video using depthcrafter and a metric depth reference video.
 
 ### Viewing 3d video
-[3d_view_depthfile.py](3d_view_depthfile.py) is a 3d viewer that can be used to either view 3d video in a open3d window. Or to render 3d video from novel perspectives in to new video.
+[3d_view_depthfile.py](3d_view_depthfile.py) is a 3d viewer that can be used to either view 3d video in a open3d window. Or to render 3d video from novel perspectives in to new video. See README banner for example render.
 
 
 ### Masking tools
-- [create_video_mask.sh](create_video_mask.sh) Creates a mask vidoo that masks of all humans in a video.
+- [create_video_mask.sh](create_video_mask.sh) Creates a mask video that masks of all humans in a video.
 - [apply_inpainting.sh](apply_inpainting.sh) Removes logos or overlays from video using ML inpanting.
 
 ## RGB encoded metric 3D depth video format
