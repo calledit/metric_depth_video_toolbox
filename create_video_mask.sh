@@ -3,7 +3,7 @@
 if [[ " $@ " =~ " -install " ]]; then
 	
 	apt-get -y install ffmpeg
-	pip install rembg[gpu] filetype watchdog aiohttp asyncer
+	pip install rembg[gpu] filetype watchdog aiohttp asyncer gradio
 
 	#rembg[gpu] needs cudnn
 	wget https://developer.download.nvidia.com/compute/cudnn/9.7.0/local_installers/cudnn-local-repo-ubuntu2404-9.7.0_1.0-1_amd64.deb

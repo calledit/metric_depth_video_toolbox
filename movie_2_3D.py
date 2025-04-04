@@ -23,7 +23,27 @@ def write_frames_to_file(input_video, nr_frames_to_copy, scene_video_file, frame
 
     if out is not None:
         out.release()
-        
+
+def wait_for_first(processes):
+    """
+    Wait for any process in the given list to finish.
+
+    Parameters:
+        processes (list): A list of subprocess.Popen objects.
+
+    Returns: list new_processes
+    """
+    if not processes:
+        return []
+
+    while True:
+        for i, p in enumerate(processes):
+            if p.poll() is not None:  # Process has finished
+                finished = p
+                new_processes = processes[:i] + processes[i+1:]
+                return new_processes
+        time.sleep(0.1)  # Sleep briefly to avoid busy waiting
+
 def is_valid_video(file_path):
     """
     Returns True if the file exists and its size is at least 2Kb (2048 bytes),
@@ -32,7 +52,7 @@ def is_valid_video(file_path):
     return os.path.exists(file_path) and os.path.getsize(file_path) >= 2048
 
 if __name__ == '__main__':
-    
+
     python = "python3.11"
 
     parser = argparse.ArgumentParser(description='Takes a movie and converts it in to stereo 3D')
@@ -46,6 +66,12 @@ if __name__ == '__main__':
     parser.add_argument('--output_dir', type=str, default='output', help='folder where output will be placed', required=False)
 
     parser.add_argument('--end_scene', type=int, default=-1, help='Stop after a certain scene nr', required=False)
+
+    parser.add_argument('--no_render', action='store_true', help='Skip rendering and subseqvent steps.', required=False)
+    parser.add_argument('--parallel', type=int, default=1, help='Run some steps in parallel, for faster processing.')
+
+
+
     args = parser.parse_args()
 
     skip_last_step = False
@@ -67,6 +93,8 @@ if __name__ == '__main__':
 
     video_files_to_concat = []
 
+    parallels = []
+
     for scene in scenes:
         print("Handle scene:", scene)
         depth_engine = 'vda'
@@ -83,13 +111,15 @@ if __name__ == '__main__':
         write_frames_to_file(raw_video, int(scene['Length (frames)']), scene_video_file, frame_rate, frame_width, frame_height)
 
         scene_depth_video_file = scene_video_file + "_depth.mkv"
+        scene_convergence_file = scene_depth_video_file + "_convergence_depths.json"
+        scene_mask_video_file = scene_video_file + "_mask.mkv"
         #Generate scene depth file
         if depth_engine == 'depthcrafter':
             #to use depth crafter we first need a metric reference. We use moge as it is the most robust metric depth model avalibe right now
             single_frame_depth_video_file = scene_video_file + "_single_frame_depth.mkv"
             if not os.path.exists(single_frame_depth_video_file):
                 subprocess.run(python+" moge_video.py --color_video "+scene_video_file, shell=True)
-            
+
             assert is_valid_video(single_frame_depth_video_file), "Could not generate metric reference video file for depthcrafter"
 
             if not os.path.exists(scene_depth_video_file):
@@ -98,30 +128,47 @@ if __name__ == '__main__':
         else:
             if not os.path.exists(scene_depth_video_file):
                 subprocess.run(python+" video_metric_convert.py --color_video "+scene_video_file, shell=True)
-        
+
         assert is_valid_video(scene_depth_video_file), "Could not generate scene_depth_video_file"
 
-        #Generate stereo 3d video and infill mask
-        scene_sbs = scene_depth_video_file + "_stereo.mkv"
-        scene_sbs_infill = scene_sbs + "_infillmask.mkv"
-        if not os.path.exists(scene_sbs):
-            subprocess.run(python+" stereo_rerender.py --color_video "+scene_video_file+" --xfov "+scene_xfov+" --depth_video "+scene_depth_video_file+" --infill_mask", shell=True)
-        
-        assert is_valid_video(scene_sbs), "Could not generate stereo video file"
-        
-        #Do infill
-        scene_infilled = scene_sbs+"_infilled.mkv"
-        if not os.path.exists(scene_infilled) and not skip_last_step:
-           subprocess.run(python+" stereo_crafter_infill.py --sbs_color_video "+scene_sbs+" --sbs_mask_video "+scene_sbs_infill, shell=True)
-        
-        assert is_valid_video(scene_infilled), "Could not generate infilled stereo video file"
-        
-        video_files_to_concat.append(scene_infilled)
+        if not os.path.exists(scene_mask_video_file):
+            subprocess.run("./create_video_mask.sh "+scene_video_file, shell=True)
+
+        assert is_valid_video(scene_mask_video_file), "Could not generate scene_mask_video_file"
+
+        if not os.path.exists(scene_convergence_file):
+            subprocess.run(python+" find_convergence_depth.py --depth_video "+scene_depth_video_file+" --mask_video "+scene_mask_video_file, shell=True)
+
+        if not args.no_render:
+            #Generate stereo 3d video and infill mask
+            scene_sbs = scene_depth_video_file + "_stereo.mkv"
+            scene_sbs_infill = scene_sbs + "_infillmask.mkv"
+            if not os.path.exists(scene_sbs):
+                parallels.append(subprocess.Popen(python+" stereo_rerender.py --color_video "+scene_video_file+" --convergence_file "+scene_convergence_file+" --xfov "+scene_xfov+" --depth_video "+scene_depth_video_file+" --infill_mask", shell=True))
+
+            if len(parallels) >= args.parallel:
+                parallels = wait_for_first(parallels)
+
+
+            if args.parallel == 1:
+                assert is_valid_video(scene_sbs), "Could not generate stereo video file"
+
+                #Do infill
+                scene_infilled = scene_sbs+"_infilled.mkv"
+                if not os.path.exists(scene_infilled) and not skip_last_step:
+                   subprocess.run(python+" stereo_crafter_infill.py --sbs_color_video "+scene_sbs+" --sbs_mask_video "+scene_sbs_infill, shell=True)
+
+                assert is_valid_video(scene_infilled), "Could not generate infilled stereo video file"
+
+                video_files_to_concat.append(scene_infilled)
 
         if args.end_scene == int(scene['Scene Number']):
             break
 
-    if skip_last_step:
+    for proc in parallels:
+        proc.wait()
+
+    if skip_last_step or args.no_render or args.parallel != 1:
         exit(0)
 
     # Write the ffmpeg concat file
@@ -137,8 +184,7 @@ if __name__ == '__main__':
     mp4_result_video_file = args.output_dir+os.sep+video_name+"_stereo3d.mp4"
 
     #Use ffmpeg to join all scenes and add back original audio
-    subprocess.run("ffmpeg -y -f concat -safe 0 -i "+ffmpeg_concat_file+" -i "+args.color_video+" -map 0:v:0 -map 1:a:0 -c:v copy -c:a copy -shortest "+result_video_file, shell=True)
+    subprocess.run("ffmpeg -y -f concat -safe 0 -i "+ffmpeg_concat_file+" -i "+args.color_video+" -map 0:v:0 -map 1:a:0  -c:v libx265 -crf 18 -tag:v hvc1 -pix_fmt yuv420p -c:a aac -shortest "+result_video_file, shell=True)
 
     #Finnal result in to a video player compatible format with audio
     subprocess.run("ffmpeg -i "+result_video_file+" -c:v libx265 -crf 18 -tag:v hvc1 -pix_fmt yuv420p -c:a aac "+mp4_result_video_file, shell=True)
-    

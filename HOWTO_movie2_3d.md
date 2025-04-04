@@ -22,6 +22,7 @@ apt install ffmpeg
 ./install_mvdtoolbox.sh -moge
 ./install_mvdtoolbox.sh -depthcrafter
 ./install_mvdtoolbox.sh -stereocrafter
+./create_video_mask.sh -install
 
 pip install --upgrade scenedetect[opencv-headless]
 
