@@ -123,8 +123,11 @@ See https://github.com/calledit/metric_depth_video_toolbox/issues/1#issuecomment
 ### Requirements
 The tools that reuire ML models have been tested on machines with nvida 3090 cards that support Cuda 12.4 and Torch 2.5.1 on [vast.ai](https://cloud.vast.ai/?ref_id=148636) using "template PyTorch (cuDNN Devel)"
 
-### Work or contracting
-Post in issues with contact details.
+### TODO
+- Implement low memmory version of GeometryCrafter https://github.com/TencentARC/GeometryCrafter (a stable defussion based depth video stabilizer)
+- Implement UniK3D https://github.com/lpiccinelli-eth/unik3d (a super acurate single frame depth model)
+- Implement Prompting Depth Anything https://github.com/DepthAnything/PromptDA (a single frame depth upscaler)
+- Make sure they all work together by using standard formats - Together these three should allow for very accurate full resolution depth videos.
 
 ### Contributing
 Is appreciated. Even for simple things like spelling.
