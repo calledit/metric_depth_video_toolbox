@@ -285,5 +285,5 @@ if __name__ == "__main__":
 
     depths = None
     print("Save depth file")
-    output_video_path = args.color_video + "_depthcrafter_depth.mkv"
+    output_video_path = args.color_video + "_depth.mkv"
     save_24bit(out_depths, output_video_path, frame_rate, args.max_depth)
