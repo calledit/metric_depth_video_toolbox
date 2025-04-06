@@ -20,7 +20,7 @@ cd metric_depth_video_toolbox
 apt install ffmpeg
 ./install_mvdtoolbox.sh
 ./install_mvdtoolbox.sh -moge
-./install_mvdtoolbox.sh -depthcrafter
+./install_mvdtoolbox.sh -geometrycrafter
 ./install_mvdtoolbox.sh -stereocrafter
 ./create_video_mask.sh -install
 
@@ -56,10 +56,10 @@ It should look something like this:
 *This step is optional*
 
 At this point we might want to look at the Scenes.html file and decide what scenes are credits or other visuals that are not pure camera shots.
-The reason we are interested in this is that the metric depth video toolbox supports multiple depth models (As of writing this depthcrafter and video-depth-anything is supported). Video-depth-anything is faster and better at most normal camera shots, whereas depthcrafter is better at handling things like credits or other visuals that are not filmed with a camera.
+The reason we are interested in this is that the metric depth video toolbox supports multiple depth models (As of writing this depthcrafter, geometrycrafter and video-depth-anything is supported). Video-depth-anything is faster and better at most normal camera shots, whereas depthcrafter is better at handling things like credits or other visuals that are not filmed with a camera.
 
 To select which scenes you want to use depthcrafter for you will need to open the Starship.Troopers-Scenes.csv file and ad a
-new column named "Engine". For the scenes that you want to use depthcrafter for you simply write "depthcrafter" in the cell.
+new column named "Engine". For the scenes that you want to use depthcrafter for you simply write "depthcrafter", "geometrycrafter", or "vda" in the cell.
 
 When you are done save the CSV file.
 
@@ -78,3 +78,17 @@ When this is all done you will have video scene files for all scenes and two fin
 
 The result of the first 3 minutes of the example can be seen here:
 https://www.youtube.com/watch?v=NzI8Js6aYiI
+
+
+## Making it faster
+Rendering can be made faster by running it in parralel, to do that 3 passes must be done
+```
+echo Pass one, only do depth estimation and convergence calculations
+python3.11 movie_2_3D.py --scene_file ~/Starship.Troopers-Scenes.csv --color_video ~/Starship.Troopers.mp4 --no_render --end_scene 20
+
+echo Pass two, parallel run 11 rendering proccesses in parallel
+python3.11 movie_2_3D.py --scene_file ~/Starship.Troopers-Scenes.csv --color_video ~/Starship.Troopers.mp4 --parallel 11 --end_scene 20
+
+echo Pass three, do paralax infill
+python3.11 movie_2_3D.py --scene_file ~/Starship.Troopers-Scenes.csv --color_video ~/Starship.Troopers.mp4 --end_scene 20
+```
