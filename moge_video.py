@@ -156,7 +156,7 @@ if __name__ == '__main__':
         if args.max_frames < frame_n and args.max_frames != -1:
             break
 
-        rgb = cv2.cvtColor(raw_frame, cv2.COLOR_BGR2RGB)
+        rgb = cv2.cvtColor(raw_frame, cv2.COLOR_BGR2RGB).astype(np.float32)
         image_tensor = torch.tensor(rgb / 255, dtype=torch.float32, device=DEVICE).permute(2, 0, 1)
 
         output = model.infer(image_tensor, fov_x=fovx)
