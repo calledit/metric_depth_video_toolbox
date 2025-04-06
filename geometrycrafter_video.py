@@ -322,6 +322,8 @@ if __name__ == "__main__":
     elif xfovs is None:
         raise ValueError("some type of FOV is needed either from a file or as a argument")
 
+    # 768 x 576 almost works on a 3090 it fails when decoding the pointmap but it would be easy to fix by just mving some stuff that is no
+    # longer used by CUDA to ram
     craft_width = 640
     craft_height = 384
 
