@@ -18,6 +18,8 @@ from geometrycrafter import (
 )
 from decord import VideoReader, cpu
 
+np.set_printoptions(suppress=True, precision=4)
+
 
 def project_depth_maps(depth_maps: torch.Tensor, intrinsic: torch.Tensor) -> torch.Tensor:
     """
@@ -94,40 +96,56 @@ max_depth_arg = 0
 cam_matrix = None
 xfovs = None
 image_id = 0
+LoadMoge = False
 depth_ref_frames = []
 class MoGe(torch.nn.Module):
 
     def __init__(self):
         super().__init__()
-        #self.model = MoGeModel.from_pretrained('Ruicheng/moge-vitl').eval()
+        
+        #to make prior model work
+        if LoadMoge:
+            sys.path.append("MoGe")
+            from moge.model import MoGeModel
+            self.model = MoGeModel.from_pretrained('Ruicheng/moge-vitl').eval()
 
 
     @torch.no_grad()
     def forward_image(self, image: torch.Tensor, **kwargs):
         global image_id
         nr_images = len(image)
-        if len(depth_ref_frames)+nr_images < image_id:
-            raise ValueError("requested depth image "+ str(image_id)+" not loaded")
-        depth_images = depth_ref_frames[image_id:image_id+nr_images]
-        #print(image.shape, depth_images.shape)
-        masks = depth_images != max_depth_arg
-        #print("get image:", image_id, nr_images)
-		#Now we have the image we need to project it and create a masks so we can send it to geometrycrafter
-        if xfovs is not None:
-            intr = []
-            for i in range(nr_images):
-                xfov = xfovs[image_id+i]
-                cam_matrix = compute_camera_matrix(xfov, None, original_width, original_height).astype(np.float32)
-                intr.append(cam_matrix)
-            intrinsics = torch.tensor(np.array(intr))
-        else:
-            intrinsics = torch.tensor(cam_matrix)
-        points = project_depth_maps(depth_images, intrinsics)
 
-        # image: b, 3, h, w 0,1
-        #output = self.model.infer(image, resolution_level=9, apply_mask=False, **kwargs)
-        #points = output['points'] # b,h,w,3
-        #masks = output['mask'] # b,h,w
+        # Originally i built this to stablize any depth video but it seams like the geometrycrafter net depends hevily on the exact
+        # nuances of the points returned by the network and projecting new ones does not work very well.
+        # But there whould be no nuances since MoGe has force_projection set to true by default
+        if len(depth_ref_frames) != 0:
+            if len(depth_ref_frames)+nr_images < image_id:
+                raise ValueError("requested depth image "+ str(image_id)+" not loaded")
+            depth_images = depth_ref_frames[image_id:image_id+nr_images]
+            #print(image.shape, depth_images.shape)
+            masks = depth_images != max_depth_arg
+            #print("get image:", image_id, nr_images)
+            #Now we have the image we need to project it and create a masks so we can send it to geometrycrafter
+            if xfovs is not None:
+                intr = []
+                for i in range(nr_images):
+                    xfov = xfovs[image_id+i]
+                    cam_matrix = compute_camera_matrix(xfov, None, original_width, original_height).astype(np.float32)
+                    intr.append(cam_matrix)
+                intrinsics = torch.tensor(np.array(intr))
+            else:
+                intrinsics = torch.tensor(cam_matrix)
+            points = project_depth_maps(depth_images, intrinsics)
+            print("saved_points:", points[0].cpu().numpy()[0])
+
+        else:
+            #image = (image*2) -1 #If you want to purify the input that goes in to MoGe  you keep this line see:
+            # https://github.com/TencentARC/GeometryCrafter/issues/2
+            output = self.model.infer(image, resolution_level=9, apply_mask=False, **kwargs)
+            points = output['points'] # b,h,w,3
+            #print("model_points:", points[0].cpu().numpy()[0])
+            #exit(0)
+            masks = output['mask'] # b,h,w
         image_id += nr_images
 
         # the fact that we move all frame to cuda is dumb and a waste of cuda memmory. This neeed to be fixed in geometrycrafter fix is here:
@@ -253,7 +271,7 @@ def compute_scale_and_shift_full(prediction, target, mask = None):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Geometrycrafter depth stablizer')
     parser.add_argument('--color_video', type=str, required=True)
-    parser.add_argument('--depth_video', type=str, required=True, help='reference metric depth video used to obtain conversion constants, can be created with any image depth model')
+    parser.add_argument('--depth_video', type=str, required=False, help='reference metric depth video used to obtain conversion constants, can be created with any image depth model')
     parser.add_argument('--max_frames', type=int, default=-1, help='maximum length of the input video, -1 means no limit')
     parser.add_argument('--max_depth', default=20, type=int, help='the max depth that the video uses', required=False)
     parser.add_argument('--max_res', type=int, default=768)
@@ -312,6 +330,10 @@ if __name__ == "__main__":
 
 
     print("load color frames")
+    col_video = cv2.VideoCapture(args.color_video)
+    frame_rate = col_video.get(cv2.CAP_PROP_FPS)
+    col_video.release()
+
     vid = VideoReader(args.color_video, ctx=cpu(0))
     original_height, original_width = vid.get_batch([0]).shape[1:3]
 
@@ -319,11 +341,7 @@ if __name__ == "__main__":
     if use_fov and xfovs is None:
         cam_matrix = compute_camera_matrix(args.xfov, args.yfov, original_width, original_height).astype(np.float32)
         fovx, fovy = fov_from_camera_matrix(cam_matrix)
-    elif xfovs is None:
-        raise ValueError("some type of FOV is needed either from a file or as a argument")
 
-    # 768 x 576 almost works on a 3090 it fails when decoding the pointmap but it would be easy to fix by just mving some stuff that is no
-    # longer used by CUDA to ram
     craft_width = 640
     craft_height = 384
 
@@ -342,32 +360,38 @@ if __name__ == "__main__":
         overlap = 0
     frames_tensor = torch.tensor(frames.astype("float32"), device='cuda').float().permute(0, 3, 1, 2)
 
-    print("load reference depth frames")
-    raw_video = cv2.VideoCapture(args.depth_video)
-    frame_width, frame_height = int(raw_video.get(cv2.CAP_PROP_FRAME_WIDTH)), int(raw_video.get(cv2.CAP_PROP_FRAME_HEIGHT))
-    frame_rate = raw_video.get(cv2.CAP_PROP_FPS)
+    if args.depth_video is not None:
 
-    depth_ref_frames = []
+        if not use_fov:
+            raise ValueError("some type of FOV is needed when using reference material, either FOV from a file or as a argument")
 
-    while raw_video.isOpened():
-        ret, raw_frame = raw_video.read()
-        if not ret:
-            break
+        print("load reference depth frames")
+        raw_video = cv2.VideoCapture(args.depth_video)
+        frame_width, frame_height = int(raw_video.get(cv2.CAP_PROP_FRAME_WIDTH)), int(raw_video.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        frame_rate = raw_video.get(cv2.CAP_PROP_FPS)
 
-        rgb = cv2.cvtColor(raw_frame, cv2.COLOR_BGR2RGB)
+        depth_ref_frames = []
 
-        # Decode video depth
-        depth = np.zeros((frame_height, frame_width), dtype=np.uint32)
-        depth_unit = depth.view(np.uint8).reshape((frame_height, frame_width, 4))
-        depth_unit[..., 3] = rgb[..., 0].astype(np.uint32)
-        depth_unit[..., 2] = rgb[..., 2]
-        depth = depth.astype(np.float32)/((255**4)/MODEL_maxOUTPUT_depth)
-        depth_ref_frames.append(depth)
+        while raw_video.isOpened():
+            ret, raw_frame = raw_video.read()
+            if not ret:
+                break
 
-    if raw_video is not None:
-        raw_video.release()
+            rgb = cv2.cvtColor(raw_frame, cv2.COLOR_BGR2RGB)
 
-    depth_ref_frames = torch.tensor(np.array(depth_ref_frames))
+            # Decode video depth
+            depth = np.zeros((frame_height, frame_width), dtype=np.uint32)
+            depth_unit = depth.view(np.uint8).reshape((frame_height, frame_width, 4))
+            depth_unit[..., 3] = rgb[..., 0].astype(np.uint32)
+            depth_unit[..., 2] = rgb[..., 2]
+            depth = depth.astype(np.float32)/((255**4)/MODEL_maxOUTPUT_depth)
+            # resized_depth_map = cv2.resize(depth, (craft_width, craft_height), interpolation=cv2.INTER_LINEAR)
+            depth_ref_frames.append(depth)
+
+        if raw_video is not None:
+            raw_video.release()
+
+        depth_ref_frames = torch.tensor(np.array(depth_ref_frames))
 
 
     print("Run the geometrycrafter net")
@@ -394,5 +418,5 @@ if __name__ == "__main__":
         depths = point_maps[..., 2].cpu().numpy()
 
     print("Save depth file")
-    output_video_path = args.color_video + "_geometrycrafter_depth.mkv"
+    output_video_path = args.color_video + "_depth.mkv"
     save_24bit(depths, output_video_path, frame_rate, args.max_depth)

@@ -76,9 +76,13 @@ fi
 
 
 if [[ " $@ " =~ " -geometrycrafter " ]]; then
-	git clone https://github.com/TencentARC/GeometryCrafter
+	
+	git clone https://github.com/calledit/GeometryCrafter
+	#git clone https://github.com/TencentARC/GeometryCrafter
 
 	cd GeometryCrafter
+	
+	git checkout reduce-cuda-memory-use
 	
 	
 	pip install decord diffusers transformers accelerate

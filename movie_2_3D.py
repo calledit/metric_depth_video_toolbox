@@ -2,6 +2,7 @@ import subprocess
 import argparse
 import csv
 import cv2
+import time
 import os
 
 def write_frames_to_file(input_video, nr_frames_to_copy, scene_video_file, frame_rate, frame_width, frame_height):
@@ -97,7 +98,7 @@ if __name__ == '__main__':
 
     for scene in scenes:
         print("Handle scene:", scene)
-        depth_engine = 'vda'
+        depth_engine = None
         if 'Engine' in scene and scene['Engine'] != '':
             depth_engine = scene['Engine']
 
@@ -112,22 +113,30 @@ if __name__ == '__main__':
 
         scene_depth_video_file = scene_video_file + "_depth.mkv"
         scene_convergence_file = scene_depth_video_file + "_convergence_depths.json"
+        scene_xfovs_file = scene_depth_video_file + "_xfovs.json"
         scene_mask_video_file = scene_video_file + "_mask.mkv"
+        single_frame_depth_video_file = scene_video_file + "_single_frame_depth.mkv"
+
         #Generate scene depth file
-        if depth_engine == 'depthcrafter':
+        if depth_engine != 'vda':
             #to use depth crafter we first need a metric reference. We use moge as it is the most robust metric depth model avalibe right now
-            single_frame_depth_video_file = scene_video_file + "_single_frame_depth.mkv"
             if not os.path.exists(single_frame_depth_video_file):
                 subprocess.run(python+" moge_video.py --color_video "+scene_video_file, shell=True)
+                subprocess.run("mv "+scene_depth_video_file+" "+single_frame_depth_video_file, shell=True)
 
             assert is_valid_video(single_frame_depth_video_file), "Could not generate metric reference video file for depthcrafter"
 
+        if depth_engine == 'depthcrafter':
             if not os.path.exists(scene_depth_video_file):
                 subprocess.run(python+" depthcrafter_video.py --color_video "+scene_video_file+" --depth_video "+single_frame_depth_video_file, shell=True)
-
-        else:
+        elif depth_engine == 'vda':
             if not os.path.exists(scene_depth_video_file):
                 subprocess.run(python+" video_metric_convert.py --color_video "+scene_video_file, shell=True)
+        else:#geometrycrafter
+            if not os.path.exists(scene_depth_video_file):
+                #+" --depth_video "+single_frame_depth_video_file+" --xfov_file "+scene_xfovs_file
+                subprocess.run(python+" geometrycrafter_video.py --color_video "+scene_video_file+" --depth_video "+single_frame_depth_video_file+" --xfov_file "+scene_xfovs_file, shell=True)
+                #subprocess.run(python+" geometrycrafter_video.py --color_video "+scene_video_file, shell=True)
 
         assert is_valid_video(scene_depth_video_file), "Could not generate scene_depth_video_file"
 
