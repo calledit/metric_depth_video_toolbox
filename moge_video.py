@@ -4,12 +4,19 @@ import os
 import torch
 import cv2
 
+import json
+
 import sys
 sys.path.append("MoGe")
 
 
 from moge.model import MoGeModel
 
+class NumpyEncoder(json.JSONEncoder):
+    def default(self, obj):
+        if isinstance(obj, np.ndarray) or isinstance(obj, torch.Tensor):
+            return obj.tolist()
+        return super().default(obj)
 
 def fov_from_camera_matrix(mat):
     w = mat[0][2]*2
@@ -98,7 +105,7 @@ def save_24bit(frames, output_video_path, fps, max_depth_arg):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Video Depth Anything Unidepth video converter')
     parser.add_argument('--color_video', type=str, required=True)
-    parser.add_argument('--max_len', type=int, default=-1, help='maximum length of the input video, -1 means no limit')
+    parser.add_argument('--max_frames', type=int, default=-1, help='maximum length of the input video, -1 means no limit')
     parser.add_argument('--target_fps', type=int, default=-1, help='target fps of the input video, -1 means the original fps')
     parser.add_argument('--max_depth', default=20, type=int, help='the max depth that the video uses', required=False)
     parser.add_argument('--xfov', type=int, help='fov in deg in the x-direction, calculated from aspectratio and yfov in not given', required=False)
@@ -122,7 +129,7 @@ if __name__ == '__main__':
     raw_video = cv2.VideoCapture(args.color_video)
     frame_width, frame_height = int(raw_video.get(cv2.CAP_PROP_FRAME_WIDTH)), int(raw_video.get(cv2.CAP_PROP_FRAME_HEIGHT))
     frame_rate = raw_video.get(cv2.CAP_PROP_FPS)
-    
+
     fovx = None
     if use_fov:
         cam_matrix = compute_camera_matrix(args.xfov, args.yfov, frame_width, frame_height).astype(np.float32)
@@ -130,6 +137,11 @@ if __name__ == '__main__':
 
     model = MoGeModel.from_pretrained('Ruicheng/moge-vitl').to(DEVICE).eval()
 
+
+    output_video_path = args.color_video+'_depth.mkv'
+    out_xfov_file = output_video_path + "_xfovs.json"
+
+    xfovs = []
 
     depths = []
 
@@ -141,18 +153,25 @@ if __name__ == '__main__':
         frame_n += 1
         print("--- frame ",frame_n," ----")
 
-        if args.max_len < frame_n and args.max_len != -1:
+        if args.max_frames < frame_n and args.max_frames != -1:
             break
 
         rgb = cv2.cvtColor(raw_frame, cv2.COLOR_BGR2RGB)
         image_tensor = torch.tensor(rgb / 255, dtype=torch.float32, device=DEVICE).permute(2, 0, 1)
 
         output = model.infer(image_tensor, fov_x=fovx)
-        
+
+
+        estimted_cam_matrix = output['intrinsics'].cpu().numpy()
+        estimated_fovx, estimated_fovy = fov_from_camera_matrix(estimted_cam_matrix)
+        xfovs.append(float(estimated_fovx))
+        print("fovx, fovy:", estimated_fovx, estimated_fovy)
+
         dpth = output['depth'].cpu().numpy()
         dpth = np.nan_to_num(dpth, nan=args.max_depth)#nan is the sky or somthing like that
         depths.append(dpth)
 
-    
-    output_video_path = args.color_video+'_depth.mkv'
+    with open(out_xfov_file, "w") as json_file_handle:
+        json_file_handle.write(json.dumps(xfovs, cls=NumpyEncoder))
+
     save_24bit(np.array(depths), output_video_path, frame_rate, args.max_depth)

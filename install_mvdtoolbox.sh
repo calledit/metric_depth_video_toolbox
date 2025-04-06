@@ -75,6 +75,23 @@ if [[ " $@ " =~ " -depthcrafter " ]]; then
 fi
 
 
+if [[ " $@ " =~ " -geometrycrafter " ]]; then
+	git clone https://github.com/TencentARC/GeometryCrafter
+
+	cd GeometryCrafter
+	
+	
+	pip install decord diffusers transformers accelerate
+	
+	pip install scipy
+	
+	
+	exit
+	
+fi
+
+
+
 #install support for Moge
 if [[ " $@ " =~ " -moge " ]]; then
 	git clone https://github.com/microsoft/MoGe
