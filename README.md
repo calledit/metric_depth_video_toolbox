@@ -65,6 +65,8 @@ There are varoius tools for doing depth estimation in the toolbox.
 - [moge_video.py](moge_video.py) Converts a video in to metric depth video using MoGe.
 - [unidepth_video.py](unidepth_video.py) Converts a video in to metric depth video using UniDepth.
 - [depthcrafter_video.py](depthcrafter_video.py) Converts video in to metric depth video using depthcrafter and a metric depth reference video.
+- [geometrycrafter_video.py](geometrycrafter_video.py) Stablilizes a metric video generated with a single frame depthmodel.
+
 
 ### Viewing 3d video
 [3d_view_depthfile.py](3d_view_depthfile.py) is a 3d viewer that can be used to either view 3d video in a open3d window. Or to render 3d video from novel perspectives in to new video. See README banner for example render.
