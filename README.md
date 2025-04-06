@@ -101,6 +101,7 @@ sudo apt-get install -y libgl1
 #Optional (only required for some tools)
 ./install_mvdtoolbox.sh -megasam
 ./install_mvdtoolbox.sh -geometrycrafter
+./install_mvdtoolbox.sh -unik3d
 ./install_mvdtoolbox.sh -stereocrafter
 ./install_mvdtoolbox.sh -madpose
 ./install_mvdtoolbox.sh -unidepth

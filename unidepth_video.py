@@ -95,7 +95,7 @@ def save_24bit(frames, output_video_path, fps, max_depth_arg):
 
 
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser(description='Video Depth Anything Unidepth video converter')
+    parser = argparse.ArgumentParser(description='MDVT Unidepth video converter')
     parser.add_argument('--color_video', type=str, required=True)
     parser.add_argument('--output_dir', type=str, default='./outputs')
     parser.add_argument('--max_len', type=int, default=-1, help='maximum length of the input video, -1 means no limit')

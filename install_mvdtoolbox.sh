@@ -129,6 +129,24 @@ if [[ " $@ " =~ " -megasam " ]]; then
 	exit
 fi
 
+
+#install support for unidepth
+if [[ " $@ " =~ " -unik3d " ]]; then
+	git clone https://github.com/lpiccinelli-eth/UniK3D
+
+	cd UniK3D
+	
+	pip install timm wandb
+	
+	#You get warning if you dont install this but it is not needed
+ 	#cd unidepth/ops/knn;bash compile.sh;cd ../../../
+	
+	cd ..
+	
+	exit
+fi
+
+
 #install support for unidepth
 if [[ " $@ " =~ " -unidepth " ]]; then
 	git clone https://github.com/lpiccinelli-eth/UniDepth
