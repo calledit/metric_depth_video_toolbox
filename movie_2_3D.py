@@ -4,6 +4,8 @@ import csv
 import cv2
 import time
 import os
+import json
+import numpy as np
 
 def write_frames_to_file(input_video, nr_frames_to_copy, scene_video_file, frame_rate, frame_width, frame_height):
 
@@ -59,7 +61,6 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Takes a movie and converts it in to stereo 3D')
 
     parser.add_argument('--color_video', type=str, help='video file to use as color input', required=True)
-    parser.add_argument('--xfov', type=float, default=42.0, help='Default camera field of view in x direction', required=False)
 
     parser.add_argument('--scene_file', type=str, help='csv from PySceneDetect describing the scenes', required=True)
     parser.add_argument('--csv_delimiter', type=str, default=',', help='Delimiter used in csv', required=False)
@@ -70,6 +71,7 @@ if __name__ == '__main__':
 
     parser.add_argument('--no_render', action='store_true', help='Skip rendering and subseqvent steps.', required=False)
     parser.add_argument('--parallel', type=int, default=1, help='Run some steps in parallel, for faster processing.')
+    parser.add_argument('--no_infill', action='store_true', help='Dont do infill.', required=False)
 
 
 
@@ -103,10 +105,6 @@ if __name__ == '__main__':
             depth_engine = scene['Engine']
 
 
-        scene_xfov = str(args.xfov)
-        if 'Xfov' in scene and scene['Xfov'] != '':
-            scene_xfov = scene['Xfov']
-
         #generate scene video file
         scene_video_file = os.path.join(args.output_dir, 'scene_'+str(scene['Scene Number'])+'.mkv')
         write_frames_to_file(raw_video, int(scene['Length (frames)']), scene_video_file, frame_rate, frame_width, frame_height)
@@ -114,14 +112,21 @@ if __name__ == '__main__':
         scene_depth_video_file = scene_video_file + "_depth.mkv"
         scene_convergence_file = scene_depth_video_file + "_convergence_depths.json"
         scene_xfovs_file = scene_depth_video_file + "_xfovs.json"
+        scene_org_xfovs_file = scene_depth_video_file + "_org_xfovs.json"
         scene_mask_video_file = scene_video_file + "_mask.mkv"
         single_frame_depth_video_file = scene_video_file + "_single_frame_depth.mkv"
 
         #Generate scene depth file
         if depth_engine != 'vda':
-            #to use depth crafter we first need a metric reference. We use moge as it is the most robust metric depth model avalibe right now
             if not os.path.exists(single_frame_depth_video_file):
-                subprocess.run(python+" unik3d_video.py --color_video "+scene_video_file, shell=True)
+                if not os.path.exists(scene_org_xfovs_file):
+                    subprocess.run(python+" unik3d_video.py --color_video "+scene_video_file, shell=True)
+                    subprocess.run("mv "+scene_xfovs_file+" "+scene_org_xfovs_file, shell=True)
+                scene_xfov = None
+                with open(scene_org_xfovs_file) as json_file_handle:
+                    xfovs = json.load(json_file_handle)
+                    scene_xfov = np.mean(xfovs)
+                subprocess.run(python+" unik3d_video.py --xfov "+str(scene_xfov)+" --color_video "+scene_video_file, shell=True)
                 subprocess.run("mv "+scene_depth_video_file+" "+single_frame_depth_video_file, shell=True)
 
             assert is_valid_video(single_frame_depth_video_file), "Could not generate metric reference video file for depthcrafter"
@@ -153,23 +158,28 @@ if __name__ == '__main__':
             scene_sbs = scene_depth_video_file + "_stereo.mkv"
             scene_sbs_infill = scene_sbs + "_infillmask.mkv"
             if not os.path.exists(scene_sbs):
-                parallels.append(subprocess.Popen(python+" stereo_rerender.py --color_video "+scene_video_file+" --convergence_file "+scene_convergence_file+" --xfov "+scene_xfov+" --depth_video "+scene_depth_video_file+" --infill_mask", shell=True))
+                parallels.append(subprocess.Popen(python+" stereo_rerender.py --color_video "+scene_video_file+" --convergence_file "+scene_convergence_file+" --xfov_file "+scene_xfovs_file+" --depth_video "+scene_depth_video_file+" --infill_mask", shell=True))
 
             if len(parallels) >= args.parallel:
                 parallels = wait_for_first(parallels)
 
 
             if args.parallel == 1:
+
                 assert is_valid_video(scene_sbs), "Could not generate stereo video file"
 
-                #Do infill
-                scene_infilled = scene_sbs+"_infilled.mkv"
-                if not os.path.exists(scene_infilled) and not skip_last_step:
-                   subprocess.run(python+" stereo_crafter_infill.py --sbs_color_video "+scene_sbs+" --sbs_mask_video "+scene_sbs_infill, shell=True)
+                if args.no_infill:
+                    video_files_to_concat.append(scene_sbs)
+                else:
 
-                assert is_valid_video(scene_infilled), "Could not generate infilled stereo video file"
+                    #Do infill
+                    scene_infilled = scene_sbs+"_infilled.mkv"
+                    if not os.path.exists(scene_infilled) and not skip_last_step:
+                       subprocess.run(python+" stereo_crafter_infill.py --sbs_color_video "+scene_sbs+" --sbs_mask_video "+scene_sbs_infill, shell=True)
 
-                video_files_to_concat.append(scene_infilled)
+                    assert is_valid_video(scene_infilled), "Could not generate infilled stereo video file"
+
+                    video_files_to_concat.append(scene_infilled)
 
         if args.end_scene == int(scene['Scene Number']):
             break

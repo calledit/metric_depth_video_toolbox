@@ -306,6 +306,7 @@ if __name__ == '__main__':
     parser.add_argument('--color_video', type=str, help='video file to use as color input', required=False)
     parser.add_argument('--xfov', type=float, help='fov in deg in the x-direction, calculated from aspectratio and yfov in not given', required=False)
     parser.add_argument('--yfov', type=float, help='fov in deg in the y-direction, calculated from aspectratio and xfov in not given', required=False)
+    parser.add_argument('--xfov_file', type=str, help='alternative to xfov and yfov, json file with one xfov for each frame', required=False)
     parser.add_argument('--max_depth', default=100, type=int, help='the max depth that the input video uses', required=False)
     parser.add_argument('--transformation_file', type=str, help='file with scene transformations from the aligner', required=False)
     parser.add_argument('--transformation_lock_frame', default=0, type=int, help='the frame that the transfomrmation will use as a base', required=False)
@@ -331,8 +332,8 @@ if __name__ == '__main__':
 
     args = parser.parse_args()
 
-    if args.xfov is None and args.yfov is None:
-        print("Either --xfov or --yfov is required.")
+    if args.xfov is None and args.yfov is None and args.xfov_file is None:
+        print("Either --xfov_file, --xfov or --yfov is required.")
         exit(0)
 
 
@@ -362,6 +363,10 @@ if __name__ == '__main__':
         with open(args.convergence_file) as json_file_handle:
             convergence_depths = json.load(json_file_handle)
 
+    xfovs = None
+    if args.xfov_file is not None:
+        with open(args.xfov_file) as json_file_handle:
+            xfovs = json.load(json_file_handle)
 
 
     transformations = None
@@ -381,21 +386,10 @@ if __name__ == '__main__':
     frame_width, frame_height = int(raw_video.get(cv2.CAP_PROP_FRAME_WIDTH)), int(raw_video.get(cv2.CAP_PROP_FRAME_HEIGHT))
     frame_rate = raw_video.get(cv2.CAP_PROP_FPS)
 
-    cam_matrix = depth_map_tools.compute_camera_matrix(args.xfov, args.yfov, frame_width, frame_height)
-    fovx, fovy = depth_map_tools.fov_from_camera_matrix(cam_matrix)
-    render_cam_matrix = cam_matrix
     out_width , out_height = frame_width, frame_height
 
     if args.touchly0:
         args.vr180 = True
-
-    if args.vr180:
-        out_width , out_height = 1920, 1920
-        max_fov = max(fovx, fovy)
-        if max_fov >= 180:
-            raise ValueError("fov cant be 180 or over, the tool is not built to handle fisheye distorted input video")
-        render_fov = max(75, max_fov)
-        render_cam_matrix = depth_map_tools.compute_camera_matrix(render_fov, render_fov, out_width, out_height)
 
     out_size = None
     if args.touchly1:
@@ -468,6 +462,26 @@ if __name__ == '__main__':
         depth_unit[..., 3] = ((rgb[..., 0].astype(np.uint32) + rgb[..., 1]).astype(np.uint32) / 2)
         depth_unit[..., 2] = rgb[..., 2]
         depth = depth.astype(np.float32)/((255**4)/MODEL_maxOUTPUT_depth)
+
+        if xfovs is not None:
+            xf = xfovs[frame_n-1]
+            yf = None
+        else:
+            xf = args.xfov
+            yf = args.yfov
+
+        cam_matrix = depth_map_tools.compute_camera_matrix(xf, yf, frame_width, frame_height)
+        render_cam_matrix = cam_matrix
+        if args.vr180:
+            out_width , out_height = 1920, 1920
+            fovx, fovy = depth_map_tools.fov_from_camera_matrix(cam_matrix)
+            max_fov = max(fovx, fovy)
+            if max_fov >= 180:
+                raise ValueError("fov cant be 180 or over, the tool is not built to handle fisheye distorted input video")
+            render_fov = max(75, max_fov)
+            render_cam_matrix = depth_map_tools.compute_camera_matrix(render_fov, render_fov, out_width, out_height)
+
+
 
         edge_pcd = None
 
