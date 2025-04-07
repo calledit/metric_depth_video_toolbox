@@ -136,7 +136,7 @@ class MoGe(torch.nn.Module):
             else:
                 intrinsics = torch.tensor(cam_matrix)
             points = project_depth_maps(depth_images, intrinsics)
-            print("saved_points:", points[0].cpu().numpy()[0])
+            #print("saved_points:", points[0].cpu().numpy()[0])
 
         else:
             #image = (image*2) -1 #If you want to purify the input that goes in to MoGe  you keep this line see:
@@ -275,9 +275,9 @@ if __name__ == "__main__":
     parser.add_argument('--max_frames', type=int, default=-1, help='maximum length of the input video, -1 means no limit')
     parser.add_argument('--max_depth', default=100, type=int, help='the max depth that the video uses', required=False)
     parser.add_argument('--max_res', type=int, default=768)
-    parser.add_argument('--xfov', type=int, help='fov in deg in the x-direction, calculated from aspectratio and yfov in not given', required=False)
+    parser.add_argument('--xfov', type=float, help='fov in deg in the x-direction, calculated from aspectratio and yfov in not given', required=False)
     parser.add_argument('--xfov_file', type=str, help='alternative to xfov and yfov, json file with one xfov for each frame', required=False)
-    parser.add_argument('--yfov', type=int, help='fov in deg in the y-direction, calculated from aspectratio and xfov in not given', required=False)
+    parser.add_argument('--yfov', type=float, help='fov in deg in the y-direction, calculated from aspectratio and xfov in not given', required=False)
 
     args = parser.parse_args()
 
