@@ -128,7 +128,7 @@ See https://github.com/calledit/metric_depth_video_toolbox/issues/1#issuecomment
 The tools that reuire ML models have been tested on machines with nvida 3090 cards that support Cuda 12.4 and Torch 2.5.1 on [vast.ai](https://cloud.vast.ai/?ref_id=148636) using "template PyTorch (cuDNN Devel)"
 
 ### Next steps
-- Implement UniK3D https://github.com/lpiccinelli-eth/unik3d (a super acurate single frame depth model)
+- Alter default max-depth. 100m will be the default this will give a 1.5mm resolution.
 - Implement Prompting Depth Anything https://github.com/DepthAnything/PromptDA (a single frame depth upscaler)
 
 ### Contributing
