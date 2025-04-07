@@ -23,7 +23,7 @@ if __name__ == '__main__':
     parser.add_argument('--color_video', type=str, help='video file to use as color input', required=False)
     parser.add_argument('--xfov', type=int, help='fov in deg in the x-direction, calculated from aspectratio and yfov in not given', required=False)
     parser.add_argument('--yfov', type=int, help='fov in deg in the y-direction, calculated from aspectratio and xfov in not given', required=False)
-    parser.add_argument('--max_depth', default=20, type=int, help='the max depth that the video uses', required=False)
+    parser.add_argument('--max_depth', default=100, type=int, help='the max depth that the video uses', required=False)
     parser.add_argument('--render', action='store_true', help='Render to video insted of GUI', required=False)
     parser.add_argument('--render_as_pointcloud', action='store_true', help='Render as point cloud instead of as mesh', required=False)
     parser.add_argument('--remove_edges', action='store_true', help='Tries to remove edges that was not visible in image(it is a bit slow)', required=False)

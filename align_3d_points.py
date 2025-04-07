@@ -57,7 +57,7 @@ if __name__ == '__main__':
     parser.add_argument('--yfov', type=int, help='fov in deg in the y-direction, calculated from aspectratio and xfov in not given', required=False)
     parser.add_argument('--depth_video', type=str, help='depth video', required=True)
     parser.add_argument('--max_frames', default=-1, type=int, help='quit after max_frames nr of frames', required=False)
-    parser.add_argument('--max_depth', default=20, type=int, help='the max depth that the video uses', required=False)
+    parser.add_argument('--max_depth', default=100, type=int, help='the max depth that the video uses', required=False)
     parser.add_argument('--color_video', type=str, help='video file to use as color input only used when debuging', required=False)
     parser.add_argument('--assume_stationary_camera', action='store_true', help='Makes the algorithm assume the camera a stationary_camera, leads to better tracking.', required=False)
     parser.add_argument('--use_madpose', action='store_true', help='Uses madpose for camera pose estimation.', required=False)

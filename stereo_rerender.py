@@ -306,7 +306,7 @@ if __name__ == '__main__':
     parser.add_argument('--color_video', type=str, help='video file to use as color input', required=False)
     parser.add_argument('--xfov', type=float, help='fov in deg in the x-direction, calculated from aspectratio and yfov in not given', required=False)
     parser.add_argument('--yfov', type=float, help='fov in deg in the y-direction, calculated from aspectratio and xfov in not given', required=False)
-    parser.add_argument('--max_depth', default=20, type=int, help='the max depth that the input video uses', required=False)
+    parser.add_argument('--max_depth', default=100, type=int, help='the max depth that the input video uses', required=False)
     parser.add_argument('--transformation_file', type=str, help='file with scene transformations from the aligner', required=False)
     parser.add_argument('--transformation_lock_frame', default=0, type=int, help='the frame that the transfomrmation will use as a base', required=False)
     parser.add_argument('--pupillary_distance', default=63, type=int, help='pupillary distance in mm', required=False)

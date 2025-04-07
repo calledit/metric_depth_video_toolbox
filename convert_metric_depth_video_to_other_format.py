@@ -482,7 +482,7 @@ if __name__ == '__main__':
     parser.add_argument('--depth_video', type=str, help='video file to use as input', required=True)
     parser.add_argument('--bit16', action='store_true', help='Convert depth video to a 16bit mono grayscale video file', required=False)
     parser.add_argument('--bit8', action='store_true', help='Convert depth video to a rgb grayscale video file', required=False)
-    parser.add_argument('--max_depth', default=20, type=int, help='the max depth that the video uses', required=False)
+    parser.add_argument('--max_depth', default=100, type=int, help='the max depth that the video uses', required=False)
     
     parser.add_argument('--save_ply', type=str, help='folder to save .ply pointcloud files in', required=False)
     parser.add_argument('--save_obj', type=str, help='folder to save .obj mesh files in', required=False)

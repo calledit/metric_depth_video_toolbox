@@ -273,7 +273,7 @@ if __name__ == "__main__":
     parser.add_argument('--color_video', type=str, required=True)
     parser.add_argument('--depth_video', type=str, required=False, help='reference metric depth video used to obtain conversion constants, can be created with any image depth model')
     parser.add_argument('--max_frames', type=int, default=-1, help='maximum length of the input video, -1 means no limit')
-    parser.add_argument('--max_depth', default=20, type=int, help='the max depth that the video uses', required=False)
+    parser.add_argument('--max_depth', default=100, type=int, help='the max depth that the video uses', required=False)
     parser.add_argument('--max_res', type=int, default=768)
     parser.add_argument('--xfov', type=int, help='fov in deg in the x-direction, calculated from aspectratio and yfov in not given', required=False)
     parser.add_argument('--xfov_file', type=str, help='alternative to xfov and yfov, json file with one xfov for each frame', required=False)

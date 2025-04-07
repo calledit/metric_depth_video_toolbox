@@ -89,7 +89,7 @@ if __name__ == '__main__':
     parser.add_argument('--input_size', type=int, default=518)
     parser.add_argument('--max_frames', type=int, default=-1, help='maximum length of the input video, -1 means no limit')
     parser.add_argument('--target_fps', type=int, default=-1, help='target fps of the input video, -1 means the original fps')
-    parser.add_argument('--max_depth', default=20, type=int, help='the max depth that the video uses', required=False)
+    parser.add_argument('--max_depth', default=100, type=int, help='the max depth that the video uses', required=False)
 
     args = parser.parse_args()
 

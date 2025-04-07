@@ -107,7 +107,7 @@ if __name__ == '__main__':
     parser.add_argument('--depth_video', type=str, help='depth video', required=True)
     parser.add_argument('--mask_video', type=str, help='black and white mask video for thigns that should not be tracked', required=False)
     parser.add_argument('--max_frames', type=int, default=-1, help='maximum length of the input video, -1 means no limit')
-    parser.add_argument('--max_depth', default=20, type=int, help='the max depth that the video uses', required=False)
+    parser.add_argument('--max_depth', default=100, type=int, help='the max depth that the video uses', required=False)
     parser.add_argument('--xfov', type=float, help='fov in deg in the x-direction, calculated from aspectratio and yfov in not given', required=False)
     parser.add_argument('--yfov', type=float, help='fov in deg in the y-direction, calculated from aspectratio and xfov in not given', required=False)
     parser.add_argument('--optimize_intrinsic', action='store_true', help='Optimize camera instrinsics (ie FOV)', required=False)

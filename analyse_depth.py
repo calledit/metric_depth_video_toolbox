@@ -55,7 +55,7 @@ if __name__ == '__main__':
     parser.add_argument('--track_file', type=str, help='file with 2d point tracking data', required=True)
     parser.add_argument('--depth_video', type=str, help='Dept Video file to analyse', required=True)
     parser.add_argument('--mask_video', type=str, help='black and white mask video for things that should not be tracked', required=False)
-    parser.add_argument('--max_depth', default=20, type=int, help='the max depth that the video uses', required=False)
+    parser.add_argument('--max_depth', default=100, type=int, help='the max depth that the video uses', required=False)
 
     args = parser.parse_args()
 
