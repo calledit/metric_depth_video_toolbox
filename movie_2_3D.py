@@ -100,7 +100,7 @@ if __name__ == '__main__':
 
     for scene in scenes:
         print("Handle scene:", scene)
-        depth_engine = None
+        depth_engine = 'vda'
         if 'Engine' in scene and scene['Engine'] != '':
             depth_engine = scene['Engine']
 
@@ -116,13 +116,14 @@ if __name__ == '__main__':
         scene_mask_video_file = scene_video_file + "_mask.mkv"
         single_frame_depth_video_file = scene_video_file + "_single_frame_depth.mkv"
 
+        scene_xfov = None
         #Generate scene depth file
         if depth_engine != 'vda':
             if not os.path.exists(single_frame_depth_video_file):
                 if not os.path.exists(scene_org_xfovs_file):
                     subprocess.run(python+" unik3d_video.py --color_video "+scene_video_file, shell=True)
                     subprocess.run("mv "+scene_xfovs_file+" "+scene_org_xfovs_file, shell=True)
-                scene_xfov = None
+                
                 with open(scene_org_xfovs_file) as json_file_handle:
                     xfovs = json.load(json_file_handle)
                     scene_xfov = np.mean(xfovs)
@@ -130,7 +131,9 @@ if __name__ == '__main__':
                 subprocess.run("mv "+scene_depth_video_file+" "+single_frame_depth_video_file, shell=True)
 
             assert is_valid_video(single_frame_depth_video_file), "Could not generate metric reference video file for depthcrafter"
-
+        else:
+            scene_xfov = 42.0
+            
         if depth_engine == 'depthcrafter':
             if not os.path.exists(scene_depth_video_file):
                 subprocess.run(python+" depthcrafter_video.py --color_video "+scene_video_file+" --depth_video "+single_frame_depth_video_file, shell=True)
@@ -158,7 +161,11 @@ if __name__ == '__main__':
             scene_sbs = scene_depth_video_file + "_stereo.mkv"
             scene_sbs_infill = scene_sbs + "_infillmask.mkv"
             if not os.path.exists(scene_sbs):
-                parallels.append(subprocess.Popen(python+" stereo_rerender.py --color_video "+scene_video_file+" --convergence_file "+scene_convergence_file+" --xfov_file "+scene_xfovs_file+" --depth_video "+scene_depth_video_file+" --infill_mask", shell=True))
+                if scene_xfov is not None:
+                    xfov_str = "--xfov "+str(scene_xfov)
+                else:
+                    xfov_str = "--xfov_file "+scene_xfovs_file
+                parallels.append(subprocess.Popen(python+" stereo_rerender.py --color_video "+scene_video_file+" --convergence_file "+scene_convergence_file+" "+xfov_str+" --depth_video "+scene_depth_video_file+" --infill_mask", shell=True))
 
             if len(parallels) >= args.parallel:
                 parallels = wait_for_first(parallels)
