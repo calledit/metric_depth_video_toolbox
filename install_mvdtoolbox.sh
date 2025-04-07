@@ -85,9 +85,9 @@ if [[ " $@ " =~ " -geometrycrafter " ]]; then
 	git checkout reduce-cuda-memory-use
 	
 	
-	pip install decord diffusers transformers accelerate
+	pip install decord diffusers transformers accelerate kornia
 	
-	pip install scipy
+	pip install scipy 
 	
 	
 	exit

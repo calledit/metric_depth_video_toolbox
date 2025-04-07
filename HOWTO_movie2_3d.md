@@ -19,7 +19,7 @@ cd metric_depth_video_toolbox
 
 apt install ffmpeg
 ./install_mvdtoolbox.sh
-./install_mvdtoolbox.sh -moge
+./install_mvdtoolbox.sh -unik3d
 ./install_mvdtoolbox.sh -geometrycrafter
 ./install_mvdtoolbox.sh -stereocrafter
 ./create_video_mask.sh -install

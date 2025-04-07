@@ -211,7 +211,12 @@ if __name__ == '__main__':
         cam_matrix = compute_camera_matrix(args.xfov, args.yfov, frame_width, frame_height).astype(np.float32)
         cam_matrix_torch = torch.from_numpy(cam_matrix)
 
-    model = UniK3D.from_pretrained("lpiccinelli/unik3d-vitl").to(DEVICE)
+    model = UniK3D.from_pretrained("lpiccinelli/unik3d-vitl")
+    
+    model.resolution_level = 9
+    model.interpolation_mode = "bilinear"
+    
+    model = model.to(DEVICE).eval()
 
     depths = []
 

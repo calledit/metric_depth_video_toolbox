@@ -121,7 +121,7 @@ if __name__ == '__main__':
         if depth_engine != 'vda':
             #to use depth crafter we first need a metric reference. We use moge as it is the most robust metric depth model avalibe right now
             if not os.path.exists(single_frame_depth_video_file):
-                subprocess.run(python+" moge_video.py --color_video "+scene_video_file, shell=True)
+                subprocess.run(python+" unik3d_video.py --color_video "+scene_video_file, shell=True)
                 subprocess.run("mv "+scene_depth_video_file+" "+single_frame_depth_video_file, shell=True)
 
             assert is_valid_video(single_frame_depth_video_file), "Could not generate metric reference video file for depthcrafter"
