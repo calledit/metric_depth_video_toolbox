@@ -8,6 +8,7 @@ import json
 import sys
 sys.path.append("UniK3D")
 from unik3d.models import UniK3D
+from unik3d.utils.camera import Pinhole
 
 class NumpyEncoder(json.JSONEncoder):
     def default(self, obj):
@@ -206,16 +207,15 @@ if __name__ == '__main__':
     frame_width, frame_height = int(raw_video.get(cv2.CAP_PROP_FRAME_WIDTH)), int(raw_video.get(cv2.CAP_PROP_FRAME_HEIGHT))
     frame_rate = raw_video.get(cv2.CAP_PROP_FPS)
 
-    cam_matrix_torch = None
+    camera = None
     if use_fov:
         cam_matrix = compute_camera_matrix(args.xfov, args.yfov, frame_width, frame_height).astype(np.float32)
-        cam_matrix_torch = torch.from_numpy(cam_matrix)
 
     model = UniK3D.from_pretrained("lpiccinelli/unik3d-vitl")
-    
+
     model.resolution_level = 9
     model.interpolation_mode = "bilinear"
-    
+
     model = model.to(DEVICE).eval()
 
     depths = []
@@ -238,7 +238,10 @@ if __name__ == '__main__':
         rgb = cv2.cvtColor(raw_frame, cv2.COLOR_BGR2RGB)
         rgb_torch = torch.from_numpy(rgb).permute(2, 0, 1)
 
-        predictions = model.infer(rgb_torch, cam_matrix_torch)
+        if use_fov:
+            #We have to createa new camera each iteration as unik3d modifies the camera instance
+            camera = Pinhole(params=torch.tensor([cam_matrix[0][0], cam_matrix[1][1], cam_matrix[0][2], cam_matrix[1][2]]).float())
+        predictions = model.infer(rgb_torch, camera)
         depths.append(predictions["depth"].squeeze().cpu().numpy())
 
         fx, fy = estimate_focal_lengths(predictions['points'], frame_width, frame_height)
