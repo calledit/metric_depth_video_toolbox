@@ -102,7 +102,7 @@ class MoGe(torch.nn.Module):
 
     def __init__(self):
         super().__init__()
-        
+
         #to make prior model work
         if LoadMoge:
             sys.path.append("MoGe")
@@ -130,8 +130,8 @@ class MoGe(torch.nn.Module):
                 intr = []
                 for i in range(nr_images):
                     xfov = xfovs[image_id+i]
-                    cam_matrix = compute_camera_matrix(xfov, None, original_width, original_height).astype(np.float32)
-                    intr.append(cam_matrix)
+                    frame_cam_matrix = compute_camera_matrix(xfov, None, original_width, original_height).astype(np.float32)
+                    intr.append(frame_cam_matrix)
                 intrinsics = torch.tensor(np.array(intr))
             else:
                 intrinsics = torch.tensor(cam_matrix)
