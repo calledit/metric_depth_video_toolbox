@@ -59,6 +59,24 @@ if [[ " $@ " =~ " -stereocrafter " ]]; then
 	
 fi
 
+if [[ " $@ " =~ " -depthpro " ]]; then
+	git clone https://github.com/apple/ml-depth-pro
+
+	cd ml-depth-pro
+	
+	pip install -e .
+	
+	source get_pretrained_models.sh
+	
+	cd ..
+	
+	ln -s ml-depth-pro/checkpoints checkpoints
+	
+	exit
+	
+fi
+
+
 #install support for depthcrafter for defusion based depth
 if [[ " $@ " =~ " -depthcrafter " ]]; then
 	git clone https://github.com/Tencent/DepthCrafter

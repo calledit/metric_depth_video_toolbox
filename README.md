@@ -18,6 +18,7 @@ https://github.com/calledit/metric_depth_video_toolbox/releases/tag/Showcase
    a) the Depth-Anything series of machine learning models.
    b) The [MoGe](https://github.com/microsoft/MoGe) machine learning model.
    c) The [UniDepth](https://github.com/lpiccinelli-eth/UniDepth)  machine learning model.
+   d) DepthPro, UniK3D, depthcrafter
 2. A tool for viewing, rendering and visualising metric 3D videos from novel camera perspectives.
 3. A tool for 3D stereo rendering. Converting normal video in to 3D video.
 4. A tool for adding parallax infill to generated stero video based on [StereoCrafter](https://github.com/TencentARC/StereoCrafter).
@@ -65,6 +66,7 @@ There are varoius tools for doing depth estimation in the toolbox.
 - [moge_video.py](moge_video.py) Converts a video in to metric depth video using MoGe.
 - [unidepth_video.py](unidepth_video.py) Converts a video in to metric depth video using UniDepth.
 - [unik3d_video.py](unik3d_video.py) Converts a video in to metric depth video using UniK3D.
+- [depthpro_video.py](depthpro_video.py) Converts a video in to metric depth video using DepthPro.
 - [depthcrafter_video.py](depthcrafter_video.py) Converts video in to metric depth video using depthcrafter and a metric depth reference video.
 - [geometrycrafter_video.py](geometrycrafter_video.py) Stablilizes a metric video generated with a single frame depthmodel.
 
@@ -102,6 +104,7 @@ sudo apt-get install -y libgl1
 ./install_mvdtoolbox.sh -megasam
 ./install_mvdtoolbox.sh -geometrycrafter
 ./install_mvdtoolbox.sh -unik3d
+./install_mvdtoolbox.sh -depthpro
 ./install_mvdtoolbox.sh -stereocrafter
 ./install_mvdtoolbox.sh -madpose
 ./install_mvdtoolbox.sh -unidepth
