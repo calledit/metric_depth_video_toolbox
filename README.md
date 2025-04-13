@@ -64,6 +64,7 @@ There are varoius tools for doing depth estimation in the toolbox.
 - [video_metric_convert.py](video_metric_convert.py) Converts video in to metric depth video using the Depth-Anything series of machine learning models.
 - [moge_video.py](moge_video.py) Converts a video in to metric depth video using MoGe.
 - [unidepth_video.py](unidepth_video.py) Converts a video in to metric depth video using UniDepth.
+- [unik3d_video.py](unik3d_video.py) Converts a video in to metric depth video using UniK3D.
 - [depthcrafter_video.py](depthcrafter_video.py) Converts video in to metric depth video using depthcrafter and a metric depth reference video.
 - [geometrycrafter_video.py](geometrycrafter_video.py) Stablilizes a metric video generated with a single frame depthmodel.
 

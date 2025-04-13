@@ -13,10 +13,10 @@ class NumpyEncoder(json.JSONEncoder):
         return super().default(obj)
 
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser(description='finds convergence depth in depth video')
+    parser = argparse.ArgumentParser(description='finds convergence depth in depth video. The depth at which a videos main focus lies. Output cn be used to render stereo video with the focus area in convergence.')
 
     parser.add_argument('--depth_video', type=str, help='Dept Video file to analyse', required=True)
-    parser.add_argument('--mask_video', type=str, help='black and white mask video for things that should not be tracked', required=False)
+    parser.add_argument('--mask_video', type=str, help='black and white mask video for the main focus area. White where area of interest is.', required=False)
     parser.add_argument('--max_depth', default=100, type=int, help='the max depth that the video uses', required=False)
 
     args = parser.parse_args()
