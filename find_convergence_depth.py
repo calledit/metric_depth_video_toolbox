@@ -67,6 +67,8 @@ if __name__ == '__main__':
                 where_forground = mask > 240
 
                 mesured_pixels = depth[where_forground]
+            else:
+                print("Failed to read mask video frame")
         
         if mesured_pixels is None:
             mesured_pixels = depth
