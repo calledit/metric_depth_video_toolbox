@@ -55,10 +55,11 @@ if __name__ == '__main__':
         # Decode video depth
         depth = np.zeros((frame_height, frame_width), dtype=np.uint32)
         depth_unit = depth.view(np.uint8).reshape((frame_height, frame_width, 4))
-        depth_unit[..., 3] = ((rgb[..., 0].astype(np.uint32) + rgb[..., 1]).astype(np.uint32) / 2)
+        depth_unit[..., 3] = rgb[..., 0]
         depth_unit[..., 2] = rgb[..., 2]
         depth = depth.astype(np.float32)/((255**4)/MODEL_maxOUTPUT_depth)
 
+        mesured_pixels = None
         if mask_video is not None:
             ret, mask = mask_video.read()
             if ret:
@@ -66,7 +67,8 @@ if __name__ == '__main__':
                 where_forground = mask > 240
 
                 mesured_pixels = depth[where_forground]
-        else:
+        
+        if mesured_pixels is None:
             mesured_pixels = depth
 
         if mesured_pixels.size != 0:
