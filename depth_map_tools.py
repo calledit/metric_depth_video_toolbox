@@ -597,11 +597,15 @@ def render(objects, cam_mat, depth = False, w = None, h = None, extrinsic_matric
         #For some reason using capture_depth_float_buffer is very slow taking about a tenth of a second while capture_screen_float_buffer is like 100 times faster
         #Probably due to this https://github.com/isl-org/Open3D/blob/c6d474b3fa0b47adbcff51219f5928855c3bb806/cpp/open3d/visualization/visualizer/VisualizerRender.cpp#L286
         if depth == -2:
-            return (np.asarray(vis.capture_screen_float_buffer(do_render=True)), np.asarray(vis.capture_depth_float_buffer(do_render=False)))
+            ret = (np.asarray(vis.capture_screen_float_buffer(do_render=True)), np.asarray(vis.capture_depth_float_buffer(do_render=False)))
+            assert ret[0].shape[0] == h and ret[0].shape[1] == w and ret[1].shape[0] == h and ret[1].shape[1] == w, "Render output is not the correct width and height"
         if depth == False:
-            return(np.asarray(vis.capture_screen_float_buffer(do_render=True)))
+            ret = np.asarray(vis.capture_screen_float_buffer(do_render=True))
+            assert ret.shape[0] == h and ret.shape[1] == w, "Render output is not the correct width and height"
         if depth == True:
-            return(np.asarray(vis.capture_depth_float_buffer(do_render=True)))
+            ret = np.asarray(vis.capture_depth_float_buffer(do_render=True))
+            assert ret.shape[0] == h and ret.shape[1] == w, "Render output is not the correct width and height"
+        return ret
     else:
 
         scene = rend.scene
@@ -624,8 +628,9 @@ def render(objects, cam_mat, depth = False, w = None, h = None, extrinsic_matric
         else:
             image = rend.render_to_image()
 
-
-    return np.asarray(image)
+    ret = np.asarray(image)
+    assert ret.shape[0] == h and ret.shape[1] == w, "Render output is not the correct width and height"
+    return ret
 
 def cam_look_at(cam_pos, target, up = np.array([0.0, 1.0, 0.0])):
 
