@@ -119,7 +119,7 @@ python3.11 stereo_rerender.py --color_video ~/in_office_720p.mp4 --depth_video ~
 Raw side by side stero (black where there is paralax):
 <img width="950" alt="sbs" src="https://github.com/user-attachments/assets/672b9703-3215-400e-bb72-54a8f119366a" />
 
-Side by side stero infill mask. Black where there is no infill needed and the normal of the projected edge where infill is needed: (From the normal finding the lower and higher side if the edge is trivial see mark_lower_side() in [stereo_crafter_infill.py](stereo_crafter_infill.py))
+Side by side stero infill mask. Black where there is no infill needed and the normal of the projected edge where infill is needed: (From the normal finding the lower and higher side if the edge is trivial see mark_lower_side() in [stereo_crafter_infill.py](stereo_crafter_infill.py)) (example image is from a diffrent frame)
 <img width="950" alt="normals_infill_format" src="https://github.com/user-attachments/assets/d3fe2519-f565-4e6d-9b2c-228baef89b6a" />
 
 ### Step 8
