@@ -151,12 +151,14 @@ def pnpSolve_ransac(t3d_points_new_frame, mkpts2, cam_mat, distCoeffs = None, re
 def reject_outliers(data, m=1):
     return abs(data - np.mean(data)) < m * np.std(data)
 
-def pts_2_pcd(points, colors = None, ids = None):
+def pts_2_pcd(points, colors = None, ids = None, normals = None):
     if ids is None:
         pcd = o3d.geometry.PointCloud()
         pcd.points = o3d.utility.Vector3dVector(points)
         if colors is not None:
             pcd.colors = o3d.utility.Vector3dVector(colors)
+        if normals is not None:
+            pcd.normals = o3d.utility.Vector3dVector(normals)
     else:
         pcd = o3d.t.geometry.PointCloud()
         pcd.point["positions"] = o3d.core.Tensor(points, dtype=o3d.core.float32)
@@ -216,12 +218,12 @@ def convert_mesh_to_pcd(mesh, included_points, input_pcd):
     return input_pcd
 
 def get_mesh_from_depth_map(depth_map, cam_mat, color_frame = None, inp_mesh = None, remove_edges = False, mask = None,
-                                 invalid_color=None, of_by_one = True):
+                                 invalid_color=None, of_by_one = True, return_normals_of_removed = False):
     points, height, width = create_point_cloud_from_depth(depth_map, cam_mat, of_by_one)
 
     # Create mesh from point cloud
-    mesh, used_indices = create_mesh_from_point_cloud(points, height, width, color_frame, inp_mesh, remove_edges, mask = mask, invalid_color = invalid_color)
-    return mesh, used_indices
+    ret = create_mesh_from_point_cloud(points, height, width, color_frame, inp_mesh, remove_edges, mask = mask, invalid_color = invalid_color, return_normals_of_removed = return_normals_of_removed)
+    return ret
 
 def create_point_cloud_from_depth(depth_image, intrinsics, of_by_one = False):
     height, width = depth_image.shape
@@ -302,9 +304,10 @@ def create_mesh_from_point_cloud(points, height, width,
                                  inp_mesh=None,
                                  remove_edges=False,
                                  mask=None,
-                                 angle_threshold_deg=85,
+                                 angle_threshold_deg=88.0,
                                  invalid_color=None,
-                                 background_edge_mask_expandansions=0):
+                                 background_edge_mask_expandansions=0,
+                                 return_normals_of_removed = False):
     """
     Creates an Open3D TriangleMesh from a grid-organized point cloud while
     filtering out triangles whose orientation relative to the camera is too oblique.
@@ -447,14 +450,51 @@ def create_mesh_from_point_cloud(points, height, width,
                     invalid_mask = ~triangle_mask
 
             if invalid_color is None:
+                
+                
+                invalid_vertexes = triangles_all[invalid_mask].ravel()
+                
+                num_vertices = ref_to_all_vert.shape[0]
+                is_un_used = np.zeros(num_vertices, dtype=bool)
+                is_un_used[invalid_vertexes] = True
+                un_used_indices = np.where(is_un_used)[0]
+                
+                triangle_normals = normals / np.linalg.norm(normals,
+                                           axis=1,       # over the 2 components
+                                           keepdims=True # yields shape (N,1)
+                                          )
+                
+                # assume triangles_all is (n_triangles, 3), triangle_normals is (n_triangles, 3)
+                n_vertices = vertices.shape[0]
+
+                # 1. Flatten the triangle‐to‐vertex index list:
+                flat_vids = triangles_all.reshape(-1)            # shape (n_triangles * 3,)
+
+                # 2. Repeat each triangle normal 3× so it lines up with flat_vids:
+                repeated_normals = np.repeat(triangle_normals, 3, axis=0)  # shape (n_triangles * 3, 3)
+
+                # 3. Create the output array and assign:
+                normals_of_vertexes = np.zeros((n_vertices, 3), dtype=triangle_normals.dtype)
+                normals_of_vertexes[flat_vids] = repeated_normals
+                
+                normals_of_removed_vertexes = normals_of_vertexes[un_used_indices]
+                
+                    
                 # Old behavior: remove invalid triangles by setting their indices to [0,0,0]
                 ref_to_all_tri[invalid_mask] = np.array([0, 0, 0])
+                
+                
+                if return_normals_of_removed:
+                    return mesh, un_used_indices, normals_of_removed_vertexes
+                
                 # Compute used indices from the valid triangles only.
                 valid_mask = np.logical_not(invalid_mask)
                 num_vertices = ref_to_all_vert.shape[0]
                 is_used = np.zeros(num_vertices, dtype=bool)
-                is_used[ ref_to_all_tri[valid_mask].ravel() ] = True
+                valid_vertexes = ref_to_all_tri[valid_mask].ravel()
+                is_used[valid_vertexes] = True
                 used_indices = np.where(is_used)[0]
+                
             else:
                 # New behavior: keep all triangles, but return them vertices of invalid triangles.
                 # Ensure a vertex_colors array exists.
@@ -549,6 +589,8 @@ def render(objects, cam_mat, depth = False, w = None, h = None, extrinsic_matric
         rend_opt = vis.get_render_option()
         rend_opt.background_color = bg_color
         rend_opt.point_size = 1.0
+        #rend_opt.mesh_color_option = o3d.visualization.MeshColorOption.Normal
+        #rend_opt.point_show_normal = True
         
         ctr = vis.get_view_control()
         ctr.set_lookat([0, 0, 1])

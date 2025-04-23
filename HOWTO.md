@@ -119,8 +119,8 @@ python3.11 stereo_rerender.py --color_video ~/in_office_720p.mp4 --depth_video ~
 Raw side by side stero (black where there is paralax):
 <img width="950" alt="sbs" src="https://github.com/user-attachments/assets/672b9703-3215-400e-bb72-54a8f119366a" />
 
-Side stero infill mask. Green, red and blue where there is paralax. Blue represents the edge of a infill area that is furthest from the camera and red is the edge closest to the camera:
-<img width="950" alt="sbs" src="https://github.com/user-attachments/assets/19784521-487d-4c13-9f04-a054a14e287c" />
+Side by side stero infill mask. Black where there is no infill needed and the normal of the projected edge where infill is needed: (From the normal finding the lower and higher side if the edge is trivial see mark_lower_side() in [stereo_crafter_infill.py](stereo_crafter_infill.py))
+<img width="950" alt="normals_infill_format" src="https://github.com/user-attachments/assets/d3fe2519-f565-4e6d-9b2c-228baef89b6a" />
 
 ### Step 8
 Here we will use ML to add paralax infill using the tool stereo_crafter_infill.py

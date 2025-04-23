@@ -21,9 +21,9 @@ def generate_infilled_frames(input_frames, input_masks):
     global num_inference_steps
     input_frames = torch.tensor(input_frames).permute(0, 3, 1, 2).float()/255.0
     frames_mask = torch.tensor(input_masks).permute(0, 1, 2).float()/255.0
-
+    
     video_latents = pipeline(
-        frames=input_frames.clone(),
+        frames=input_frames,
         frames_mask=frames_mask,
         height=input_frames.shape[2],
         width=input_frames.shape[3],
@@ -47,6 +47,54 @@ def generate_infilled_frames(input_frames, input_masks):
 
     return (video_frames*255).astype(np.uint8)
 
+
+def mark_lower_side(normals_img, max_steps=30):
+    """
+    normals_img: H×W×3 array, dtype uint8.
+                 Black ([0,0,0]) = no normal; 
+                 non‑black pixels encode normals in (X,Y,Z).
+    max_steps:   how far along the ray to march before giving up.
+    
+    Returns: H×W×3 uint8 image, where blue pixels mark the “lower side”
+             for each normal.
+    """
+    H, W = normals_img.shape[:2]
+    # keep a copy for tests
+    orig = normals_img.copy()
+    
+    # Prepare output (all black initially)
+    output = np.zeros((H, W, 3), dtype=np.uint8)
+    
+    # 1) Build a mask of valid normals (non‑black)
+    valid_mask = ~np.all(orig == 0, axis=-1)
+    
+    # 2) Extract and normalize (dx,dy)
+    dirs = ((orig[..., :2].astype(np.float32)/255.0)*2)-1
+    lengths = np.linalg.norm(dirs, axis=-1, keepdims=True)
+    valid_dirs = valid_mask & (lengths[...,0] > 1e-6)
+    dirs[valid_dirs] /= lengths[valid_dirs]
+    
+    # 3) For each valid normal, march until hitting black in the original,
+    #    then step back one and mark blue in output.
+    ys, xs = np.nonzero(valid_dirs)
+    for y, x in zip(ys, xs):
+        dx, dy = dirs[y, x]
+        for t in range(1, max_steps):
+            xi = int(round(x + dx*t))
+            yi = int(round(y + dy*t))
+            # stop if out of bounds
+            if not (0 < xi < W and 0 < yi < H):
+                break
+            # if we’ve reached a background pixel (black in orig), mark the previous
+            if np.all(orig[yi, xi] == 0):
+                xb = int(round(x + dx*(t-1)))
+                yb = int(round(y + dy*(t-1)))
+                if 0 <= xb < W and 0 <= yb < H:
+                    output[yb, xb] = np.array([0, 0, 255], dtype=np.uint8)
+                break
+    
+    return output
+
 def deal_with_frame_chunk(keep_first_three, chunk, out, keep_last_three):
 
     ##where the side by side picture ends
@@ -58,6 +106,7 @@ def deal_with_frame_chunk(keep_first_three, chunk, out, keep_last_three):
     #1024x768 looks good enogh a okay tradeof betwen looks and speed
     new_width = 1024
     new_height = 768
+    # Default seams to be height: int = 576, width: int = 1024,
 
     right_input = []
     left_input = []
@@ -134,8 +183,11 @@ def deal_with_frame_chunk(keep_first_three, chunk, out, keep_last_three):
 
         # Apply edge blending
         # if we dont we get a uggly halo effect around forground objects
-        right_backedge_mask = np.all(right_mask == blue, axis=-1)
-        left_backedge_mask = np.all(left_mask == blue, axis=-1)
+        # This no longer works now that the masks are based on normals....
+        right_mask_blue = mark_lower_side(right_mask)
+        right_backedge_mask = np.all(right_mask_blue == blue, axis=-1)
+        left_mask_blue = mark_lower_side(left_mask)
+        left_backedge_mask = np.all(left_mask_blue == blue, axis=-1)
 
         right_backedge_mask = binary_dilation(right_backedge_mask, iterations = 6)
         left_backedge_mask = binary_dilation(left_backedge_mask, iterations = 6)

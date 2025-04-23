@@ -86,194 +86,9 @@ def convert_to_equirectangular(image, input_fov=100):
     return equirect_img
 
 
-def infill_from_deep_side(image, mask, sample_side='right'):
-    """
-    For each row in the image, infill segments marked in the mask with the color sampled
-    from the deeper side (blue side). The mask is assumed to have:
-      - Blue pixels: [0, 0, 255] marking the deeper edge.
-      - Red  ([255, 0, 0]) and Green ([0, 255, 0]) marking the infill region.
-      - Black: [0, 0, 0] elsewhere.
+def make_infill_mask(boolean_mask, normals):
+    return None
 
-    For each contiguous segment (where mask is non-black) in a row, the function:
-      1. Searches for blue marker pixels in the segment.
-      2. If blue markers exist, uses their position to decide the infill candidate.
-         - If a blue marker is at the left or right boundary, the candidate color is
-           sampled from the pixel just outside the segment.
-         - Otherwise, the first blue marker is used (and its right neighbor is chosen).
-      3. If no blue marker exists (i.e. only a single green pixel), the candidate color
-         is sampled from the right or left side of the segment, depending on the `sample_side`
-         argument.
-      4. Fills the segment with the candidate color.
-
-    Parameters:
-      image (np.ndarray): Input image (H, W, 3) of type uint8.
-      mask (np.ndarray): Marking mask (H, W, 3) of type uint8.
-      sample_side (str): "right" (default) or "left". Used when no blue pixel is found.
-
-    Returns:
-      np.ndarray: The resulting image after infilling.
-    """
-    result = image.copy()
-    H, W, _ = image.shape
-
-    # Define colors.
-    black = np.array([0, 0, 0], dtype=np.uint8)
-    blue  = np.array([0, 0, 255], dtype=np.uint8)
-
-    # Create a binary infill region: True where the mask is not black.
-    infill_region = np.any(mask != 0, axis=-1)  # shape (H, W)
-
-    for i in range(H):
-        row_infill = infill_region[i]
-        if not np.any(row_infill):
-            continue
-
-        # Compute contiguous segments in the row.
-        row_int = row_infill.astype(np.int32)
-        d = np.diff(row_int)  # length W-1
-
-        # A segment starts where diff == 1 (and at index 0 if the row starts True).
-        seg_starts = list(np.where(d == 1)[0] + 1)
-        if row_infill[0]:
-            seg_starts = [0] + seg_starts
-
-        # A segment ends where diff == -1 (and at W-1 if the row ends True).
-        seg_ends = list(np.where(d == -1)[0])
-        if row_infill[-1]:
-            seg_ends = seg_ends + [W - 1]
-
-        # Process each segment.
-        for start, end in zip(seg_starts, seg_ends):
-            # Extract this segment from the mask.
-            segment_mask = mask[i, start:end+1]  # shape (segment_length, 3)
-            # Identify blue pixels in the segment.
-            is_blue = np.all(segment_mask == blue, axis=-1)
-            blue_indices = np.where(is_blue)[0]
-
-            if blue_indices.size == 0:
-                # No blue pixel exists, so sample from the specified side.
-                if sample_side == 'right':
-                    candidate_idx = end + 1 if end < W - 1 else end
-                else:  # sample_side == 'left'
-                    candidate_idx = start - 1 if start > 0 else start
-            else:
-                # Use blue markers if present.
-                # Check if the blue marker is at one of the boundaries.
-                if 0 in blue_indices:
-                    # Blue is at the left edge of the segment.
-                    candidate_idx = start - 1 if start > 0 else start
-                elif (end - start) in blue_indices:
-                    # Blue is at the right edge.
-                    candidate_idx = end + 1 if end < W - 1 else end
-                else:
-                    # Otherwise, choose the first blue marker in the segment.
-                    b_rel = blue_indices[0]  # relative index inside segment
-                    candidate_idx = start + b_rel + 1
-                    if candidate_idx >= W:
-                        candidate_idx = start + b_rel - 1 if (start + b_rel - 1) >= 0 else start + b_rel
-
-            # Sample the candidate color from the original image.
-            candidate_color = image[i, candidate_idx]
-            # Fill the entire segment with the candidate color.
-            result[i, start:end+1] = candidate_color
-
-    return result
-
-
-def mark_depth_transitions(boolean_mask, depth_map):
-    """
-    This function tries to determine what side of an edge is closer or further away from the camera.
-    Which is usefull info to have when doing paralax infill.
-    This is something that could be calculated exactly but, that would probably require more processing power.
-    Or use of a diffrent 3D library than open3D. So this function asumes that all pixels only move in x direction due to paralax.
-    Which is true for the exact height center of the image as that is how we move the camera but it is a rough estimation of pixels
-    Further up or down....
-
-    For each row in the boolean mask, finds segments where the mask is True.
-    For each segment, compares depth values at points slightly outside the segment edges:
-      - Closer edge is marked red (255, 0, 0)
-      - Further edge is marked blue (0, 0, 255)
-      - The interior of infill areas is marked green (0, 255, 0)
-      - Non infill pixels are black (0, 0, 0)
-
-    Parameters:
-      boolean_mask (np.ndarray): 2D boolean array, shape (H, W)
-      depth_map (np.ndarray): 2D float array, shape (H, W) with depth values.
-
-    Returns:
-      np.ndarray: Color image (H, W, 3) with the markings.
-    """
-    H, W = boolean_mask.shape
-
-    # Define colors (RGB)
-    red   = np.array([255, 0, 0], dtype=np.uint8)
-    blue  = np.array([0, 0, 255], dtype=np.uint8)
-    green = np.array([0, 255, 0], dtype=np.uint8)
-    black = np.array([0, 0, 0], dtype=np.uint8)
-
-    # Start with a black output image.
-    result = np.zeros((H, W, 3), dtype=np.uint8)
-    # Mark all True pixels as green.
-    result[boolean_mask] = green
-
-    # Convert mask to integer (0/1) and compute diff along each row.
-    mask_int = boolean_mask.astype(np.int8)
-    diff = np.diff(mask_int, axis=1)  # shape (H, W-1)
-
-    # Find indices of transitions:
-    # diff == 1: transition from False->True, so segment start (actual index = col + 1)
-    start_rows, start_cols = np.where(diff == 1)
-    start_cols = start_cols + 1  # adjust to actual start
-
-    # diff == -1: transition from True->False, so segment end (actual index = col)
-    end_rows, end_cols = np.where(diff == -1)
-
-    # Rows starting with True: add (row, 0) as start.
-    first_true = np.where(boolean_mask[:, 0])[0]
-    start_rows = np.concatenate([first_true, start_rows])
-    start_cols = np.concatenate([np.zeros(first_true.shape, dtype=int), start_cols])
-
-    # Rows ending with True: add (row, W-1) as end.
-    last_true = np.where(boolean_mask[:, -1])[0]
-    end_rows = np.concatenate([end_rows, last_true])
-    end_cols = np.concatenate([end_cols, np.full(last_true.shape, W - 1, dtype=int)])
-
-    # To pair transitions per row, group by row.
-    # Process only rows that have at least one transition.
-    unique_rows = np.unique(np.concatenate([start_rows, end_rows]))
-    for r in unique_rows:
-        # Get all start and end indices for this row.
-        s_mask = start_rows == r
-        e_mask = end_rows == r
-        s_cols = start_cols[s_mask]
-        e_cols = end_cols[e_mask]
-        # Only process if we have a matching pair per segment.
-        n_segments = min(len(s_cols), len(e_cols))
-        if n_segments == 0:
-            continue
-        s_cols = s_cols[:n_segments]
-        e_cols = e_cols[:n_segments]
-
-        # Compute check positions: 2 pixels to the left of s (clamped to 0)
-        # and 2 pixels to the right of e (clamped to W-1)
-        s_checks = np.maximum(s_cols - 2, 0)
-        e_checks = np.minimum(e_cols + 2, W - 1)
-
-        # Get depth values at the check positions.
-        depth_s = depth_map[r, s_checks]
-        depth_e = depth_map[r, e_checks]
-
-        # Compare depths: lower depth is considered closer.
-        # For each segment, mark the closer edge red and the further edge blue.
-        closer_at_start = depth_s < depth_e
-        # For segments where start is closer:
-        result[r, s_cols[closer_at_start]] = red
-        result[r, e_cols[closer_at_start]] = blue
-        # For segments where end is closer:
-        result[r, s_cols[~closer_at_start]] = blue
-        result[r, e_cols[~closer_at_start]] = red
-
-    return result
 
 def convergence_angle(distance, pupillary_distance):
     """
@@ -295,6 +110,101 @@ def convergence_angle(distance, pupillary_distance):
 
     return angle_per_eye
 
+def masked_blur(img, ksize=(6,6), sigma=0):
+    """
+    Gaussian‑blurs `img` but ignores pure black pixels when computing each output pixel.
+    Black pixels (0,0,0) act like “transparent” in the kernel.
+    
+    img:     H×W×C uint8 BGR image
+    ksize:   blur kernel size
+    sigma:   gaussian sigma (0 = auto)
+    """
+    # 1) Build your Gaussian kernel (1D then outer‑product → 2D)
+    g1d = cv2.getGaussianKernel(ksize[0], sigma)
+    kernel = g1d @ g1d.T
+
+    # 2) Make a mask of “valid” pixels (1 where img != black)
+    #    For color: consider black only if all channels are zero
+    black_mask = np.all(img == 0, axis=2)
+    valid_mask = ~black_mask
+    valid_mask = valid_mask.astype(np.float32)
+
+    # 3) Convolve image and mask separately
+    #    We need float32 so sums don’t wrap / clip
+    img_f = img.astype(np.float32)
+    # sum of weighted pixel values
+    blurred_sum = cv2.filter2D(img_f,   -1, kernel, borderType=cv2.BORDER_ISOLATED)
+    # sum of weights where mask=1
+    weight_sum  = cv2.filter2D(valid_mask, -1, kernel, borderType=cv2.BORDER_ISOLATED)
+
+    # 4) Normalize: for each channel, divide by weight_sum
+    #    Prevent divide‑by‑zero: wherever weight_sum==0, leave as black (or original)
+    #    Expand weight_sum to H×W×1 so it broadcasts over channels
+    w = weight_sum[..., None]
+    # avoid zeros
+    w_safe = np.where(w==0, 1.0, w)
+
+    out = blurred_sum / w_safe
+    # in “holes” where w was zero, force black
+    out[weight_sum == 0] = 0
+    out[black_mask] = 0
+
+    return np.clip(out, 0, 255).astype(np.uint8)
+    
+def infill_using_normals(color_img, hole_mask, normal_map, max_steps=30):
+    """
+    Infill black (“hole”) pixels in color_img by ray‑marching
+    along the XY direction from normal_map.
+    """
+    # Prepare
+    color = color_img.copy()
+    H, W = color.shape[:2]
+    if max_steps is None:
+        max_steps = max(H, W)
+
+    # Decode normals to floats in [-1,1]
+    nm = normal_map
+    green_pixels = np.all(nm == np.array([0.0,1.0,0.0]), axis=-1)
+    dirs = nm[..., :2]   # take X,Y components
+    lengths = np.linalg.norm(dirs, axis=-1, keepdims=True)
+    valid = (lengths[...,0] != 0.)  # where there's a direction to march
+
+    # Normalize directions
+    dirs[valid] /= lengths[valid]
+    
+
+    # Find all hole pixels that have a valid normal
+    ys, xs = np.nonzero(hole_mask & valid)
+
+    for y, x in zip(ys, xs):
+        if green_pixels[y, x]:
+            print("found green pixel, there should not by any such pixels")
+            continue
+        dx, dy = dirs[y, x]
+        # march along the ray
+        for t in range(1, max_steps):
+            xi = int(round(x + dx * t))
+            yi = int(round(y + dy * t))
+            if not (0 <= xi < W and 0 <= yi < H):
+                break
+            if not hole_mask[yi, xi]:
+                #check two pixels out if posible (we try to pick a pixel a bit ahead as the closest pixels tend to be contamined with forground stuff)
+                xi2 = int(round(x + dx * (t+2)))
+                yi2 = int(round(y + dy * (t+2)))
+                if (0 <= xi2 < W and 0 <= yi2 < H) and not hole_mask[yi2, xi2]:
+                    color[y, x] = color_img[yi2, xi2]
+                else:
+                    #check one pixels out if two not posible
+                    xi1 = int(round(x + dx * (t+1)))
+                    yi1 = int(round(y + dy * (t+1)))
+                    if (0 <= xi1 < W and 0 <= yi1 < H) and not hole_mask[yi1, xi1]:
+                        color[y, x] = color_img[yi1, xi1]
+                    else:
+                        #use 0 pixel if the other ones where not avalible
+                        color[y, x] = color_img[yi, xi]
+                break
+
+    return color
 
 if __name__ == '__main__':
 
@@ -320,6 +230,7 @@ if __name__ == '__main__':
 
     parser.add_argument('--dont_place_points_in_edges', action='store_true', help='Dont put point cloud points in the removed edges', required=False)
 
+    parser.add_argument('--do_basic_infill', action='store_true', help='Does basic non ML infill.', required=False)
     parser.add_argument('--touchly1', action='store_true', help='Render as touchly1 format. ie. mono video with 3d', required=False)
     parser.add_argument('--touchly_max_depth', default=5, type=float, help='the max depth that touchly is cliped to', required=False)
     parser.add_argument('--compressed', action='store_true', help='Render the video in a compressed format. Reduces file size but also quality.', required=False)
@@ -506,7 +417,7 @@ if __name__ == '__main__':
                 transform_to_zero = np.eye(4)
 
             remove_edges = False
-            if args.infill_mask or args.remove_edges:
+            if args.infill_mask or args.remove_edges or args.do_basic_infill:
                 remove_edges = True
 
             of_by_one = True
@@ -517,25 +428,30 @@ if __name__ == '__main__':
                 of_by_one = False
 
 
-            mesh, used_indices = depth_map_tools.get_mesh_from_depth_map(depth, cam_matrix, color_frame, last_mesh, remove_edges = remove_edges, of_by_one = of_by_one)
+            mesh, unused_indices, removed_normals = depth_map_tools.get_mesh_from_depth_map(depth, cam_matrix, color_frame, last_mesh, remove_edges = remove_edges, of_by_one = of_by_one, return_normals_of_removed = True)
             last_mesh = mesh
 
 
             # If there are not points in the infill areas the infill models get confused.
             # So we add points in the infill area
             if not args.dont_place_points_in_edges and remove_edges:
-                vertextes_in_edge = np.ones(len(mesh.vertices), dtype=bool)
-                vertextes_in_edge[used_indices] = False
+                vertextes_in_edge = np.zeros(len(mesh.vertices), dtype=bool)
+                
+                vertextes_in_edge[unused_indices] = True
+                
                 edge_points = np.asarray(mesh.vertices)[vertextes_in_edge]
                 edge_colors = np.asarray(mesh.vertex_colors)[vertextes_in_edge]
+                world_space_edge_normals = removed_normals + edge_points
 
                 #Undo off by one fix
                 edge_points[:, 0] *= (frame_width-1)/frame_width
                 edge_points[:, 1] *= (frame_height-1)/frame_height
+                
 
                 #Only draw edge points if there is more than 1 of them
                 if len(edge_points) > 1:
-                    edge_pcd = depth_map_tools.pts_2_pcd(edge_points, edge_colors)
+                    edge_pcd = depth_map_tools.pts_2_pcd(edge_points)
+                    edge_normal_pcd = depth_map_tools.pts_2_pcd(world_space_edge_normals)
 
 
             if args.render_as_pointcloud:
@@ -548,6 +464,7 @@ if __name__ == '__main__':
                 draw_mesh.transform(transform_to_zero)
                 if edge_pcd is not None:
                     edge_pcd.transform(transform_to_zero)
+                    edge_normal_pcd.transform(transform_to_zero)
 
             if mask_video is not None:
 
@@ -638,15 +555,21 @@ if __name__ == '__main__':
                 if edge_pcd is not None:
                     if convergence_distance is not None:
                         edge_pcd.rotate(convergence_rotation_minus, center=(0, 0, 0))
+                        edge_normal_pcd.rotate(convergence_rotation_minus, center=(0, 0, 0))
                     edge_pcd.translate([-left_shift, 0.0, 0.0])
-                    points_2d = depth_map_tools.project_3d_points_to_2d(np.asarray(edge_pcd.points), render_cam_matrix)
-
+                    edge_normal_pcd.translate([-left_shift, 0.0, 0.0])
+                    unprojected_normals = np.asarray(edge_normal_pcd.points) - np.asarray(edge_pcd.points)
+                    points_3d = np.asarray(edge_pcd.points)
+                    points_2d = depth_map_tools.project_3d_points_to_2d(points_3d, render_cam_matrix)
+                
+                
                 left_image, left_depth = depth_map_tools.render(to_draw, render_cam_matrix, depth = -2, bg_color = bg_color)
+                
+                
+                bg_mask = np.all(left_image == bg_color, axis=-1)
+                
 
-                if infill_mask_video is not None:
-                    bg_mask = np.all(left_image == bg_color, axis=-1)
-                    left_img_mask = mark_depth_transitions(bg_mask, left_depth)
-
+                    
 
                 if edge_pcd is not None:
                     points_int = np.round(points_2d).astype(int)
@@ -654,23 +577,71 @@ if __name__ == '__main__':
                         (points_int[:, 0] >= 0) & (points_int[:, 0] < frame_width) &
                         (points_int[:, 1] >= 0) & (points_int[:, 1] < frame_height)
                     )
-                    valid_points = points_int[valid_mask]
-                    valid_colors = edge_colors[valid_mask]
+                    points_3d = points_3d[valid_mask]
+                    depth_order = np.argsort(points_3d[:, 2])[::-1]
+                    valid_points = points_int[valid_mask][depth_order]
+                    valid_colors = edge_colors[valid_mask][depth_order]
+                    valid_unprojected_normals = unprojected_normals[valid_mask][depth_order]
+                    
+                    ####valid_normals = [valid_mask] #What are the normals after rotation?
+                    # valid_colors dows not chnage after rotation but the normals in screen space should change.
+                    # A Truth is that the normals will change but not that much, we might get away with just leaving them as they are.
+                    # NOT is there is insane convergence or large tranformations from a tranformation file.
+                    # Okay... One way to deal with this is to project the normals in to world space by doing:
+                    # projected_normals = edge_normals + np.asarray(edge_pcd.points)
+                    # then applying rotations, then un projecting:
+                    # unprojected_normals = projected_normals - np.asarray(edge_pcd.points)
+                    
+                    # Okay this works now, But there is still an issue:
+                    # When there is a big triangle there will be green in the middle since there is no vertexes there and i only do
+                    # color pixels that have vertexes.
+                    # One way to solve this is to flood fill these areas, with normals from surounding areas.
+                    # another is to acctually render the infill as triangles. (make a second mesh for the infill areas that is colored
+                    # by its unprojected_normals). This will require a second render. And will not work great for back facing triangles.
+                    # As they will be covered by front facing triangles.
+                    # I just realized that you probably accutally want to do infill from the raw image/model not the rotated one.
+                    # As the area you want to infill from might be coverd in the rotated translated render.
+                    
                     mask = np.all(left_image[valid_points[:, 1], valid_points[:, 0]] == bg_color, axis=-1)
-
-
-
-
-                if infill_mask_video is not None:
-                    left_image[bg_mask] = np.array([.0,.0,.0])
+                    
+                    normalized = valid_unprojected_normals[mask]
+                    lengths = np.linalg.norm(normalized, axis=1, keepdims=True)
+                    normalized = normalized / lengths
+                
+                
+                
+                    
+                    
+                    
+                left_img_mask = np.zeros((frame_height, frame_width, 3), dtype=np.float64)
 
                 if edge_pcd is not None:
-                    left_image[valid_points[mask, 1], valid_points[mask, 0]] = valid_colors[mask]
+                    
+                    
+                    left_img_mask[bg_mask] = bg_color # We simply hope that there is no normal that is perfectly green when we use green as bg
+                    left_image[bg_mask] = np.array([.0,.0,.0])
+                    left_img_mask[:, 0][np.all(left_img_mask[:, 0, :]  == bg_color, axis=1)] = np.array([1., 0.5, 0.5])
+                    
+                    
+                    left_img_mask[valid_points[mask, 1], valid_points[mask, 0]] = (normalized+1)/2
+                    green_left = np.all(left_img_mask == bg_color, axis=-1)
+                    green_and_black = green_left | np.all(left_img_mask == np.array([.0,.0,.0]), axis=-1)
+                    infill_area_mask = (green_and_black*255).astype('uint8')
+                    left_img_mask_infilled = cv2.inpaint((left_img_mask*255).astype('uint8'), infill_area_mask, inpaintRadius=3, flags=cv2.INPAINT_TELEA)
+                    left_img_mask[green_left] = left_img_mask_infilled[green_left].astype('float32')/255.0
+                    left_img_mask = masked_blur((left_img_mask*255).astype('uint8')).astype('float32')/255.0
+                    
+                    if args.do_basic_infill:
+                        left_img_mask_minus = (left_img_mask*2)-1
+                        left_image = infill_using_normals(left_image, bg_mask, left_img_mask_minus)
+                    else:
+                        left_image[valid_points[mask, 1], valid_points[mask, 0]] = valid_colors[mask]
+                    
+                if infill_mask_video is not None:
+                    left_img_mask = (left_img_mask*255).astype(np.uint8)
 
                 left_image = (left_image*255).astype(np.uint8)
 
-                #else:
-                #    left_image = infill_from_deep_side(left_image, left_img_mask, 'left')
 
 
                 touchly_left_depth = None
@@ -690,18 +661,21 @@ if __name__ == '__main__':
                 to_draw = [draw_mesh]
                 if edge_pcd is not None:
                     edge_pcd.translate([left_shift, 0.0, 0.0])
+                    edge_normal_pcd.translate([left_shift, 0.0, 0.0])
                     if convergence_distance is not None:
                         edge_pcd.rotate(convergence_rotation_plus, center=(0, 0, 0))
                         edge_pcd.rotate(convergence_rotation_plus, center=(0, 0, 0))
+                        edge_normal_pcd.rotate(convergence_rotation_plus, center=(0, 0, 0))
+                        edge_normal_pcd.rotate(convergence_rotation_plus, center=(0, 0, 0))
                     edge_pcd.translate([-right_shift, 0.0, 0.0])
-                    points_2d = depth_map_tools.project_3d_points_to_2d(np.asarray(edge_pcd.points), render_cam_matrix)
-
+                    edge_normal_pcd.translate([-right_shift, 0.0, 0.0])
+                    unprojected_normals = np.asarray(edge_normal_pcd.points) - np.asarray(edge_pcd.points)
+                    points_3d = np.asarray(edge_pcd.points)
+                    points_2d = depth_map_tools.project_3d_points_to_2d(points_3d, render_cam_matrix)
+                
                 right_image, right_depth = depth_map_tools.render(to_draw, render_cam_matrix, depth = -2, bg_color = bg_color)
 
-                if infill_mask_video is not None:
-                    bg_mask = np.all(right_image == bg_color, axis=-1)
-                    right_img_mask = mark_depth_transitions(bg_mask, right_depth)
-
+                bg_mask = np.all(right_image == bg_color, axis=-1)
 
 
                 if edge_pcd is not None:
@@ -710,21 +684,50 @@ if __name__ == '__main__':
                         (points_int[:, 0] >= 0) & (points_int[:, 0] < frame_width) &
                         (points_int[:, 1] >= 0) & (points_int[:, 1] < frame_height)
                     )
-                    valid_points = points_int[valid_mask]
-                    valid_colors = edge_colors[valid_mask]
+                    points_3d = points_3d[valid_mask]
+                    depth_order = np.argsort(points_3d[:, 2])[::-1]
+                    valid_points = points_int[valid_mask][depth_order]
+                    valid_colors = edge_colors[valid_mask][depth_order]
+                    valid_unprojected_normals = unprojected_normals[valid_mask][depth_order]
                     mask = np.all(right_image[valid_points[:, 1], valid_points[:, 0]] == bg_color, axis=-1)
-
-
-                if infill_mask_video is not None:
-                    right_image[bg_mask] = np.array([.0,.0,.0])
-
+                    
+                    normalized = valid_unprojected_normals[mask]
+                    lengths = np.linalg.norm(normalized, axis=1, keepdims=True)
+                    normalized = normalized / lengths
+                
+                right_img_mask = np.zeros((frame_height, frame_width, 3), dtype=np.float64)
+                
                 if edge_pcd is not None:
-                    right_image[valid_points[mask, 1], valid_points[mask, 0]] = valid_colors[mask]
+                    
+                    right_img_mask[bg_mask] = bg_color # We simply hope that there is no normal that is perfectly green when we use green as bg
+                    right_image[bg_mask] = np.array([.0,.0,.0])
+                    right_img_mask[:, -1][np.all(right_img_mask[:, -1, :]  == bg_color, axis=1)] = np.array([0., 0.5, 0.5])
+
+                
+                    
+                    #if the left most pixels are all green set their normals so they get infilled
+                    
+                    
+                    #What hapens when two vertexes are antop of eachother?
+                    right_img_mask[valid_points[mask, 1], valid_points[mask, 0]] = (normalized+1)/2
+                    green_left = np.all(right_img_mask == bg_color, axis=-1)
+                    green_and_black = green_left | np.all(right_img_mask == np.array([.0,.0,.0]), axis=-1)
+                    infill_area_mask = (green_and_black*255).astype('uint8')
+                    right_img_mask_infilled = cv2.inpaint((right_img_mask*255).astype('uint8'), infill_area_mask, inpaintRadius=3, flags=cv2.INPAINT_TELEA)
+                    right_img_mask[green_left] = right_img_mask_infilled[green_left].astype('float32')/255.0
+                    right_img_mask = masked_blur((right_img_mask*255).astype('uint8')).astype('float32')/255.0
+                    
+                    if args.do_basic_infill:
+                        right_img_mask_minus = (right_img_mask*2)-1
+                        right_image = infill_using_normals(right_image, bg_mask, right_img_mask_minus)
+                    else:
+                        right_image[valid_points[mask, 1], valid_points[mask, 0]] = valid_colors[mask]
+                
+                if infill_mask_video is not None:
+                    right_img_mask = (right_img_mask*255).astype(np.uint8)
 
                 right_image = (right_image*255).astype(np.uint8)
 
-                #else:
-                    #right_image = infill_from_deep_side(right_image, right_img_mask, 'right')
 
                 imgs = [left_image, right_image]
                 if touchly_left_depth is not None:
