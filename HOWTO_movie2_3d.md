@@ -17,10 +17,13 @@ Installing:
 git clone https://github.com/calledit/metric_depth_video_toolbox
 cd metric_depth_video_toolbox
 
+# if using headless linux you need to start a virtual x11 server
+apt-get install xvfb
+Xvfb :2 &
+export DISPLAY=:2
+
 apt install ffmpeg
 ./install_mvdtoolbox.sh
-./install_mvdtoolbox.sh -unik3d
-./install_mvdtoolbox.sh -geometrycrafter
 ./install_mvdtoolbox.sh -stereocrafter
 ./create_video_mask.sh -install
 
