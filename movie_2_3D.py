@@ -100,9 +100,13 @@ if __name__ == '__main__':
 
     for scene in scenes:
         print("Handle scene:", scene)
+        infill = True
         depth_engine = 'vda'
         if 'Engine' in scene and scene['Engine'] != '':
             depth_engine = scene['Engine']
+
+        if 'Infill' in scene and scene['Infill'] == 'No':
+            infill = False
 
 
         #generate scene video file
@@ -123,7 +127,7 @@ if __name__ == '__main__':
                 if not os.path.exists(scene_org_xfovs_file):
                     subprocess.run(python+" unik3d_video.py --color_video "+scene_video_file, shell=True)
                     subprocess.run("mv "+scene_xfovs_file+" "+scene_org_xfovs_file, shell=True)
-                
+
                 with open(scene_org_xfovs_file) as json_file_handle:
                     xfovs = json.load(json_file_handle)
                     scene_xfov = np.mean(xfovs)
@@ -133,7 +137,7 @@ if __name__ == '__main__':
             assert is_valid_video(single_frame_depth_video_file), "Could not generate metric reference video file for depthcrafter"
         else:
             scene_xfov = 42.0
-            
+
         if depth_engine == 'depthcrafter':
             if not os.path.exists(scene_depth_video_file):
                 subprocess.run(python+" depthcrafter_video.py --color_video "+scene_video_file+" --depth_video "+single_frame_depth_video_file, shell=True)
@@ -165,7 +169,12 @@ if __name__ == '__main__':
                     xfov_str = "--xfov "+str(scene_xfov)
                 else:
                     xfov_str = "--xfov_file "+scene_xfovs_file
-                parallels.append(subprocess.Popen(python+" stereo_rerender.py --color_video "+scene_video_file+" --convergence_file "+scene_convergence_file+" "+xfov_str+" --depth_video "+scene_depth_video_file+" --infill_mask", shell=True))
+
+                infm = ''
+                if infill:
+                    infm = '--infill_mask'
+
+                parallels.append(subprocess.Popen(python+" stereo_rerender.py --color_video "+scene_video_file+" --convergence_file "+scene_convergence_file+" "+xfov_str+" --depth_video "+scene_depth_video_file+" "+infm, shell=True))
 
             if len(parallels) >= args.parallel:
                 parallels = wait_for_first(parallels)
@@ -175,7 +184,7 @@ if __name__ == '__main__':
 
                 assert is_valid_video(scene_sbs), "Could not generate stereo video file"
 
-                if args.no_infill:
+                if args.no_infill or not infill:
                     video_files_to_concat.append(scene_sbs)
                 else:
 
