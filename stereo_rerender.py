@@ -7,6 +7,7 @@ import sys
 import time
 import json
 import math
+import depth_frames_helper
 
 import open3d as o3d
 import depth_map_tools
@@ -153,58 +154,89 @@ def masked_blur(img, ksize=(6,6), sigma=0):
     
 def infill_using_normals(color_img, hole_mask, normal_map, max_steps=30):
     """
-    Infill black (“hole”) pixels in color_img by ray‑marching
-    along the XY direction from normal_map.
+    Vectorized infill of hole pixels in `color_img` by ray-marching along
+    XY directions from `normal_map`, using NumPy.
+
+    Args:
+        color_img:   H×W×3 uint8 array of RGB colors.
+        hole_mask:   H×W bool array where True indicates a hole (to fill).
+        normal_map:  H×W×3 float array with normals in [0,1] or [-1,1] encoding;
+                     XY components give fill directions.
+        max_steps:   Maximum ray-march steps.
+    Returns:
+        H×W×3 uint8 array with holes filled.
     """
-    # Prepare
-    color = color_img.copy()
-    H, W = color.shape[:2]
-    if max_steps is None:
-        max_steps = max(H, W)
+    H, W = hole_mask.shape
+    # Copy colors for output
+    out = color_img.copy()
 
-    # Decode normals to floats in [-1,1]
-    nm = normal_map
-    green_pixels = np.all(nm == np.array([0.0,1.0,0.0]), axis=-1)
-    dirs = nm[..., :2]   # take X,Y components
-    lengths = np.linalg.norm(dirs, axis=-1, keepdims=True)
-    valid = (lengths[...,0] != 0.)  # where there's a direction to march
+    # 1) Decode and normalize XY directions
+    dirs = normal_map[..., :2].astype(np.float32)
+    norms = np.linalg.norm(dirs, axis=-1)
+    valid = norms > 1e-6  # pixels with a valid normal
+    dirs[valid] /= norms[valid][..., None]
 
-    # Normalize directions
-    dirs[valid] /= lengths[valid]
-    
+    # 2) Identify hole pixels to fill (exclude any green-coded normals if present)
+    green = np.all(normal_map == np.array([0.,1.,0.]), axis=-1)
+    to_fill = hole_mask & valid & ~green
+    ys, xs = np.nonzero(to_fill)
+    if ys.size == 0:
+        return out
 
-    # Find all hole pixels that have a valid normal
-    ys, xs = np.nonzero(hole_mask & valid)
+    # Flatten pixel positions and directions
+    pts = np.stack([xs, ys], axis=1).astype(np.float32)  # N×2
+    vecs = dirs[ys, xs]                                  # N×2
+    N = pts.shape[0]
 
-    for y, x in zip(ys, xs):
-        if green_pixels[y, x]:
-            print("found green pixel, there should not by any such pixels")
+    # Arrays to track active rays and hit coordinates
+    alive = np.ones(N, dtype=bool)
+    hits = -np.ones((N, 2), dtype=int)
+
+    # 3) Ray-march all holes in lockstep
+    for t in range(1, max_steps+1):
+        idx = np.nonzero(alive)[0]
+        if idx.size == 0:
+            break
+
+        # Sample positions for this step
+        sample = pts[idx] + vecs[idx] * t
+        xi = np.rint(sample[:,0]).astype(int)
+        yi = np.rint(sample[:,1]).astype(int)
+
+        # In-bounds check
+        inb = (xi >= 0) & (xi < W) & (yi >= 0) & (yi < H)
+        idx_in = idx[inb]
+        if idx_in.size == 0:
+            alive[idx] = False
             continue
-        dx, dy = dirs[y, x]
-        # march along the ray
-        for t in range(1, max_steps):
-            xi = int(round(x + dx * t))
-            yi = int(round(y + dy * t))
-            if not (0 <= xi < W and 0 <= yi < H):
-                break
-            if not hole_mask[yi, xi]:
-                #check two pixels out if posible (we try to pick a pixel a bit ahead as the closest pixels tend to be contamined with forground stuff)
-                xi2 = int(round(x + dx * (t+2)))
-                yi2 = int(round(y + dy * (t+2)))
-                if (0 <= xi2 < W and 0 <= yi2 < H) and not hole_mask[yi2, xi2]:
-                    color[y, x] = color_img[yi2, xi2]
-                else:
-                    #check one pixels out if two not posible
-                    xi1 = int(round(x + dx * (t+1)))
-                    yi1 = int(round(y + dy * (t+1)))
-                    if (0 <= xi1 < W and 0 <= yi1 < H) and not hole_mask[yi1, xi1]:
-                        color[y, x] = color_img[yi1, xi1]
-                    else:
-                        #use 0 pixel if the other ones where not avalible
-                        color[y, x] = color_img[yi, xi]
-                break
 
-    return color
+        xi_in = xi[inb]; yi_in = yi[inb]
+        # Check for exiting the hole
+        not_hole = ~hole_mask[yi_in, xi_in]
+        hit_ids = idx_in[not_hole]
+        if hit_ids.size > 0:
+            # For each hit, choose best fill source: t+2, t+1, else t
+            for rid in hit_ids:
+                # try two steps ahead
+                for dt in (2, 1, 0):
+                    off = t + dt
+                    p2 = pts[rid] + vecs[rid] * off
+                    x2 = int(round(p2[0])); y2 = int(round(p2[1]))
+                    if 0 <= x2 < W and 0 <= y2 < H and not hole_mask[y2, x2]:
+                        hits[rid] = (x2, y2)
+                        break
+            alive[hit_ids] = False
+
+        # Rays that went out of bounds or still in hole remain or die
+        alive[idx[~inb]] = False
+
+    # 4) Scatter filled colors into output
+    filled = hits[:,0] >= 0
+    xs0 = xs[filled]; ys0 = ys[filled]
+    xs1 = hits[filled, 0]; ys1 = hits[filled, 1]
+    out[ys0, xs0] = color_img[ys1, xs1]
+
+    return out
 
 if __name__ == '__main__':
 
@@ -368,11 +400,7 @@ if __name__ == '__main__':
             color_frame = rgb
 
         # Decode video depth
-        depth = np.zeros((frame_height, frame_width), dtype=np.uint32)
-        depth_unit = depth.view(np.uint8).reshape((frame_height, frame_width, 4))
-        depth_unit[..., 3] = ((rgb[..., 0].astype(np.uint32) + rgb[..., 1]).astype(np.uint32) / 2)
-        depth_unit[..., 2] = rgb[..., 2]
-        depth = depth.astype(np.float32)/((255**4)/MODEL_maxOUTPUT_depth)
+        depth = depth_frames_helper.decode_rgb_depth_frame(rgb, MODEL_maxOUTPUT_depth, True)
 
         if xfovs is not None:
             xf = xfovs[frame_n-1]

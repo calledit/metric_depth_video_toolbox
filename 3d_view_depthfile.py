@@ -6,6 +6,7 @@ import json
 import sys
 import time
 import copy
+import depth_frames_helper
 
 import open3d as o3d
 import depth_map_tools
@@ -160,11 +161,7 @@ if __name__ == '__main__':
             continue
 
         # Decode video depth
-        depth = np.zeros((frame_height, frame_width), dtype=np.uint32)
-        depth_unit = depth.view(np.uint8).reshape((frame_height, frame_width, 4))
-        depth_unit[..., 3] = ((rgb[..., 0].astype(np.uint32) + rgb[..., 1]).astype(np.uint32) / 2)
-        depth_unit[..., 2] = rgb[..., 2]
-        depth = depth.astype(np.float32)/((255**4)/MODEL_maxOUTPUT_depth)
+        depth = depth_frames_helper.decode_rgb_depth_frame(rgb, MODEL_maxOUTPUT_depth, True)
         
         transform_to_zero = np.eye(4)
         if transformations is not None:

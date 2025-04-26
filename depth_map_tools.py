@@ -520,35 +520,6 @@ def create_mesh_from_point_cloud(points, height, width,
     if return_normals_of_removed:
         return mesh, used_indices, []
     return mesh, used_indices
-    
-def encode_data_as_rgb(data, frame_width, frame_height, bit16 = False):
-    # View the uint32 as raw bytes: shape (H, W, 4)
-    save_bytes = data.view(np.uint8).reshape(frame_height, frame_width, 4)
-    
-    if bit16:
-        R = (save_bytes[:, :, 3])# if 16 bit Most significant bits in R and G channel (duplicated in 16bit for visulization)
-        G = (save_bytes[:, :, 3])
-        B = (save_bytes[:, :, 2]) # Least significant bit in blue channel
-    else:#24 bif format is absolute or mabye it depends on input format like int32 is one thing sanf float32 another
-        R = (save_bytes[:, :, 2])
-        G = (save_bytes[:, :, 1])
-        B = (save_bytes[:, :, 0])
-    
-    return np.dstack((R, G, B))
-    
-def decode_rgb_as_data(rgb, frame_width, frame_height, bit16 = False):
-    # View the uint32 as raw bytes: shape (H, W, 4)
-    data = np.zeros((frame_height, frame_width), dtype=np.uint32)
-    depth_unit = data.view(np.uint8).reshape((frame_height, frame_width, 4))
-    if bit16:
-        depth_unit[..., 3] = rgb[..., 0]
-        depth_unit[..., 2] = rgb[..., 2]
-    else:
-        depth_unit[..., 0] = rgb[..., 2]
-        depth_unit[..., 1] = rgb[..., 0]
-        depth_unit[..., 2] = rgb[..., 1]
-    
-    return data
 
 
 vis = None

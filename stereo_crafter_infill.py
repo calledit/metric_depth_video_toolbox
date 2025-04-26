@@ -50,49 +50,69 @@ def generate_infilled_frames(input_frames, input_masks):
 
 def mark_lower_side(normals_img, max_steps=30):
     """
-    normals_img: H×W×3 array, dtype uint8.
-                 Black ([0,0,0]) = no normal; 
-                 non‑black pixels encode normals in (X,Y,Z).
-    max_steps:   how far along the ray to march before giving up.
-    
-    Returns: H×W×3 uint8 image, where blue pixels mark the “lower side”
-             for each normal.
+    Vectorized version of mark_lower_side using NumPy.
+    normals_img: H×W×3 uint8
+    max_steps: how far to march before giving up
     """
     H, W = normals_img.shape[:2]
-    # keep a copy for tests
-    orig = normals_img.copy()
-    
-    # Prepare output (all black initially)
-    output = np.zeros((H, W, 3), dtype=np.uint8)
-    
-    # 1) Build a mask of valid normals (non‑black)
-    valid_mask = ~np.all(orig == 0, axis=-1)
-    
-    # 2) Extract and normalize (dx,dy)
-    dirs = ((orig[..., :2].astype(np.float32)/255.0)*2)-1
-    lengths = np.linalg.norm(dirs, axis=-1, keepdims=True)
-    valid_dirs = valid_mask & (lengths[...,0] > 1e-6)
-    dirs[valid_dirs] /= lengths[valid_dirs]
-    
-    # 3) For each valid normal, march until hitting black in the original,
-    #    then step back one and mark blue in output.
-    ys, xs = np.nonzero(valid_dirs)
-    for y, x in zip(ys, xs):
-        dx, dy = dirs[y, x]
-        for t in range(1, max_steps):
-            xi = int(round(x + dx*t))
-            yi = int(round(y + dy*t))
-            # stop if out of bounds
-            if not (0 < xi < W and 0 < yi < H):
-                break
-            # if we’ve reached a background pixel (black in orig), mark the previous
-            if np.all(orig[yi, xi] == 0):
-                xb = int(round(x + dx*(t-1)))
-                yb = int(round(y + dy*(t-1)))
-                if 0 <= xb < W and 0 <= yb < H:
-                    output[yb, xb] = np.array([0, 0, 255], dtype=np.uint8)
-                break
-    
+    orig = normals_img  # alias
+
+    # 1) valid normals mask
+    valid = ~np.all(orig == 0, axis=-1)
+
+    # 2) extract & normalize dx, dy only for valid pixels
+    ys, xs = np.nonzero(valid)
+    pts = np.stack([xs, ys], axis=1).astype(np.float32)           # N×2
+    dirs = ((orig[ys, xs, :2].astype(np.float32) / 255)*2 - 1)    # N×2 raw
+    norms = np.linalg.norm(dirs, axis=1, keepdims=True)
+    good = (norms[:,0] > 1e-6)
+    pts   = pts[good]
+    dirs  = dirs[good] / norms[good]   # N_good×2 unit vectors
+
+    N = pts.shape[0]
+    alive = np.ones(N, dtype=bool)
+    res_pts = -np.ones((N, 2), dtype=int)  # to store hit positions
+
+    # 3) march all rays in lockstep
+    for t in range(1, max_steps):
+        # compute new sample positions for all *alive* rays
+        idx = np.nonzero(alive)[0]
+        if idx.size == 0:
+            break
+
+        p = pts[idx] + dirs[idx] * t        # float positions N_alive×2
+        xi = np.rint(p[:,0]).astype(int)
+        yi = np.rint(p[:,1]).astype(int)
+
+        # which are still in-bounds?
+        inb = (xi >= 0) & (xi < W) & (yi >= 0) & (yi < H)
+
+        # for those in-bounds, check if we've hit a black pixel
+        xi_in = xi[inb]; yi_in = yi[inb]
+        orig_vals = orig[yi_in, xi_in]       # M×3
+        bg_hit = np.all(orig_vals == 0, axis=1)
+
+        # mark any that hit background this step
+        hit_idx = idx[inb][bg_hit]           # indices in the big array
+        if hit_idx.size > 0:
+            # step back one to get the "lower side" pixel
+            p0 = pts[hit_idx] + dirs[hit_idx] * (t-1)
+            xb = np.rint(p0[:,0]).astype(int)
+            yb = np.rint(p0[:,1]).astype(int)
+            res_pts[hit_idx, 0] = xb
+            res_pts[hit_idx, 1] = yb
+
+        # any ray that either went out-of-bounds or hit bg should stop
+        idx_oob = idx[~inb]
+        alive[idx_oob] = False
+        alive[hit_idx] = False
+
+    # 4) scatter the blue marks into the output image
+    output = np.zeros_like(orig)
+    xb = res_pts[:,0]; yb = res_pts[:,1]
+    valid_hits = (xb >= 0) & (yb >= 0)
+    output[yb[valid_hits], xb[valid_hits]] = (0, 0, 255)
+
     return output
 
 def deal_with_frame_chunk(keep_first_three, chunk, out, keep_last_three):

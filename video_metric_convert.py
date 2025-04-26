@@ -4,55 +4,14 @@ import os
 import torch
 import cv2
 
+import depth_frames_helper
+
 import sys
 sys.path.append("Video-Depth-Anything"+os.sep+"metric_depth")
 
 from video_depth_anything.video_depth import VideoDepthAnything
 from utils.dc_utils import read_video_frames, save_video
 
-def save_24bit(frames, output_video_path, fps, max_depth_arg, rescale_width, rescale_height):
-    """
-    Saves depth maps encoded in the R, G and B channels of a video (to increse accuracy as when compared to gray scale)
-    """
-
-
-
-    MODEL_maxOUTPUT_depth = max_depth_arg ### pick a value slitght above max metric depth to save the depth in th video file nicly
-    # if you pick a high value you will lose resolution
-
-    if isinstance(frames, np.ndarray):
-        height = frames.shape[1]
-        width = frames.shape[2]
-        max_depth = frames.max()
-        print("max metric depth: ", max_depth)
-        # incase you did not pick a absolute value we max out (this mean each video will have depth relative to max_depth)
-        # (if you want to use the video as a depth souce a absolute value is prefrable)
-        if MODEL_maxOUTPUT_depth < max_depth:
-            print("warning: output depth is deeper than max_depth. The depth will be clipped")
-        nr_frames = frames.shape[0]
-    else:
-        nr_frames = len(frames)
-        height = frames[0].shape[0]
-        width = frames[0].shape[1]
-
-    out = cv2.VideoWriter(output_video_path, cv2.VideoWriter_fourcc(*"FFV1"), fps, (rescale_width, rescale_height))
-
-    for i in range(nr_frames):
-        dpt = numpy.clip(frames[i], a_max=MODEL_maxOUTPUT_depth)
-        depth = cv2.resize(dpt, (rescale_width, rescale_height), interpolation=cv2.INTER_LINEAR)
-        scaled_depth = (((255**4)/MODEL_maxOUTPUT_depth)*depth.astype(np.float64)).astype(np.uint32)
-
-        # View the depth as raw bytes: shape (H, W, 4)
-        depth_bytes = scaled_depth.view(np.uint8).reshape(rescale_height, rescale_width, 4)
-
-
-        R = (depth_bytes[:, :, 3]) # Most significant bits in R and G channel (duplicated to reduce compression artifacts)
-        G = (depth_bytes[:, :, 3])
-        B = (depth_bytes[:, :, 2]) # Least significant bit in blue channel
-        bgr24bit = np.dstack((B, G, R))
-        out.write(bgr24bit)
-
-    out.release()
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Video Depth Anything metric')
@@ -84,10 +43,5 @@ if __name__ == '__main__':
     frames, target_fps = read_video_frames(args.color_video, args.max_frames, args.target_fps, siz)
 
     depths, fps = video_depth_anything.infer_video_depth(frames, target_fps, input_size=args.input_size, device=DEVICE, fp32=args.fp32)
-
-    nr_frames = len(frames)
-
-    max_depth = depths.max()
-
-    output_video_path = args.color_video+'_depth.mkv'
-    save_24bit(depths, output_video_path, fps, args.max_depth, width, height)
+    
+    depth_frames_helper.save_depth_video(depths, args.color_video+'_depth.mkv', fps, args.max_depth, width, height)
