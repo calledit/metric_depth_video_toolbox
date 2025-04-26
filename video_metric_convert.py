@@ -38,7 +38,8 @@ def save_24bit(frames, output_video_path, fps, max_depth_arg, rescale_width, res
     out = cv2.VideoWriter(output_video_path, cv2.VideoWriter_fourcc(*"FFV1"), fps, (rescale_width, rescale_height))
 
     for i in range(nr_frames):
-        depth = cv2.resize(frames[i], (rescale_width, rescale_height), interpolation=cv2.INTER_LINEAR)
+        dpt = numpy.clip(frames[i], a_max=MODEL_maxOUTPUT_depth)
+        depth = cv2.resize(dpt, (rescale_width, rescale_height), interpolation=cv2.INTER_LINEAR)
         scaled_depth = (((255**4)/MODEL_maxOUTPUT_depth)*depth.astype(np.float64)).astype(np.uint32)
 
         # View the depth as raw bytes: shape (H, W, 4)

@@ -505,6 +505,8 @@ def create_mesh_from_point_cloud(points, height, width,
                 # Get indices of vertices in invalid triangles.
                 invalid_triangles = ref_to_all_tri[invalid_mask]
                 invalid_vertex_indices = np.unique(invalid_triangles)
+                if return_normals_of_removed:
+                    return mesh, invalid_vertex_indices, []
                 return mesh, invalid_vertex_indices
     else:
         # If we already have an input mesh and we are not removing edges, simply update vertices.
@@ -515,7 +517,8 @@ def create_mesh_from_point_cloud(points, height, width,
             ref_to_all_col = np.asarray(mesh.vertex_colors)
             ref_to_all_col[:] = colors[:]
         used_indices = np.arange(vertices.shape[0])
-    
+    if return_normals_of_removed:
+        return mesh, used_indices, []
     return mesh, used_indices
     
 def encode_data_as_rgb(data, frame_width, frame_height, bit16 = False):
