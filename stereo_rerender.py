@@ -502,7 +502,12 @@ if __name__ == '__main__':
                 #find all black pixels
                 mask_img1d = mask_img.reshape(-1)
                 bg_mask = np.where(mask_img1d < 128)[0]
-
+                
+                used_indices_mask = np.ones(len(mesh.vertices), dtype=bool)
+                used_indices_mask[unused_indices] = False
+                
+                used_indices = np.where(used_indices_mask)[0]
+                
                 # intersect the mask pixels with the pizels that are not edges
                 points_2_keep = np.intersect1d(used_indices, bg_mask)
 
