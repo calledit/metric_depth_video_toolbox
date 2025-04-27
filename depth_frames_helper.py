@@ -4,7 +4,8 @@ import cv2
 def encode_depth_as_uint32(depth, max_depth):
     
     depth = np.clip(depth, a_max=max_depth, a_min=0.0)
-    encoded_value = (((255**4)/max_depth)*depth.astype(np.float64)).astype(np.uint32)
+    multi = (255**4)/float(max_depth)
+    encoded_value = (multi*depth.astype(np.float64)).astype(np.uint32)
     
     return encoded_value
     
@@ -17,7 +18,8 @@ def decode_uint32_as_depth(encoded_value, max_depth):
     """
     # cast up to float for the division
     e = encoded_value.astype(np.float32)
-    depth = e * (max_depth / (255**4))
+    multi = float(max_depth) / (255**4)
+    depth = e * multi
     return depth
 
 #These values have been picked as they give reaonable resolution at max_depth 100
