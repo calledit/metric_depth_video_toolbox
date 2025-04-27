@@ -483,7 +483,7 @@ if __name__ == '__main__':
 
 
             if args.render_as_pointcloud:
-                draw_mesh = depth_map_tools.convert_mesh_to_pcd(mesh, used_indices, draw_mesh)
+                draw_mesh = depth_map_tools.convert_mesh_to_pcd(mesh, unused_indices, draw_mesh)
                 #TODO:move points that is vertices back to their real position
             else:
                 draw_mesh = mesh
