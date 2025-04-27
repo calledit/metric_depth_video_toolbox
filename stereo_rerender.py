@@ -374,6 +374,27 @@ if __name__ == '__main__':
     frame_rate   = mask_video.get(cv2.CAP_PROP_FPS)
     MODEL_maxOUTPUT_depth = args.max_depth
 
+    # check color video / depth video / mask video have the same size and same number of frames
+    if color_video is not None:
+        color_width  = int(color_video.get(cv2.CAP_PROP_FRAME_WIDTH))
+        color_height = int(color_video.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        color_rate   = color_video.get(cv2.CAP_PROP_FPS)
+
+        if frame_width != color_width or frame_height != color_height:
+            raise ValueError("Color video and depth video must have the same dimensions.")
+        if frame_rate != color_rate:
+            raise ValueError("Color video and depth video must have the same frame rate.")
+    
+    if mask_video is not None:
+        mask_width  = int(mask_video.get(cv2.CAP_PROP_FRAME_WIDTH))
+        mask_height = int(mask_video.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        mask_rate   = mask_video.get(cv2.CAP_PROP_FPS)
+
+        if frame_width != mask_width or frame_height != mask_height:
+            raise ValueError("Mask video and depth video must have the same dimensions.")
+        if frame_rate != mask_rate:
+            raise ValueError("Mask video and depth video must have the same frame rate.")
+
     if args.touchly0:
         args.vr180 = True
 
@@ -476,6 +497,11 @@ if __name__ == '__main__':
         color_frame = None
         if color_video is not None:
             ret, color_frame = color_video.read()
+            if not ret:
+                print("Warning: cannot read color video. Skipping it until the end.")
+                color_video.release()
+                color_video = None
+                continue
             color_frame = cv2.cvtColor(color_frame, cv2.COLOR_BGR2RGB)
 
             assert color_frame.shape == rgb.shape, "color image and depth image need to have same width and height" #potential BUG here with mono depth videos
@@ -575,8 +601,13 @@ if __name__ == '__main__':
                     edge_normal_pcd.transform(transform_to_zero)
 
             if mask_video is not None:
-
                 ret, mask_frame = mask_video.read()
+                # check mask_frame not empty
+                if not ret:
+                    print("Warning: cannot read mask_video. Skipping it until the end.")
+                    mask_video.release()
+                    mask_video = None
+                    continue
                 mask_img = np.array(cv2.cvtColor(mask_frame, cv2.COLOR_BGR2GRAY))
 
                 #find all black pixels
