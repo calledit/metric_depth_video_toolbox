@@ -197,8 +197,6 @@ if [[ " $@ " =~ " -videometricany " ]]; then
 	cd ..
 	cd ..
 	
-	cp -a other/metric_dpt_func.py Video-Depth-Anything/Depth-Anything-V2/metric_depth/.
-	
 	exit
 fi
 
@@ -222,3 +220,9 @@ mkdir checkpoints
 cd checkpoints
 wget https://huggingface.co/depth-anything/Depth-Anything-V2-Metric-Hypersim-Large/resolve/main/depth_anything_v2_metric_hypersim_vitl.pth
 cd ..
+
+cd ..
+cd ..
+cd ..
+
+cp -a other/metric_dpt_func.py Video-Depth-Anything/Depth-Anything-V2/metric_depth/.
