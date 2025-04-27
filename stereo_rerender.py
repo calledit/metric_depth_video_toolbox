@@ -369,26 +369,26 @@ if __name__ == '__main__':
             for i, transformation in enumerate(transformations):
                 transformations[i] = transformation @ ref_frame_inv_trans
 
-    frame_width  = int(mask_video.get(cv2.CAP_PROP_FRAME_WIDTH))
-    frame_height = int(mask_video.get(cv2.CAP_PROP_FRAME_HEIGHT))
-    frame_rate   = mask_video.get(cv2.CAP_PROP_FPS)
+    frame_width  = int(depth_video.get(cv2.CAP_PROP_FRAME_WIDTH))
+    frame_height = int(depth_video.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    frame_rate   = round(depth_video.get(cv2.CAP_PROP_FPS), 2)
     MODEL_maxOUTPUT_depth = args.max_depth
 
     # check color video / depth video / mask video have the same size and same number of frames
     if color_video is not None:
         color_width  = int(color_video.get(cv2.CAP_PROP_FRAME_WIDTH))
         color_height = int(color_video.get(cv2.CAP_PROP_FRAME_HEIGHT))
-        color_rate   = color_video.get(cv2.CAP_PROP_FPS)
+        color_rate   = round(color_video.get(cv2.CAP_PROP_FPS), 2)
 
         if frame_width != color_width or frame_height != color_height:
-            raise ValueError("Color video and depth video must have the same dimensions.")
+            raise ValueError(f"Depth video and Color video must have the same dimensions (Depth: {frame_width}x{frame_height} vs Color {color_width}x{color_height}).")
         if frame_rate != color_rate:
-            raise ValueError("Color video and depth video must have the same frame rate.")
+            raise ValueError(f"Color video and depth video must have the same frame rate (Depth={frame_rate} vs Color={color_rate}).")
     
     if mask_video is not None:
         mask_width  = int(mask_video.get(cv2.CAP_PROP_FRAME_WIDTH))
         mask_height = int(mask_video.get(cv2.CAP_PROP_FRAME_HEIGHT))
-        mask_rate   = mask_video.get(cv2.CAP_PROP_FPS)
+        mask_rate   = round(mask_video.get(cv2.CAP_PROP_FPS), 2)
 
         if frame_width != mask_width or frame_height != mask_height:
             raise ValueError("Mask video and depth video must have the same dimensions.")
@@ -486,13 +486,13 @@ if __name__ == '__main__':
             dmin, dmax = float(depth.min()), float(depth.max())
             # threshold: less than 1% of max_depth
             if (dmax - dmin) < (args.max_depth * 0.01):
-                print(f"  WARNING: Frame {frame_idx}: depth range too small ({dmin:.2f} - {dmax:.2f}), parallax may be negligible.")
+                print(f"  WARNING: Frame {frame_n}: depth range too small ({dmin:.2f} - {dmax:.2f}), parallax may be negligible.")
             else:
                 print(f" DEBUG: Frame {frame_n}: depth range {dmin:.2f} - {dmax:.2f}")
             # Normalize full range to 8-bit for visualization
             depth_norm = raw_depth.astype(np.float32) / (2**24 - 1)
             depth_vis = (depth_norm * 255).astype(np.uint8)
-            cv2.imwrite(os.path.join(debug_dir, f"depthframe_{frame_n:06d}_depth_preview.png"), depth_vis)
+            cv2.imwrite(os.path.join(debug_dir, f"depthframe_{frame_n:06d}.png"), depth_vis)
 
         color_frame = None
         if color_video is not None:
@@ -520,6 +520,7 @@ if __name__ == '__main__':
             yf = args.yfov
         cam_matrix = depth_map_tools.compute_camera_matrix(xf, yf, frame_width, frame_height)
         render_cam_matrix = cam_matrix
+
 
         if args.vr180:
             out_width , out_height = 1920, 1920
@@ -700,10 +701,6 @@ if __name__ == '__main__':
                 
                 
                 left_image, left_depth = depth_map_tools.render(to_draw, render_cam_matrix, depth = -2, bg_color = bg_color)
-
-                if args.debug:
-                    diff = (np.abs(left_image.astype(int) - color_frame.astype(int))).astype(np.uint8)
-                    cv2.imwrite(os.path.join(debug_dir, f"frame_{frame_n:06d}_left_diff.png"), cv2.cvtColor(diff, cv2.COLOR_RGB2BGR))
                 
                 bg_mask = np.all(left_image == bg_color, axis=-1)
 
@@ -807,7 +804,7 @@ if __name__ == '__main__':
                     left_dbg = cv2.cvtColor((left_image * 255).astype(np.uint8), cv2.COLOR_RGB2BGR)
                     right_dbg = cv2.cvtColor((right_image * 255).astype(np.uint8), cv2.COLOR_RGB2BGR)
                     stereo_diff = cv2.absdiff(left_dbg, right_dbg)
-                    cv2.imwrite(os.path.join(debug_dir, f"frame_{frame_n:06d}_stereo_diff.png"), cv2.cvtColor(stereo_diff, cv2.COLOR_RGB2BGR))
+                    cv2.imwrite(os.path.join(debug_dir, f"stereo_{frame_n:06d}.png"), cv2.cvtColor(stereo_diff, cv2.COLOR_RGB2BGR))
 
                 # ------------- Infill and Masking -------------
                 # Apply infill algorithm to fill holes (depth gaps) in left and right
@@ -884,7 +881,6 @@ if __name__ == '__main__':
 
                     out_mask_image = cv2.hconcat(imgs)
                     infill_mask_writer.write(cv2.cvtColor(out_mask_image, cv2.COLOR_RGB2BGR))
-
 
         out_writer.write(cv2.cvtColor(out_image, cv2.COLOR_RGB2BGR))
 
