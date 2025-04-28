@@ -806,13 +806,13 @@ if __name__ == '__main__':
     # Release resources
     raw_video.release()
     out.release()
-    if mask_video:
+    if mask_video is not None:
         mask_video.release()
     
-    if color_video:
+    if color_video is not None:
         color_video.release()
 
-    if infill_mask_video:
+    if infill_mask_video is not None:
         infill_mask_video.release()
 
     print(f"Processing complete. Output saved to: {output_file}")
