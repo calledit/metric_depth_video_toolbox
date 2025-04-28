@@ -275,41 +275,44 @@ if __name__ == '__main__':
 
     args = parser.parse_args()
 
+    # ------------------ Input Validation ------------------
     if args.xfov is None and args.yfov is None and args.xfov_file is None:
-        print("Either --xfov_file, --xfov or --yfov is required.")
-        exit(0)
-
-
+        raise ValueError("Error: Either --xfov_file, --xfov or --yfov must be provided.")
 
     MODEL_maxOUTPUT_depth = args.max_depth
 
-    # Verify input file exists
     if not os.path.isfile(args.depth_video):
-        raise Exception("input video does not exist")
+        raise FileNotFoundError(f"Depth video not found: {args.depth_video}")
+    depth_video = cv2.VideoCapture(args.depth_video)
 
     color_video = None
-    if args.color_video is not None:
+    if args.color_video:
         if not os.path.isfile(args.color_video):
-            raise Exception("input color_video does not exist")
+            raise FileNotFoundError(f"Color video not found: {args.color_video}")
         color_video = cv2.VideoCapture(args.color_video)
 
     mask_video = None
-    if args.mask_video is not None:
+    if args.mask_video:
         if not os.path.isfile(args.mask_video):
-            raise Exception("input mask_video does not exist")
+            raise FileNotFoundError(f"Mask video not found: {args.mask_video}")
         mask_video = cv2.VideoCapture(args.mask_video)
 
     convergence_depths = None
-    if args.convergence_file is not None:
+    if args.convergence_file:
         if not os.path.isfile(args.convergence_file):
-            raise Exception("input convergence_file does not exist")
-        with open(args.convergence_file) as json_file_handle:
-            convergence_depths = json.load(json_file_handle)
+            raise FileNotFoundError(f"Convergence file not found: {args.convergence_file}")
+        with open(args.convergence_file) as jf:
+            convergence_depths = json.load(jf)
 
     xfovs = None
-    if args.xfov_file is not None:
-        with open(args.xfov_file) as json_file_handle:
-            xfovs = json.load(json_file_handle)
+    if args.xfov_file:
+        if not os.path.isfile(args.xfov_file):
+            raise FileNotFoundError(f"XFOV file not found: {args.xfov_file}")
+        with open(args.xfov_file) as jf:
+            xfovs = json.load(jf)
+            # assert xfovs is an array
+            if not isinstance(xfovs, list) or not all(isinstance(x, (int, float)) for x in xfovs):
+                raise ValueError("XFOV file must contain a list of numbers.")
 
 
     transformations = None
@@ -330,6 +333,31 @@ if __name__ == '__main__':
     frame_rate = raw_video.get(cv2.CAP_PROP_FPS)
 
     out_width , out_height = frame_width, frame_height
+
+    # check color video / depth video / mask video have the same size and same number of frames
+    if color_video is not None:
+        color_width  = int(color_video.get(cv2.CAP_PROP_FRAME_WIDTH))
+        color_height = int(color_video.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        color_rate   = round(color_video.get(cv2.CAP_PROP_FPS), 2)
+
+        if frame_width != color_width or frame_height != color_height:
+            raise ValueError(f"Depth video and Color video must have the same dimensions (Depth: {frame_width}x{frame_height} vs Color {color_width}x{color_height}).")
+        if round(frame_rate, 2) != color_rate:
+            raise ValueError(f"Color video and depth video must have the same frame rate (Depth={frame_rate} vs Color={color_rate}).")
+    
+    if mask_video is not None:
+        mask_width  = int(mask_video.get(cv2.CAP_PROP_FRAME_WIDTH))
+        mask_height = int(mask_video.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        mask_rate   = round(mask_video.get(cv2.CAP_PROP_FPS), 2)
+
+        if frame_width != mask_width or frame_height != mask_height:
+            raise ValueError("Mask video and depth video must have the same dimensions (Depth: {frame_width}x{frame_height} vs Mask {mask_width}x{mask_height}).")
+        if round(frame_rate, 2) != mask_rate:
+            raise ValueError("Mask video and depth video must have the same frame rate (Depth={round(frame_rate, 2)} vs Mask={mask_rate}).")
+
+    if xfovs is not None:
+        if len(xfovs) != int(raw_video.get(cv2.CAP_PROP_FRAME_COUNT)):
+            raise ValueError(f"XFOV file must have the same number of frames as the input video ({int(raw_video.get(cv2.CAP_PROP_FRAME_COUNT))} vs xfov={len(xfov)}).")
 
     if args.touchly0:
         args.vr180 = True
@@ -393,6 +421,13 @@ if __name__ == '__main__':
         color_frame = None
         if color_video is not None:
             ret, color_frame = color_video.read()
+
+            if not ret:
+                print("Warning: cannot read color video frame. Skipping it until the end.")
+                color_video.release()
+                color_video = None
+                continue
+
             color_frame = cv2.cvtColor(color_frame, cv2.COLOR_BGR2RGB)
 
             assert color_frame.shape == rgb.shape, "color image and depth image need to have same width and height" #potential BUG here with mono depth videos
@@ -497,6 +532,11 @@ if __name__ == '__main__':
             if mask_video is not None:
 
                 ret, mask_frame = mask_video.read()
+                if not ret:
+                    print("Warning: cannot read mask video frame. Skipping it until the end.")
+                    mask_video.release()
+                    mask_video = None
+                    continue
                 mask_img = np.array(cv2.cvtColor(mask_frame, cv2.COLOR_BGR2GRAY))
 
                 #find all black pixels
