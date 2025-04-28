@@ -301,8 +301,8 @@ if __name__ == '__main__':
     if args.convergence_file:
         if not os.path.isfile(args.convergence_file):
             raise FileNotFoundError(f"Convergence file not found: {args.convergence_file}")
-        with open(args.convergence_file) as jf:
-            convergence_depths = json.load(jf)
+        with open(args.convergence_file) as json_file_handle:
+            convergence_depths = json.load(json_file_handle)
 
     xfovs = None
     if args.xfov_file:
