@@ -380,10 +380,31 @@ if __name__ == '__main__':
     draw_mesh = None
     frame_n = 0
     last_mesh = None
-    while raw_video.isOpened():
 
-        print(f"Frame: {frame_n} {frame_n/frame_rate}s")
+    start_time = time.time()
+    prev_frame_end  = start_time
+    # Determine how many frames we’ll process
+    total_frames = int(raw_video.get(cv2.CAP_PROP_FRAME_COUNT)) if args.max_frames < 0 else args.max_frames
+
+
+    while raw_video.isOpened():
         frame_n += 1
+
+        ############# TIMING PART #############
+        # Mark the start of *this* frame
+        frame_start = time.time()
+        if frame_n == 1:
+            print(f"[     %] Frame #{frame_n:4d}/{total_frames}")
+        else:
+            pct = (frame_n / total_frames) * 100 if total_frames > 0 else 0
+            avg_per_frame = (frame_start - start_time) / frame_n if frame_n > 0 else 0
+            rem_seconds   = avg_per_frame * (total_frames - frame_n)
+            print(f"[{pct:5.1f}%] Frame #{frame_n:4d}/{total_frames}, "
+                f"Remaining: {(int(rem_seconds) // 60)}min{(int(rem_seconds) % 60):02d}s | "
+                f"Last frame rendered in {(frame_start - prev_frame_end):6.3f}s", end='\r')
+            prev_frame_end = frame_start
+        ############# TIMING PART #############
+
         ret, raw_frame = raw_video.read()
         if not ret:
             break
