@@ -272,7 +272,24 @@ if __name__ == '__main__':
     parser.add_argument('--save_background', action='store_true', help='Save the compound background as a file. To be ussed as infill.', required=False)
     parser.add_argument('--load_background', help='Load the compound background as a file. To be used as infill.', required=False)
 
-
+    parser.add_argument('--fastmode', action='store_true', help='Fast mode. Keep image on right eye, render only left eye. It is less accurate but 2x faster', required=False)
+    # ==========================================================================
+    # FAST MODE: IMAGE SHEAR (LESS ACCURATE STEREO PROJECTION)
+    # --------------------------------------------------------------------------
+    # In this mode, we skip the full 3D render for the right eye:
+    #   - LEFT EYE: computed at twice the pupillary distance.
+    #   - RIGHT EYE: use the original color frame directly (no mesh reprojection)
+    # Advantages:
+    #   * Cuts rendering time roughly in half (only one 3D pass instead of two)
+    #   * Simple to implement
+    # Drawbacks:
+    #   * No true perspective shift on object borders (objects near the edge
+    #     will not warp consistently with camera baseline)
+    #   * Convergence adjustment (toe-in) is not applied, so disparity is
+    #     a pure horizontal translation rather than full stereo projection
+    #   * Can create visual artifacts at the edges (blank regions or wrap-around)
+    #   * Less accurate depth cues, especially for large disparity values
+    # ==========================================================================
     args = parser.parse_args()
 
     if args.xfov is None and args.yfov is None and args.xfov_file is None:
@@ -373,9 +390,12 @@ if __name__ == '__main__':
             bg_points = loaded_bg[0]
             bg_point_colors = loaded_bg[1]
 
-
     left_shift = -(args.pupillary_distance/1000)/2
     right_shift = +(args.pupillary_distance/1000)/2
+
+    if args.fastmode:
+        left_shift = -(args.pupillary_distance/1000)
+        right_shift = 0
 
     draw_mesh = None
     frame_n = 0
@@ -684,6 +704,17 @@ if __name__ == '__main__':
                     left_depth8bit[left_depth8bit == 0] = 255 # Any pixel at zero depth needs to move back is is non rendered depth buffer(ie things on the side of the mesh)
                     left_depth8bit = 255 - left_depth8bit #Touchly uses reverse depth
                     touchly_left_depth = np.repeat(left_depth8bit[..., np.newaxis], 3, axis=-1)
+
+
+                if args.fastmode:
+                    right_image = color_frame.copy()
+                    imgs = [left_image, right_image]
+                    out_image = cv2.hconcat(imgs)
+                    out.write(cv2.cvtColor(out_image, cv2.COLOR_RGB2BGR))
+
+                    if args.max_frames < frame_n and args.max_frames != -1:
+                        break
+                    continue
 
                 #Move mesh back to center and move mesh for right eye render
                 draw_mesh.translate([left_shift, 0.0, 0.0])
