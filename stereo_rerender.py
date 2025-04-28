@@ -3,7 +3,6 @@ import cv2
 import numpy as np
 import os
 import copy
-import sys
 import time
 import json
 import math
@@ -12,7 +11,6 @@ import depth_frames_helper
 import open3d as o3d
 import depth_map_tools
 from contextlib import contextmanager
-import time
 
 @contextmanager
 def timer(name = 'not named'):
@@ -587,9 +585,13 @@ if __name__ == '__main__':
                 convergence_distance = None
                 if convergence_depths is not None:
                     convergence_distance = float(convergence_depths[frame_n-1]) #np.mean(depth)#Testing set convergence to scene frame average depth
-                    convergence_angle_rad = convergence_angle(convergence_distance, args.pupillary_distance/1000)
-                    convergence_rotation_plus = mesh.get_rotation_matrix_from_xyz((0, convergence_angle_rad, 0))
-                    convergence_rotation_minus = mesh.get_rotation_matrix_from_xyz((0, -convergence_angle_rad, 0))
+                    if convergence_distance == 0:
+                        print("Convergence distance is zero, skipping convergence")
+                        convergence_distance = None
+                    else:
+                        convergence_angle_rad = convergence_angle(convergence_distance, args.pupillary_distance/1000)
+                        convergence_rotation_plus = mesh.get_rotation_matrix_from_xyz((0, convergence_angle_rad, 0))
+                        convergence_rotation_minus = mesh.get_rotation_matrix_from_xyz((0, -convergence_angle_rad, 0))
 
                 if convergence_distance is not None:
                     draw_mesh.rotate(convergence_rotation_minus, center=(0, 0, 0))
@@ -813,4 +815,4 @@ if __name__ == '__main__':
     if infill_mask_video:
         infill_mask_video.release()
 
-    print("Processing complete. Output saved to:", output_file)
+    print(f"Processing complete. Output saved to: {output_file}")
