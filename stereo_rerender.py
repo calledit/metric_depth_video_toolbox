@@ -394,7 +394,7 @@ if __name__ == '__main__':
         # Mark the start of *this* frame
         frame_start = time.time()
         if frame_n == 1:
-            print(f"[     %] Frame #{frame_n:4d}/{total_frames}")
+            print(f"[     %] Frame #{frame_n:4d}/{total_frames}", end='\r')
         else:
             pct = (frame_n / total_frames) * 100 if total_frames > 0 else 0
             avg_per_frame = (frame_start - start_time) / frame_n if frame_n > 0 else 0
