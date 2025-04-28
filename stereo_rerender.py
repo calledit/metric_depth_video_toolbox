@@ -272,6 +272,7 @@ if __name__ == '__main__':
     parser.add_argument('--save_background', action='store_true', help='Save the compound background as a file. To be ussed as infill.', required=False)
     parser.add_argument('--load_background', help='Load the compound background as a file. To be used as infill.', required=False)
 
+    parser.add_argument('--debug', action='store_true', help='Enable debug mode: save intermediates depth+mask+stereo frames in debug_frames/. VERY SLOW, use only with --max_frames=x', required=False)
 
     args = parser.parse_args()
 
@@ -324,6 +325,11 @@ if __name__ == '__main__':
             ref_frame_inv_trans = np.linalg.inv(ref_frame)
             for i, transformation in enumerate(transformations):
                 transformations[i] = transformation @ ref_frame_inv_trans
+
+    if args.debug:
+        # Ensure debug directory exists
+        debug_dir = os.path.join(os.getcwd(), "debug_frames")
+        os.makedirs(debug_dir, exist_ok=True)
 
     raw_video = cv2.VideoCapture(args.depth_video)
     frame_width, frame_height = int(raw_video.get(cv2.CAP_PROP_FRAME_WIDTH)), int(raw_video.get(cv2.CAP_PROP_FRAME_HEIGHT))
@@ -389,6 +395,22 @@ if __name__ == '__main__':
             break
 
         rgb = cv2.cvtColor(raw_frame, cv2.COLOR_BGR2RGB)
+
+        if args.debug:
+            # record the raw depth frame
+            raw_R = raw_frame[:,:,2].astype(np.uint32)
+            raw_G = raw_frame[:,:,1].astype(np.uint32)
+            raw_B = raw_frame[:,:,0].astype(np.uint32)
+            raw_depth = (raw_R << 16) | (raw_G << 8) | raw_B
+            depth = raw_depth.astype(np.float32) * (args.max_depth / float(2**24 - 1))
+            dmin, dmax = float(depth.min()), float(depth.max())
+            # threshold: less than 1% of max_depth
+            if (dmax - dmin) < (args.max_depth * 0.01):
+                print(f"  WARNING: Frame {frame_n}: depth range too small ({dmin:.2f} - {dmax:.2f}), parallax may be negligible.")
+            # Normalize full range to 8-bit for visualization
+            depth_norm = raw_depth.astype(np.float32) / (2**24 - 1)
+            depth_vis = (depth_norm * 255).astype(np.uint8)
+            cv2.imwrite(os.path.join(debug_dir, f"depthframe_{frame_n:06d}.png"), depth_vis)
 
         color_frame = None
         if color_video is not None:
@@ -708,8 +730,20 @@ if __name__ == '__main__':
                 
                 right_image, right_depth = depth_map_tools.render(to_draw, render_cam_matrix, depth = -2, bg_color = bg_color)
 
-                bg_mask = np.all(right_image == bg_color, axis=-1)
+                if args.debug:
+                    # Record difference between left and right images
+                    left_dbg = cv2.cvtColor((left_image * 255).astype(np.uint8), cv2.COLOR_RGB2BGR)
+                    right_dbg = cv2.cvtColor((right_image * 255).astype(np.uint8), cv2.COLOR_RGB2BGR)
+                    stereo_diff = cv2.absdiff(left_dbg, right_dbg)
+                    cv2.imwrite(os.path.join(debug_dir, f"stereo_{frame_n:06d}.png"), cv2.cvtColor(stereo_diff, cv2.COLOR_RGB2BGR))
 
+                    # Record mask that will need to be filled
+                    mask_dbg = np.zeros((frame_height, frame_width, 3), dtype=np.uint8)
+                    mask_dbg[bg_mask] = np.array([0, 255, 0], dtype=np.uint8)
+                    mask_dbg[~bg_mask] = np.array([0, 0, 0], dtype=np.uint8)
+                    cv2.imwrite(os.path.join(debug_dir, f"mask_{frame_n:06d}.png"), mask_dbg)
+
+                bg_mask = np.all(right_image == bg_color, axis=-1)
 
                 if edge_pcd is not None:
                     points_int = np.round(points_2d).astype(int)
