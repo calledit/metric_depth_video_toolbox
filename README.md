@@ -63,6 +63,7 @@ There are multiple tracking tools that support camera tracking:
 ### Depth estimation
 There are varoius tools for doing depth estimation in the toolbox.
 - [video_metric_convert.py](video_metric_convert.py) Converts video in to metric depth video using the Depth-Anything series of machine learning models.
+- [videoanythingmetric_video.py](videoanythingmetric_video.py) Converts video in to metric depth using Video-Depth-Anything-Metric
 - [moge_video.py](moge_video.py) Converts a video in to metric depth video using MoGe.
 - [unidepth_video.py](unidepth_video.py) Converts a video in to metric depth video using UniDepth.
 - [unik3d_video.py](unik3d_video.py) Converts a video in to metric depth video using UniK3D.
