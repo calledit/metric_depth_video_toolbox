@@ -3,7 +3,6 @@ import cv2
 import numpy as np
 import os
 import copy
-import sys
 import time
 import json
 import math
@@ -12,7 +11,6 @@ import depth_frames_helper
 import open3d as o3d
 import depth_map_tools
 from contextlib import contextmanager
-import time
 
 @contextmanager
 def timer(name = 'not named'):
@@ -21,6 +19,7 @@ def timer(name = 'not named'):
     end = time.perf_counter()
     print(f"{name}: {end - start:.6f} seconds")
 
+# Set numpy print options for better readability
 np.set_printoptions(suppress=True, precision=4)
 
 def convert_to_equirectangular(image, input_fov=100):
@@ -88,6 +87,7 @@ def convert_to_equirectangular(image, input_fov=100):
 
 
 def make_infill_mask(boolean_mask, normals):
+    # Placeholder stub: user to implement infill mask generator
     return None
 
 
@@ -154,8 +154,9 @@ def masked_blur(img, ksize=(6,6), sigma=0):
     
 def infill_using_normals(color_img, hole_mask, normal_map, max_steps=30):
     """
-    Vectorized infill of hole pixels in `color_img` by ray-marching along
-    XY directions from `normal_map`, using NumPy.
+    Fill black "holes" in `color_img` by marching along surface normals
+    obtained from `normal_map`. Stops after `max_steps` or upon hitting
+    valid pixels.
 
     Args:
         color_img:   H×W×3 uint8 array of RGB colors.
@@ -241,33 +242,37 @@ def infill_using_normals(color_img, hole_mask, normal_map, max_steps=30):
 if __name__ == '__main__':
 
     # Setup arguments
-    parser = argparse.ArgumentParser(description='Take a rgb encoded depth video and a color video, and render them it as a steroscopic 3D video.'+
-        'that can be used on 3d tvs and vr headsets.')
+    parser = argparse.ArgumentParser(
+        description=(
+            'Convert an RGB-encoded depth video and optional color video '
+            'into a stereoscopic 3D side-by-side output for VR/3D TVs.'
+        )
+    )
 
-    parser.add_argument('--depth_video', type=str, help='video file to use as input', required=True)
-    parser.add_argument('--color_video', type=str, help='video file to use as color input', required=False)
-    parser.add_argument('--xfov', type=float, help='fov in deg in the x-direction, calculated from aspectratio and yfov in not given', required=False)
-    parser.add_argument('--yfov', type=float, help='fov in deg in the y-direction, calculated from aspectratio and xfov in not given', required=False)
-    parser.add_argument('--xfov_file', type=str, help='alternative to xfov and yfov, json file with one xfov for each frame', required=False)
-    parser.add_argument('--max_depth', default=100, type=int, help='the max depth that the input video uses', required=False)
+    parser.add_argument('--depth_video', type=str, help='Path to input depth-encoded video file', required=True)
+    parser.add_argument('--color_video', type=str, help='Path to input color video file', required=False)
+    parser.add_argument('--xfov', type=float, help='Horizontal FOV in degrees', required=False)
+    parser.add_argument('--yfov', type=float, help='Vertical FOV in degrees, calculated from aspectratio and xfov if not given', required=False)
+    parser.add_argument('--xfov_file', type=str, help='JSON file specifying xfov per frame', required=False)
+    parser.add_argument('--max_depth', default=100, type=int, help='Maximum depth encoded in video', required=False)
     parser.add_argument('--transformation_file', type=str, help='file with scene transformations from the aligner', required=False)
     parser.add_argument('--transformation_lock_frame', default=0, type=int, help='the frame that the transfomrmation will use as a base', required=False)
     parser.add_argument('--pupillary_distance', default=63, type=int, help='pupillary distance in mm', required=False)
-    parser.add_argument('--max_frames', default=-1, type=int, help='quit after max_frames nr of frames', required=False)
-    parser.add_argument('--touchly0', action='store_true', help='Render as touchly0 format. ie. stereo video with 3d ', required=False)
-    parser.add_argument('--vr180', action='store_true', help='Render as vr180 format. ie. stereo video at 180 deg ', required=False)
-    parser.add_argument('--render_as_pointcloud', action='store_true', help='Render as point cloud instead of as mesh', required=False)
+    parser.add_argument('--max_frames', default=-1, type=int, help='Stop after processing this many frames', required=False)
+    parser.add_argument('--touchly0', action='store_true', help='Render in touchly0 format (stereo 3D)', required=False)
+    parser.add_argument('--vr180', action='store_true', help='Render in VR180 180° side-by-side', required=False)
+    parser.add_argument('--render_as_pointcloud', action='store_true', help='Render output as point cloud', required=False)
 
     parser.add_argument('--convergence_file', type=str, help='json file with convergence data for each frame.', required=False)
 
-    parser.add_argument('--dont_place_points_in_edges', action='store_true', help='Dont put point cloud points in the removed edges', required=False)
+    parser.add_argument('--dont_place_points_in_edges', action='store_true', help='Skip adding edge points for infill', required=False)
 
-    parser.add_argument('--do_basic_infill', action='store_true', help='Does basic non ML infill.', required=False)
-    parser.add_argument('--touchly1', action='store_true', help='Render as touchly1 format. ie. mono video with 3d', required=False)
+    parser.add_argument('--do_basic_infill', action='store_true', help='Use basic in-house infill algorithm.', required=False)
+    parser.add_argument('--touchly1', action='store_true', help='Render in touchly1 format (mono+depth)', required=False)
     parser.add_argument('--touchly_max_depth', default=5, type=float, help='the max depth that touchly is cliped to', required=False)
-    parser.add_argument('--compressed', action='store_true', help='Render the video in a compressed format. Reduces file size but also quality.', required=False)
-    parser.add_argument('--infill_mask', action='store_true', help='Save infill mask video.', required=False)
-    parser.add_argument('--remove_edges', action='store_true', help='Tries to remove edges that was not visible in image', required=False)
+    parser.add_argument('--compressed', action='store_true', help='Compress output video (lower quality)', required=False)
+    parser.add_argument('--infill_mask', action='store_true', help='Save infill masks alongside output', required=False)
+    parser.add_argument('--remove_edges', action='store_true', help='Remove mesh edges not visible in input frames', required=False)
     parser.add_argument('--mask_video', type=str, help='video file to use as mask input to filter out the forground and generate a background version of the mesh that can be used as infill. Requires non moving camera or very good tracking.', required=False)
     parser.add_argument('--save_background', action='store_true', help='Save the compound background as a file. To be ussed as infill.', required=False)
     parser.add_argument('--load_background', help='Load the compound background as a file. To be used as infill.', required=False)
@@ -363,6 +368,7 @@ if __name__ == '__main__':
         args.vr180 = True
 
     out_size = None
+    # Determine side-by-side output size
     if args.touchly1:
         output_file = args.depth_video + "_Touchly1."
         out_size = (out_width, out_height*2)
@@ -401,7 +407,7 @@ if __name__ == '__main__':
             bg_points = loaded_bg[0]
             bg_point_colors = loaded_bg[1]
 
-
+    # Precompute eye shifts in world units (meters)
     left_shift = -(args.pupillary_distance/1000)/2
     right_shift = +(args.pupillary_distance/1000)/2
 
@@ -458,6 +464,7 @@ if __name__ == '__main__':
         # Decode video depth
         depth = depth_frames_helper.decode_rgb_depth_frame(rgb, MODEL_maxOUTPUT_depth, True)
 
+        # Compute camera intrinsics per frame
         if xfovs is not None:
             xf = xfovs[frame_n-1]
             yf = None
@@ -595,7 +602,8 @@ if __name__ == '__main__':
 
 
             if args.save_background:
-                if args.max_frames < frame_n and args.max_frames != -1: #We ceed to check this here so that the continue dont skip the check
+                # We need to check this here so that the continue dont skip the check
+                if args.max_frames < frame_n and args.max_frames != -1:
                     break
                 continue
 
@@ -638,9 +646,13 @@ if __name__ == '__main__':
                 convergence_distance = None
                 if convergence_depths is not None:
                     convergence_distance = float(convergence_depths[frame_n-1]) #np.mean(depth)#Testing set convergence to scene frame average depth
-                    convergence_angle_rad = convergence_angle(convergence_distance, args.pupillary_distance/1000)
-                    convergence_rotation_plus = mesh.get_rotation_matrix_from_xyz((0, convergence_angle_rad, 0))
-                    convergence_rotation_minus = mesh.get_rotation_matrix_from_xyz((0, -convergence_angle_rad, 0))
+                    if convergence_distance == 0:
+                        print("Convergence distance is zero, skipping convergence")
+                        convergence_distance = None
+                    else:
+                        convergence_angle_rad = convergence_angle(convergence_distance, args.pupillary_distance/1000)
+                        convergence_rotation_plus = mesh.get_rotation_matrix_from_xyz((0, convergence_angle_rad, 0))
+                        convergence_rotation_minus = mesh.get_rotation_matrix_from_xyz((0, -convergence_angle_rad, 0))
 
                 if convergence_distance is not None:
                     draw_mesh.rotate(convergence_rotation_minus, center=(0, 0, 0))
@@ -678,7 +690,7 @@ if __name__ == '__main__':
                     valid_unprojected_normals = unprojected_normals[valid_mask][depth_order]
                     
                     ####valid_normals = [valid_mask] #What are the normals after rotation?
-                    # valid_colors dows not chnage after rotation but the normals in screen space should change.
+                    # valid_colors dows not change after rotation but the normals in screen space should change.
                     # A Truth is that the normals will change but not that much, we might get away with just leaving them as they are.
                     # NOT is there is insane convergence or large tranformations from a tranformation file.
                     # Okay... One way to deal with this is to project the normals in to world space by doing:
@@ -852,11 +864,16 @@ if __name__ == '__main__':
     if args.save_background:
         np.save(args.depth_video + '_background.npy', np.array([bg_points, bg_point_colors]))
 
+    # Release resources
     raw_video.release()
     out.release()
-
     if mask_video is not None:
         mask_video.release()
+    
+    if color_video is not None:
+        color_video.release()
 
     if infill_mask_video is not None:
         infill_mask_video.release()
+
+    print(f"Processing complete. Output saved to: {output_file}")
