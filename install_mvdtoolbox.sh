@@ -1,14 +1,19 @@
 #!/bin/bash
 
-pip install open3d numpy opencv-python
 
-#Stuff required for Depth-Anything and other third party tools
-pip install einops easydict imageio xformers==0.0.29 tqdm torch
 
 DOWNLOAD='curl -LO'
+PIP='pip3.11'
 if [ "$(uname)" == "Linux" ]; then
     DOWNLOAD='wget'
+    PIP='pip'
 fi
+
+
+$PIP install open3d numpy opencv-python
+
+#Stuff required for Depth-Anything and other third party tools
+$PIP install einops easydict imageio xformers==0.0.29 tqdm
 
 #install support for madpose for accurate camera tracking
 if [[ " $@ " =~ " -madpose " ]]; then
@@ -27,11 +32,7 @@ if [[ " $@ " =~ " -madpose " ]]; then
 	
 	cd ..
 	
-	if [ "$(uname)" == "Linux" ]; then
-		pip install .
-	else
-		pip3.11 install .
-	fi
+	$PIP install .
 	
 	cd ..
 	
@@ -107,9 +108,9 @@ if [[ " $@ " =~ " -geometrycrafter " ]]; then
 	git checkout reduce-cuda-memory-use
 	
 	
-	pip install decord diffusers transformers accelerate kornia
+	$PIP install decord diffusers transformers accelerate kornia
 	
-	pip install scipy 
+	$PIP install scipy 
 	
 	
 	exit
@@ -124,7 +125,7 @@ if [[ " $@ " =~ " -moge " ]]; then
 
 	cd MoGe
 	git checkout dd158c05461f2353287a182afb2adf0fda46436f
-	pip install -r requirements.txt
+	$PIP install -r requirements.txt
 
 	cd ..
 	
@@ -138,7 +139,7 @@ if [[ " $@ " =~ " -megasam " ]]; then
 
 	cd mega-sam
 	
-	pip install torch_scatter
+	$PIP install torch_scatter
 	
 	#install mega-sam specific version of Droid-slam
 	cd base
@@ -158,7 +159,7 @@ if [[ " $@ " =~ " -unik3d " ]]; then
 
 	cd UniK3D
 	
-	pip install timm wandb
+	$PIP install timm wandb
 	
 	#You get warning if you dont install this but it is not needed
  	#cd unidepth/ops/knn;bash compile.sh;cd ../../../
@@ -175,7 +176,7 @@ if [[ " $@ " =~ " -unidepth " ]]; then
 
 	cd UniDepth
 	
-	pip install timm wandb
+	$PIP install timm wandb
 	$DOWNLOAD https://raw.githubusercontent.com/AbdBarho/xformers-wheels/refs/heads/main/xformers/components/attention/nystrom.py
 	sed -i 's/from xformers\.components\.attention import NystromAttention/from nystrom import NystromAttention/g' unidepth/layers/nystrom_attention.py
 
