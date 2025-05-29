@@ -3,7 +3,7 @@
 pip install open3d numpy opencv-python
 
 #Stuff required for Depth-Anything and other third party tools
-pip install einops easydict imageio xformers==0.0.29 tqdm
+pip install einops easydict imageio xformers==0.0.29 tqdm torch
 
 DOWNLOAD='curl -LO'
 if [ "$(uname)" == "Linux" ]; then
@@ -196,7 +196,7 @@ if [[ " $@ " =~ " -videometricany " ]]; then
 	cd metric_depth
 	mkdir checkpoints
 	cd checkpoints
-	wget https://huggingface.co/depth-anything/Metric-Video-Depth-Anything-Large/resolve/main/metric_video_depth_anything_vitl.pth
+	$DOWNLOAD https://huggingface.co/depth-anything/Metric-Video-Depth-Anything-Large/resolve/main/metric_video_depth_anything_vitl.pth
 	cd ..
 	cd ..
 	cd ..
