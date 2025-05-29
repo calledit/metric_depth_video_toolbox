@@ -5,6 +5,10 @@ pip install open3d numpy opencv-python
 #Stuff required for Depth-Anything and other third party tools
 pip install einops easydict imageio xformers==0.0.29 tqdm
 
+DOWNLOAD='curl -LO'
+if [ "$(uname)" == "Linux" ]; then
+    DOWNLOAD='wget'
+fi
 
 #install support for madpose for accurate camera tracking
 if [[ " $@ " =~ " -madpose " ]]; then
@@ -172,7 +176,7 @@ if [[ " $@ " =~ " -unidepth " ]]; then
 	cd UniDepth
 	
 	pip install timm wandb
-	wget https://raw.githubusercontent.com/AbdBarho/xformers-wheels/refs/heads/main/xformers/components/attention/nystrom.py
+	DOWNLOAD https://raw.githubusercontent.com/AbdBarho/xformers-wheels/refs/heads/main/xformers/components/attention/nystrom.py
 	sed -i 's/from xformers\.components\.attention import NystromAttention/from nystrom import NystromAttention/g' unidepth/layers/nystrom_attention.py
 
  	cd unidepth/ops/knn;bash compile.sh;cd ../../../
@@ -207,7 +211,7 @@ git checkout 3628f50d55e81183c7cc7025f2c22190fa37ef28
 
 mkdir checkpoints
 cd checkpoints
-wget https://huggingface.co/depth-anything/Video-Depth-Anything-Large/resolve/main/video_depth_anything_vitl.pth
+DOWNLOAD https://huggingface.co/depth-anything/Video-Depth-Anything-Large/resolve/main/video_depth_anything_vitl.pth
 cd ..
 
 
@@ -218,7 +222,7 @@ cd Depth-Anything-V2
 cd metric_depth
 mkdir checkpoints
 cd checkpoints
-wget https://huggingface.co/depth-anything/Depth-Anything-V2-Metric-Hypersim-Large/resolve/main/depth_anything_v2_metric_hypersim_vitl.pth
+DOWNLOAD https://huggingface.co/depth-anything/Depth-Anything-V2-Metric-Hypersim-Large/resolve/main/depth_anything_v2_metric_hypersim_vitl.pth
 cd ..
 
 cd ..
