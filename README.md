@@ -70,6 +70,7 @@ There are varoius tools for doing depth estimation in the toolbox.
 - [depthpro_video.py](depthpro_video.py) Converts a video in to metric depth video using DepthPro.
 - [depthcrafter_video.py](depthcrafter_video.py) Converts video in to metric depth video using depthcrafter and a metric depth reference video.
 - [geometrycrafter_video.py](geometrycrafter_video.py) Stablilizes a metric video generated with a single frame depthmodel.
+- [upscale_depth_promptda.py](upscale_depth_promptda.py) Upscales metric depth video given a full resolution color video using PromptDA.
 
 
 ### Viewing 3d video
@@ -110,6 +111,7 @@ sudo apt-get install -y libgl1
 ./install_mvdtoolbox.sh -madpose
 ./install_mvdtoolbox.sh -unidepth
 ./install_mvdtoolbox.sh -moge
+./install_mvdtoolbox.sh -promptda
 
 # if using headless linux you need to start a virtual x11 server
 apt-get install xvfb
@@ -132,7 +134,7 @@ See https://github.com/calledit/metric_depth_video_toolbox/issues/1#issuecomment
 The tools that reuire ML models have been tested on machines with nvida 3090 cards that support Cuda 12.4 and Torch 2.5.1 on [vast.ai](https://cloud.vast.ai/?ref_id=148636) using "template PyTorch (cuDNN Devel)"
 
 ### Next steps
-- Implement Prompting Depth Anything https://github.com/DepthAnything/PromptDA (a single frame depth upscaler)
+- Currently waiting for new stable and accurate depth models.
 
 ### Contributing
 Is appreciated. Even for simple things like spelling.

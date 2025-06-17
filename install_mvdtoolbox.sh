@@ -2,10 +2,12 @@
 
 
 
-DOWNLOAD='curl -LO'
+DOWNLOAD='curl'
+DOWNLOAD_ARG='-LO'
 PIP='pip3.11'
 if [ "$(uname)" == "Linux" ]; then
     DOWNLOAD='wget'
+	DOWNLOAD_ARG=''
     PIP='pip'
 fi
 
@@ -177,7 +179,7 @@ if [[ " $@ " =~ " -unidepth " ]]; then
 	cd UniDepth
 	
 	$PIP install timm wandb
-	$DOWNLOAD https://raw.githubusercontent.com/AbdBarho/xformers-wheels/refs/heads/main/xformers/components/attention/nystrom.py
+	$DOWNLOAD $DOWNLOAD_ARG https://raw.githubusercontent.com/AbdBarho/xformers-wheels/refs/heads/main/xformers/components/attention/nystrom.py
 	sed -i 's/from xformers\.components\.attention import NystromAttention/from nystrom import NystromAttention/g' unidepth/layers/nystrom_attention.py
 
  	cd unidepth/ops/knn;bash compile.sh;cd ../../../
@@ -187,6 +189,10 @@ if [[ " $@ " =~ " -unidepth " ]]; then
 	exit
 fi
 
+MODEL_URL='https://huggingface.co/depth-anything/Video-Depth-Anything-Large/resolve/main/video_depth_anything_vitl.pth'
+if [[ " $@ " =~ " -small " ]]; then
+	MODEL_URL='https://huggingface.co/depth-anything/Video-Depth-Anything-Small/resolve/main/video_depth_anything_vits.pth'
+fi
 
 #install Video-Depth-Anything metric
 if [[ " $@ " =~ " -videometricany " ]]; then
@@ -197,11 +203,18 @@ if [[ " $@ " =~ " -videometricany " ]]; then
 	cd metric_depth
 	mkdir checkpoints
 	cd checkpoints
-	$DOWNLOAD https://huggingface.co/depth-anything/Metric-Video-Depth-Anything-Large/resolve/main/metric_video_depth_anything_vitl.pth
+	$DOWNLOAD $DOWNLOAD_ARG https://huggingface.co/depth-anything/Metric-Video-Depth-Anything-Large/resolve/main/metric_video_depth_anything_${MODEL_SIZE}.pth
 	cd ..
 	cd ..
 	cd ..
 	
+	exit
+fi
+
+if [[ " $@ " =~ " -promptda " ]]; then
+	git clone https://github.com/DepthAnything/PromptDA
+	$PIP install huggingface_hub
+
 	exit
 fi
 
@@ -212,7 +225,7 @@ git checkout 3628f50d55e81183c7cc7025f2c22190fa37ef28
 
 mkdir checkpoints
 cd checkpoints
-$DOWNLOAD https://huggingface.co/depth-anything/Video-Depth-Anything-Large/resolve/main/video_depth_anything_vitl.pth
+$DOWNLOAD $DOWNLOAD_ARG $MODEL_URL
 cd ..
 
 
@@ -223,7 +236,7 @@ cd Depth-Anything-V2
 cd metric_depth
 mkdir checkpoints
 cd checkpoints
-$DOWNLOAD https://huggingface.co/depth-anything/Depth-Anything-V2-Metric-Hypersim-Large/resolve/main/depth_anything_v2_metric_hypersim_vitl.pth
+$DOWNLOAD $DOWNLOAD_ARG https://huggingface.co/depth-anything/Depth-Anything-V2-Metric-Hypersim-Large/resolve/main/depth_anything_v2_metric_hypersim_vitl.pth
 cd ..
 
 cd ..
