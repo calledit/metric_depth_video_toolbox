@@ -46,6 +46,7 @@ if __name__ == '__main__':
     parser.add_argument('--color_video', type=str, required=True)
     parser.add_argument('--depth_video', type=str, required=False, help='reference metric depth video')
     parser.add_argument('--input_size', type=int, default=518)
+    parser.add_argument('--model', type=str, default='vitl', help='vitl or with vits, downlaod vits with install script.')
     parser.add_argument('--max_frames', type=int, default=-1, help='maximum length of the input video, -1 means no limit')
     parser.add_argument('--target_fps', type=int, default=-1, help='target fps of the input video, -1 means the original fps')
     parser.add_argument('--max_depth', default=100, type=int, help='the max depth that the video uses', required=False)
@@ -54,14 +55,16 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
+    #DEVICE = 'cuda' if torch.cuda.is_available() else 'mps'
 
     model_configs = {
         'vits': {'encoder': 'vits', 'features': 64, 'out_channels': [48, 96, 192, 384]},
         'vitl': {'encoder': 'vitl', 'features': 256, 'out_channels': [256, 512, 1024, 1024]},
     }
 
-    video_depth_anything = VideoDepthAnything(**model_configs['vitl'])
-    video_depth_anything.load_state_dict(torch.load('Video-Depth-Anything/checkpoints/video_depth_anything_vitl.pth', map_location='cpu'), strict=True)
+    print("loading model")
+    video_depth_anything = VideoDepthAnything(**model_configs[args.model])
+    video_depth_anything.load_state_dict(torch.load('Video-Depth-Anything/checkpoints/video_depth_anything_' + args.model + '.pth', map_location='cpu'), strict=True)
     video_depth_anything = video_depth_anything.to(DEVICE).eval()
 
     size_frame, target_fps = read_video_frames(args.color_video, 1, args.target_fps, 99999999)
@@ -70,12 +73,14 @@ if __name__ == '__main__':
     rat = min(height, width) / max(height, width)
     siz = args.input_size/rat
 
+    print("read video frames")
     frames, target_fps = read_video_frames(args.color_video, args.max_frames, args.target_fps, siz)
 
     ref_frames = None
     if args.depth_video is not None:
         ref_frames, _ = read_video_frames(args.depth_video, 32, args.target_fps, siz)
 
+    print("infer depths")
     depths, fps = video_depth_anything.infer_video_depth(frames, target_fps, input_size=args.input_size, device=DEVICE, fp32=args.fp32)
 
     nr_frames = len(frames)
