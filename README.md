@@ -1,4 +1,4 @@
-# Metric depth video toolbox
+# Metric depth video toolbox (MDVToolbox)
 
 Tools for Generating and working with metric 3D depth videos.
 
