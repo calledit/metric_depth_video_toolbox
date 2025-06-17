@@ -33,7 +33,7 @@ python video_metric_convert.py --color_video some_video.mkv
 
 ```
 
-#### unidepth_video.py (rquires installation with  ./install_mvdtoolbox.sh -unidepth )
+#### unidepth_video.py (rquires installation with  ./install_mdvtoolbox.sh -unidepth )
 _Uses ML to create FOV locked metric depth video from any normal video file._ UniDepth is not made for video so the videos it produces are jittery. However UniDepth has the capability of using FOV as given by the user. Which means it's output tend to be more accurate as a whole. That said UniDepth has been trained with less data than many other models so it struggles with certain types of scenes.
 
 ```bash
@@ -44,7 +44,7 @@ python unidepth_video.py --color_video some_video.mkv -xfov 45
 
 ```
 
-#### moge_video.py (rquires installation with  ./install_mvdtoolbox.sh -moge )
+#### moge_video.py (rquires installation with  ./install_mdvtoolbox.sh -moge )
 _Uses ML to create FOV "locked" metric depth video from any normal video file._ Moge is not made for video so the videos it produces are jittery. 
 
 ```bash
@@ -229,7 +229,7 @@ example:
 python track_points_in_video.py --color_video some_video.mkv
 ```
 
-#### sam_track_video.py (rquires installation with  ./install_mvdtoolbox.sh -megasam )
+#### sam_track_video.py (rquires installation with  ./install_mdvtoolbox.sh -megasam )
 Use [Mega-sam](https://github.com/mega-sam/mega-sam) to track the camera. Outputs a transfomations.json file. Mega-sam merges traditonal SLAM methods with data from estimated ML depth videos to track the camera.
 
 ```bash

@@ -17,7 +17,7 @@ This will install required packages and download the needed ML models.
 git clone https://github.com/calledit/metric_depth_video_toolbox
 cd metric_depth_video_toolbox
 
-./install_mvdtoolbox.sh
+./install_mdvtoolbox.sh
 ```
 
 ### Step 1
@@ -67,7 +67,7 @@ Visualised here as tiny dots in the images:
 Generate camera transformations from the depth and the source video. We make a guess of 30-50 deg and chose 40 deg. Later analysis showed that the real FOV is something like 42 deg. See [RECOVER_FOV.md](RECOVER_FOV.md) for more info on recovering the FOV of a video. If the video has paralax you can run sam_track_video.py with --optimize_intrinsic and it will give you a accurate FOV.
 
 ```
-./install_mvdtoolbox.sh -megasam #takes a long time to install
+./install_mdvtoolbox.sh -megasam #takes a long time to install
 python sam_track_video.py --color_video ~/in_office_720p.mp4 --depth_video ~/in_office_720p.mp4_depth.mkv --yfov 40
 
 
@@ -127,7 +127,7 @@ Here we will use ML to add paralax infill using the tool stereo_crafter_infill.p
 Stereocrafter is based on stable defusion so is slow, be patient.
 
 ```
-./install_mvdtoolbox.sh -stereocrafter #downloads and installs stereocrafter in the right folder
+./install_mdvtoolbox.sh -stereocrafter #downloads and installs stereocrafter in the right folder
 
 python3.11 stereo_crafter_infill.py --sbs_color_video ~/in_office_720p.mp4_depth.mkv_rescaled.mkv_stereo.mkv --sbs_mask_video ~/in_office_720p.mp4_depth.mkv_rescaled.mkv_infillmask.mkv
 ```

@@ -23,8 +23,8 @@ Xvfb :2 &
 export DISPLAY=:2
 
 apt install ffmpeg
-./install_mvdtoolbox.sh
-./install_mvdtoolbox.sh -stereocrafter
+./install_mdvtoolbox.sh
+./install_mdvtoolbox.sh -stereocrafter
 ./create_video_mask.sh -install
 
 pip install --upgrade scenedetect[opencv-headless]

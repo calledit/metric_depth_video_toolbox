@@ -100,18 +100,18 @@ cd metric_depth_video_toolbox
 
 # on linux
 sudo apt-get install -y libgl1
-./install_mvdtoolbox.sh
+./install_mdvtoolbox.sh
 
 #Optional (only required for some tools)
-./install_mvdtoolbox.sh -megasam
-./install_mvdtoolbox.sh -geometrycrafter
-./install_mvdtoolbox.sh -unik3d
-./install_mvdtoolbox.sh -depthpro
-./install_mvdtoolbox.sh -stereocrafter
-./install_mvdtoolbox.sh -madpose
-./install_mvdtoolbox.sh -unidepth
-./install_mvdtoolbox.sh -moge
-./install_mvdtoolbox.sh -promptda
+./install_mdvtoolbox.sh -megasam
+./install_mdvtoolbox.sh -geometrycrafter
+./install_mdvtoolbox.sh -unik3d
+./install_mdvtoolbox.sh -depthpro
+./install_mdvtoolbox.sh -stereocrafter
+./install_mdvtoolbox.sh -madpose
+./install_mdvtoolbox.sh -unidepth
+./install_mdvtoolbox.sh -moge
+./install_mdvtoolbox.sh -promptda
 
 # if using headless linux you need to start a virtual x11 server
 apt-get install xvfb
