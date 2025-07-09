@@ -61,7 +61,7 @@ if __name__ == '__main__':
 
         low_res_metric_depth = cv2.resize(metric_depth, (rescale_width, rescale_height), interpolation=cv2.INTER_LINEAR)
 
-        if frame_width != color_rescale_width and frame_height != color_rescale_height:
+        if frame_width != color_rescale_width or frame_height != color_rescale_height:
             rgb_multiple_of_14 = cv2.resize(rgb, (color_rescale_width, color_rescale_height), interpolation=cv2.INTER_LINEAR)
         else:
             rgb_multiple_of_14 = rgb
