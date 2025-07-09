@@ -74,7 +74,7 @@ if __name__ == '__main__':
 
         upscaled_depth = upscaled_depth.squeeze().detach().cpu().numpy()
 
-        if frame_width != color_rescale_width and frame_height != color_rescale_height:
+        if frame_width != color_rescale_width or frame_height != color_rescale_height:
             upscaled_depth = cv2.resize(upscaled_depth, (frame_width, frame_height), interpolation=cv2.INTER_LINEAR)
 
 
