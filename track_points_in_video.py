@@ -8,6 +8,44 @@ import gc
 import random
 
 
+def visualize_mask(image, mask):
+    """
+    Shows orb image, mask, and overlay side by side.
+    """
+    import matplotlib
+    matplotlib.use("TkAgg")
+    import matplotlib.pyplot as plt
+    # Ensure mask is single-channel uint8
+    if mask.dtype != np.uint8:
+        mask = mask.astype(np.uint8)
+    if mask.ndim == 3:
+        mask = cv2.cvtColor(mask, cv2.COLOR_BGR2GRAY)
+
+    # Make overlay (red mask on top of original image)
+    overlay = image.copy()
+    overlay[mask > 0] = (0, 0, 255)  # red where mask is nonzero
+
+    # Show side by side
+    plt.figure(figsize=(15, 5))
+    plt.subplot(1, 3, 1)
+    plt.title("Original")
+    plt.imshow(cv2.cvtColor(image, cv2.COLOR_BGR2RGB))
+    plt.axis("off")
+
+    plt.subplot(1, 3, 2)
+    plt.title("Mask")
+    plt.imshow(mask, cmap="gray")
+    plt.axis("off")
+
+    plt.subplot(1, 3, 3)
+    plt.title("Overlay")
+    plt.imshow(cv2.cvtColor(overlay, cv2.COLOR_BGR2RGB))
+    plt.axis("off")
+
+    plt.show()
+
+
+
 DEVICE = 'cuda'
 
 cotracker = None
@@ -66,7 +104,7 @@ def create_keypoint_mask(image, keypoints, radius=2):
 
     return mask
 
-def mask_from_orb_features(image, mask=None):
+def mask_from_orb_features(image, size=10, mask=None):
     """
     Detects ORB features and creates a image mask from that
     """
@@ -76,11 +114,13 @@ def mask_from_orb_features(image, mask=None):
     # Detect keypoints and compute descriptors using the mask if provided
     keypoints, descriptors = orb.detectAndCompute(image, mask=mask)
 
-    keypoint_mask = create_keypoint_mask(image, keypoints, radius=5)
+    keypoint_mask = create_keypoint_mask(image, keypoints, radius=int(size/2))
 
     blurred_mask = cv2.GaussianBlur(keypoint_mask, (9, 9), 0)
 
     ret, keypoint_mask = cv2.threshold(blurred_mask, 15, 255, cv2.THRESH_BINARY)
+
+    #visualize_mask(image, keypoint_mask)
 
     return keypoint_mask
 
@@ -114,7 +154,7 @@ def generate_grid(width, height, grid_edge, width_step, height_step, iteration, 
     max_offset_y = height_step / 2
 
     # Compute fraction f that scales from 0 (iteration 0) to 1 (final iteration)
-    f = iteration / (nr_iterations - 1)
+    f = iteration / (max(nr_iterations, 2) - 1)
     
     random.seed(nr_iterations^iteration)
     
@@ -203,20 +243,22 @@ def process_clip(frames, grid_size, global_id_start, start_frame, last_points, i
             available_indices = np.delete(available_indices, local_idx)
 
 
-    #Then we filter away points that probably cant be accuratly tracked (like large flat single colord surfaces or the sky)
+    #Then we filter away points that probably cant be accuratly tracked (like large flat single colord surfaces or the sky) cotracker will try to track these but it does not do a good joob
     first_frame = frames[0].astype(np.uint8)
-    mask = mask_from_orb_features(first_frame)
+
+    #here we create a mask that is 0 where there are no features and 255 in areas where there are features
+    mask = mask_from_orb_features(first_frame, size=(width_step+height_step)/2)
 
     track_points_x = track_2d_points[:, 1].astype(np.int32)
     track_points_y = track_2d_points[:, 2].astype(np.int32)
 
     # Check for each point: keep the point if the mask at that (y, x) location is white (>0)
     valid = mask[track_points_y, track_points_x] > 0
-    filtered_points = track_2d_points#[valid]
+    filtered_points = track_2d_points[valid]
 
     global_idret = global_id_start + len(global_ids)
     #print("global_ids:", global_id_start, "len:", len(global_ids))
-    global_ids = np.array(global_ids)#[valid]
+    global_ids = np.array(global_ids)[valid]
 
 
     if cotracker is None:
@@ -251,6 +293,7 @@ if __name__ == '__main__':
     parser.add_argument('--downscale', type=int, default=1, help='how much to downscale the frames before tacking, presumably makes tracking faster?', required=False)
     parser.add_argument('--nr_iterations', type=int, default=1, help='how many times to do the tracking more times = more points', required=False)
     parser.add_argument('--steps_bewtwen_track_init', type=int, default=60, help='how often to seek for new tracking points in nr of frames', required=False)
+    parser.add_argument('--save_visulization_video', action='store_true', help='Save a video with the tracking points visualised', required=False)
     
 
     args = parser.parse_args()
@@ -262,8 +305,13 @@ if __name__ == '__main__':
 
     raw_video = cv2.VideoCapture(args.color_video)
     frame_width, frame_height = int(raw_video.get(cv2.CAP_PROP_FRAME_WIDTH)), int(raw_video.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    frame_rate = raw_video.get(cv2.CAP_PROP_FPS)
 
     downscaled_dimensions = (frame_width//args.downscale, frame_height//args.downscale)
+    visualization_video = None
+    visualization_frames = []
+    if args.save_visulization_video:
+        visualization_video = cv2.VideoWriter(args.color_video+"_track_visualization.mkv", cv2.VideoWriter_fourcc(*"FFV1"), frame_rate, (frame_width, frame_height))
 
     #30x250 works well for long shots on nvidia 3090
 
@@ -311,6 +359,8 @@ if __name__ == '__main__':
         if not ret:
             break
         frame = cv2.cvtColor(raw_frame, cv2.COLOR_BGR2RGB)
+        if visualization_video is not None:
+            visualization_frames.append(frame)
         frame = cv2.resize(frame, downscaled_dimensions, interpolation=cv2.INTER_AREA)
         print("--- frame ",frame_n+1," ----")
         
@@ -374,3 +424,28 @@ if __name__ == '__main__':
 
     with open(out_file, "w") as fp:
         fp.write(json.dumps(track_frames))
+
+    if visualization_video is not None:
+        print("Creating visualization video")
+        for frame_no, frame_points in enumerate(track_frames):
+            image = visualization_frames[frame_no]
+            if len(frame_points) > 0:
+                points_2d = np.array(frame_points)
+                x = np.clip(points_2d[:,1].astype(np.int32), 0, frame_width-2)
+                y = np.clip(points_2d[:,2].astype(np.int32), 0, frame_height-2)
+                red = np.array([255,0,0])
+                image[y, x] = red
+                image[y, x+1] = red
+                image[y, x-1] = red
+
+                image[y-1, x] = red
+                image[y-1, x+1] = red
+                image[y-1, x-1] = red
+
+                image[y+1, x] = red
+                image[y+1, x+1] = red
+                image[y+1, x-1] = red
+
+            visualization_video.write(cv2.cvtColor(image, cv2.COLOR_RGB2BGR))
+
+        visualization_video.release()
