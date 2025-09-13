@@ -116,3 +116,57 @@ def save_depth_video(frames, output_video_path, fps, max_depth_arg, rescale_widt
         out.write(bgr24bit)
 
     out.release()
+
+def save_grayscale_video(frames, output_video_path, fps, max_depth_arg, rescale_width, rescale_height):
+    """
+    Saves depth maps as grayscale (R=G=B), using FFV1 (lossless).
+    Depth values are linearly mapped to [0, 255] using `max_depth_arg`.
+    If depth > max_depth_arg, it is clipped.
+    """
+
+    MODEL_maxOUTPUT_depth = float(max_depth_arg)
+
+    # determine input shape
+    if isinstance(frames, np.ndarray):
+        # Expecting [N, H, W] or [N, H, W, 1]
+        nr_frames = frames.shape[0]
+        height = frames.shape[1]
+        width = frames.shape[2]
+        max_depth = np.max(frames)
+        print("max metric depth:", max_depth)
+        if MODEL_maxOUTPUT_depth < max_depth:
+            print("warning: output depth exceeds max_depth_arg; values will be clipped.")
+    else:
+        # list/sequence of HxW arrays
+        nr_frames = len(frames)
+        height, width = frames[0].shape[:2]
+
+    out = cv2.VideoWriter(
+        output_video_path,
+        cv2.VideoWriter_fourcc(*"FFV1"),
+        fps,
+        (int(rescale_width), int(rescale_height))
+    )
+
+    for i in range(nr_frames):
+        depth = frames[i]
+        # squeeze last channel if present
+        if depth.ndim == 3 and depth.shape[-1] == 1:
+            depth = depth[..., 0]
+
+        # resize if needed (linear is fine for metric depth visualization)
+        if (rescale_width != width) or (rescale_height != height):
+            depth = cv2.resize(depth, (int(rescale_width), int(rescale_height)), interpolation=cv2.INTER_LINEAR)
+
+        # map depth to 0..255 (uint8)
+        # avoid division by zero
+        denom = MODEL_maxOUTPUT_depth if MODEL_maxOUTPUT_depth > 0 else (depth.max() if np.max(depth) > 0 else 1.0)
+        gray = (np.clip(depth, 0, MODEL_maxOUTPUT_depth) / denom) * 255.0
+        gray_u8 = gray.astype(np.uint8)
+
+        # OpenCV wants BGR; replicate gray to 3 channels
+        bgr = cv2.merge([gray_u8, gray_u8, gray_u8])
+
+        out.write(bgr)
+
+    out.release()
