@@ -269,7 +269,8 @@ if __name__ == '__main__':
 
     parser.add_argument('--do_basic_infill', action='store_true', help='Use basic in-house infill algorithm.', required=False)
     parser.add_argument('--touchly1', action='store_true', help='Render in touchly1 format (mono+depth)', required=False)
-    parser.add_argument('--touchly_max_depth', default=5, type=float, help='the max depth that touchly is cliped to', required=False)
+    parser.add_argument('--touchly_max_depth', default=5, type=float, help='the max depth that touchly is cliped to.', required=False)
+    parser.add_argument('--touchly_min_depth', default=0, type=float, help='the min depth that touchly is cliped to.', required=False)
     parser.add_argument('--compressed', action='store_true', help='Compress output video (lower quality)', required=False)
     parser.add_argument('--infill_mask', action='store_true', help='Save infill masks alongside output', required=False)
     parser.add_argument('--remove_edges', action='store_true', help='Remove mesh edges not visible in input frames', required=False)
@@ -488,7 +489,7 @@ if __name__ == '__main__':
         edge_pcd = None
 
         if transformations is None and args.touchly1: #Fast path we can skip the full render pass
-            depth8bit = np.rint(np.minimum(depth, args.touchly_max_depth)*(255/args.touchly_max_depth)).astype(np.uint8)
+            depth8bit = np.rint(np.maximum(0, np.minimum(depth, args.touchly_max_depth)-args.touchly_min_depth)*(255/(args.touchly_max_depth-args.touchly_min_depth))).astype(np.uint8)
             touchly_depth = np.repeat(depth8bit[..., np.newaxis], 3, axis=-1)
             touchly_depth = 255 - touchly_depth #Touchly uses reverse depth
             out_image = cv2.vconcat([color_frame, touchly_depth])
@@ -623,7 +624,7 @@ if __name__ == '__main__':
                 color_transformed = (color_transformed*255).astype(np.uint8)
 
 
-                touchly_depth8bit = np.rint(np.minimum(touchly_depth, args.touchly_max_depth)*(255/args.touchly_max_depth)).astype(np.uint8)
+                touchly_depth8bit = np.rint(np.maximum(0, np.minimum(touchly_depth, args.touchly_max_depth)-args.touchly_min_depth)*(255/(args.touchly_max_depth-args.touchly_min_depth))).astype(np.uint8)
                 touchly_depth8bit[touchly_depth8bit == 0] = 255 # Any pixel at zero depth needs to move back as it is part of the render viewport background and not the mesh
                 touchly_depth8bit = 255 - touchly_depth8bit #Touchly uses reverse depth
                 touchly_depth = np.repeat(touchly_depth8bit[..., np.newaxis], 3, axis=-1)
@@ -753,7 +754,7 @@ if __name__ == '__main__':
                 touchly_left_depth = None
                 #Touchly1 requires a left eye depthmap XXX use dual rendering here to speed things upp
                 if args.touchly0:
-                    left_depth8bit = np.rint(np.minimum(left_depth, args.touchly_max_depth)*(255/args.touchly_max_depth)).astype(np.uint8)
+                    left_depth8bit = np.rint(np.maximum(0, np.minimum(left_depth, args.touchly_max_depth)-args.touchly_min_depth)*(255/(args.touchly_max_depth-args.touchly_min_depth))).astype(np.uint8)
                     left_depth8bit[left_depth8bit == 0] = 255 # Any pixel at zero depth needs to move back is is non rendered depth buffer(ie things on the side of the mesh)
                     left_depth8bit = 255 - left_depth8bit #Touchly uses reverse depth
                     touchly_left_depth = np.repeat(left_depth8bit[..., np.newaxis], 3, axis=-1)
