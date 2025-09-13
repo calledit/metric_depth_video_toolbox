@@ -390,9 +390,9 @@ def create_camera_alembic(transforms, output_file, fps=24.0, camera_name="Tracke
         point_cloud_obj = add_point_cloud(point_cloud_points, point_colors=point_cloud_colors, object_name=point_cloud_name)
         assign_vertex_color_material(point_cloud_obj, vcol_name="Col")
     
-    # Optionally, add an Open3D mesh.
+    # If there is no tracked points we add the first frame as a reference.
     open3d_mesh_obj = None
-    if open3d_mesh is not None:
+    if point_cloud_points is None and open3d_mesh is not None:
         open3d_mesh_obj = add_open3d_mesh(open3d_mesh, object_name=open3d_mesh_name)
         assign_vertex_color_material(open3d_mesh_obj, vcol_name="Col")
         
@@ -640,7 +640,8 @@ if __name__ == '__main__':
             frame_n += 1
             continue
         
-        frames[frame_n] = np.array(frames[frame_n])
+        if frames is not None:
+            frames[frame_n] = np.array(frames[frame_n])
         
         depth = np.zeros((frame_height, frame_width), dtype=np.uint32)
         depth_unit = depth.view(np.uint8).reshape((frame_height, frame_width, 4))
@@ -701,31 +702,32 @@ if __name__ == '__main__':
                     
                     saved_depth_maps.append(depth)
                     
-                    point_ids_in_this_frame = frames[frame_n][:,0]
-                    points_2d = frames[frame_n][:, 1:3]
-                    points_3d = depth_map_tools.project_2d_points_to_3d(points_2d, depth, cam_matrix)
-                    transform_to_zero_rot = transform_to_zero.copy()
-                    transform_to_zero_rot[:3, 3] = 0.0
-                    points_3d_rot = depth_map_tools.transform_points(points_3d, transform_to_zero_rot)
-                    points_3d_trans = depth_map_tools.transform_points(points_3d, transform_to_zero)
-                    cam_pos = transform_to_zero[:3, 3]
-                    
-                    for i, global_id in enumerate(point_ids_in_this_frame):
-                        if global_id not in global_3d_points:
-                            global_3d_points[global_id] = [[],[],[],[],[]]
-                            
-                        if args.merge_close_points:
-                            nearby_points = find_nearby_points(points_3d_rot, i, 0.005)
-                            for pt in nearby_points:
-                                if global_id not in remaped_points:
-                                    remaped_points[global_id] = []
-                                remaped_points[global_id].append(point_ids_in_this_frame[pt])
+                    if len(frames[frame_n]) != 0:
+                        point_ids_in_this_frame = frames[frame_n][:,0]
+                        points_2d = frames[frame_n][:, 1:3]
+                        points_3d = depth_map_tools.project_2d_points_to_3d(points_2d, depth, cam_matrix)
+                        transform_to_zero_rot = transform_to_zero.copy()
+                        transform_to_zero_rot[:3, 3] = 0.0
+                        points_3d_rot = depth_map_tools.transform_points(points_3d, transform_to_zero_rot)
+                        points_3d_trans = depth_map_tools.transform_points(points_3d, transform_to_zero)
+                        cam_pos = transform_to_zero[:3, 3]
                         
-                        global_3d_points[global_id][0].append(cam_pos)
-                        global_3d_points[global_id][1].append(points_3d_rot[i])
-                        global_3d_points[global_id][2].append(np.array(color_frame[points_2d[i][1], points_2d[i][0]], dtype=np.float32)/255)
-                        global_3d_points[global_id][3].append(frame_n)
-                        global_3d_points[global_id][4].append(points_3d_trans[i])
+                        for i, global_id in enumerate(point_ids_in_this_frame):
+                            if global_id not in global_3d_points:
+                                global_3d_points[global_id] = [[],[],[],[],[]]
+                                
+                            if args.merge_close_points:
+                                nearby_points = find_nearby_points(points_3d_rot, i, 0.005)
+                                for pt in nearby_points:
+                                    if global_id not in remaped_points:
+                                        remaped_points[global_id] = []
+                                    remaped_points[global_id].append(point_ids_in_this_frame[pt])
+                            
+                            global_3d_points[global_id][0].append(cam_pos)
+                            global_3d_points[global_id][1].append(points_3d_rot[i])
+                            global_3d_points[global_id][2].append(np.array(color_frame[points_2d[i][1], points_2d[i][0]], dtype=np.float32)/255)
+                            global_3d_points[global_id][3].append(frame_n)
+                            global_3d_points[global_id][4].append(points_3d_trans[i])
                 
             if args.save_obj is not None:
                 file_name = args.save_obj+f"/{frame_n:07d}"+".obj"
