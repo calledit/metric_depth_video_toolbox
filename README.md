@@ -18,7 +18,7 @@ https://github.com/calledit/metric_depth_video_toolbox/releases/tag/Showcase
    a) the Depth-Anything series of machine learning models.
    b) The [MoGe](https://github.com/microsoft/MoGe) machine learning model.
    c) The [UniDepth](https://github.com/lpiccinelli-eth/UniDepth)  machine learning model.
-   d) DepthPro, UniK3D, depthcrafter
+   d) DepthPro, UniK3D, depthcrafter, MVSAnywhere
 2. A tool for viewing, rendering and visualising metric 3D videos from novel camera perspectives.
 3. A tool for 3D stereo rendering. Converting normal video in to 3D video.
 4. A tool for adding parallax infill to generated stero video based on [StereoCrafter](https://github.com/TencentARC/StereoCrafter).
@@ -43,7 +43,7 @@ There are multiple tracking tools that support camera tracking:
     1. Madpose PnPSolver [madpose library](https://github.com/MarkYu98/madpose). Better than traditonal PnPSolve, but suffers to long term drift as it is a fram 2 frame solution.
     2. SVD based rotational solver asuming the camera is stationary and only tracking rotation. If the camera is trully still this is the best option.
     3. Iterative camera movmenet untill best fitt. Offers better tracking than madpose and is very fast.
-
+- [optical_flow.py](optical_flow.py) a tool to generate a optical flow video from a RGB video.
 
 ### Data export
 [convert_metric_depth_video_to_other_format.py](convert_metric_depth_video_to_other_format.py) is a tool that can take data and export the data in to standard formats that can be used in external tools like blender.
@@ -51,7 +51,7 @@ There are multiple tracking tools that support camera tracking:
 **Supported export data:**
 - video frames to .ply point clouds.
 - video frames to .obj model files
-- Camera tracking data in to alembic camera tracking files .abc
+- Camera tracking data in to blender .blend and alembic camera tracking files .abc
 - Rescaled depth video, rescaled based on triangulation and camera tracking data.
 - Depth video in to 16 and 8 bit greyscale format.
 
@@ -71,6 +71,7 @@ There are varoius tools for doing depth estimation in the toolbox.
 - [depthcrafter_video.py](depthcrafter_video.py) Converts video in to metric depth video using depthcrafter and a metric depth reference video.
 - [geometrycrafter_video.py](geometrycrafter_video.py) Stablilizes a metric video generated with a single frame depthmodel.
 - [upscale_depth_promptda.py](upscale_depth_promptda.py) Upscales metric depth video given a full resolution color video using PromptDA.
+- [video_mvsa.py](video_mvsa.py) Converts a video together with camera poses in to metric depth video using MVSAnywhere.
 
 
 ### Viewing 3d video
