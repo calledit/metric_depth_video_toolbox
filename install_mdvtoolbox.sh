@@ -154,8 +154,19 @@ if [[ " $@ " =~ " -megasam " ]]; then
 	exit
 fi
 
+#install support for HMHI-net
+if [[ " $@ " =~ " -hmhi " ]]; then
+	git clone https://github.com/ZhengxyFlow/HMHI-Net
 
-#install support for unidepth
+	cd HMHI-Net/
+	
+	
+	cd ..
+	
+	exit
+fi
+
+#install support for unik3d
 if [[ " $@ " =~ " -unik3d " ]]; then
 	git clone https://github.com/lpiccinelli-eth/UniK3D
 
