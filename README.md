@@ -79,7 +79,7 @@ There are varoius tools for doing depth estimation in the toolbox.
 
 
 ### Masking tools
-- [create_video_mask.sh](create_video_mask.sh) Creates a mask video that masks of all humans in a video.
+- [generate_video_mask.py](generate_video_mask.py) Creates a mask video that masks of all humans in a video.
 - [apply_inpainting.sh](apply_inpainting.sh) Removes logos or overlays from video using ML inpanting.
 
 ## RGB encoded metric 3D depth video format
