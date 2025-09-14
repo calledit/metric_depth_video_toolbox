@@ -65,3 +65,7 @@ git clone https://huggingface.co/TencentARC/StereoCrafter
 cd .. 
 cd ..
 echo infill model installed
+
+echo install masking dependencies
+pip install rembg[gpu] filetype watchdog aiohttp asyncer gradio
+CALL "%CONDA%"  install -c conda-forge cudnn=9.*

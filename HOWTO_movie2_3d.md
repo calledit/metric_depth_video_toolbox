@@ -28,7 +28,7 @@ export DISPLAY=:2
 apt install ffmpeg
 ./install_mdvtoolbox.sh
 ./install_mdvtoolbox.sh -stereocrafter
-./create_video_mask.sh -install
+./install_mdvtoolbox.sh -rembg
 
 pip install --upgrade scenedetect[opencv-headless]
 ```
