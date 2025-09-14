@@ -215,11 +215,17 @@ if __name__ == '__main__':
             f.write(f"file '{video}'\n")
 
     video_name = os.path.basename(args.color_video)
-    result_video_file = args.output_dir+os.sep+video_name+"_SBS.mkv"
     mp4_result_video_file = args.output_dir+os.sep+video_name+"_SBS.mp4"
 
     #Use ffmpeg to join all scenes and add back original audio
-    subprocess.run("ffmpeg -y -f concat -safe 0 -i "+ffmpeg_concat_file+" -i "+args.color_video+" -map 0:v:0 -map 1:a:0  -c:v libx265 -crf 18 -tag:v hvc1 -pix_fmt yuv420p -c:a aac -shortest "+result_video_file, shell=True)
-
-    #Finnal result in to a video player compatible format with audio
-    subprocess.run("ffmpeg -i "+result_video_file+" -c:v libx265 -crf 18 -tag:v hvc1 -pix_fmt yuv420p -c:a aac "+mp4_result_video_file, shell=True)
+    subprocess.run(
+        "ffmpeg -y -f concat -safe 0 -i "
+        + ffmpeg_concat_file
+        + " -i "
+        + args.color_video
+        + " -map 0:v:0 -map 1:a:0 "
+        + "-c:v libx264 -crf 18 -preset veryfast -pix_fmt yuv420p "
+        + "-c:a aac -shortest "
+        + mp4_result_video_file,
+        shell=True
+    )
