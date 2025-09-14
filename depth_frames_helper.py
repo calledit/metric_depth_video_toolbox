@@ -133,7 +133,6 @@ def save_grayscale_video(frames, output_video_path, fps, max_depth_arg, rescale_
         height = frames.shape[1]
         width = frames.shape[2]
         max_depth = np.max(frames)
-        print("max metric depth:", max_depth)
         if MODEL_maxOUTPUT_depth < max_depth:
             print("warning: output depth exceeds max_depth_arg; values will be clipped.")
     else:

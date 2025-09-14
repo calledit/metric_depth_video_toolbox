@@ -56,7 +56,7 @@ def is_valid_video(file_path):
 
 if __name__ == '__main__':
 
-    python = "python3.11"
+    python = "python"
 
     parser = argparse.ArgumentParser(description='Takes a movie and converts it in to stereo 3D')
 
@@ -153,7 +153,7 @@ if __name__ == '__main__':
         assert is_valid_video(scene_depth_video_file), "Could not generate scene_depth_video_file"
 
         if not os.path.exists(scene_mask_video_file):
-            subprocess.run("./create_video_mask.sh "+scene_video_file, shell=True)
+            subprocess.run(python+" generate_video_mask.py --color_video "+scene_video_file, shell=True)
 
         assert is_valid_video(scene_mask_video_file), "Could not generate scene_mask_video_file"
 
