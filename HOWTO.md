@@ -10,7 +10,7 @@ If you want to convert an entire movie split it up and do it scene by scene. The
 I will use [in_office_720p.mp4](https://github.com/calledit/metric_depth_video_toolbox/releases/download/ExampleFiles/in_office_720p.mp4) with two individuals walking in a hallway obtained from pexels.com
 <img width="930" alt="video_in" src="https://github.com/user-attachments/assets/3ff877b1-fa68-4a0c-8089-6ee6d4fccecc" />
 ### Step 0
-On your **LINUX** machine Install metric depth video toolbox:
+On your machine Install metric depth video toolbox:
 
 This will install required packages and download the needed ML models.
 ```

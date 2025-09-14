@@ -9,6 +9,9 @@ if [ "$(uname)" == "Linux" ]; then
     DOWNLOAD='wget'
 	DOWNLOAD_ARG=''
     PIP='pip'
+elif [ "$(uname -o)" == "Msys" ]; then
+	echo use windows installer for windows
+    exit
 fi
 
 

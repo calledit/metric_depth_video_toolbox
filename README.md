@@ -93,6 +93,18 @@ As depth estimation models improve (especially for distant things) this 16bit de
 
 
 ## Install
+
+### Windows
+1. install git https://git-scm.com/downloads/win
+2. Install miniconda https://docs.conda.io/en/latest/
+3. Open the Anacoda prompt(miniconda) from the start menu
+4. git clone https://github.com/calledit/metric_depth_video_toolbox
+5. cd metric_depth_video_toolbox
+6. windows_installer.bat
+7. use ´´´conda activate mdvt´´´ to activate conda and use the tools
+
+### Ubuntu/Debian and OSX
+
 ```bash
 
 
@@ -122,12 +134,6 @@ export DISPLAY=:2
 # OSX (OSX only supports post processing of depth videos not generation of them. As the ML models need CUDA)
 # (open3d requires python3.11 on OSX (as of 2025)))
 pip3.11 install open3d numpy opencv-python
-
-
-#On Windows (Not tested or "officially" supported, but anecdotally working).
-WindowsInstall.bat
-See https://github.com/calledit/metric_depth_video_toolbox/issues/1#issuecomment-2632040738
-
 
 ```
 

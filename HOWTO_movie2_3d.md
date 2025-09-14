@@ -4,7 +4,7 @@ This guide contains a walkthrogh of how to use the Metric depth video toolbox to
 convert a full movie into side by side 3d stereo video.
 
 ## Part zero: install
-On your linux machine with a graphics card that has 24Gb of memory or more.
+On your machine with a graphics card that has 24Gb of memory or more.
 *Things may work on cards that have less memory but that has not been tested. The metric depth video toolbox is built and tested with nvidia 3090s rented on vast.ai*
 
 Make sure you have alot of free harddrive space we will be working with very large high
