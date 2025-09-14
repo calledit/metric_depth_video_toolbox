@@ -13,10 +13,13 @@ Most of these files can be thrown away once they have been used and you are done
 
 
 Installing:
+Windows:
 ```
-git clone https://github.com/calledit/metric_depth_video_toolbox
-cd metric_depth_video_toolbox
-
+windows_installer.bat
+pip install --upgrade scenedetect[opencv-headless]
+```
+linux:
+```
 # if using headless linux you need to start a virtual x11 server
 apt-get install xvfb
 Xvfb :2 &
@@ -28,7 +31,6 @@ apt install ffmpeg
 ./create_video_mask.sh -install
 
 pip install --upgrade scenedetect[opencv-headless]
-
 ```
 
 
