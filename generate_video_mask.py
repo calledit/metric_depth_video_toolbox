@@ -41,31 +41,40 @@ def process_batch(frames_rgb, session, use_threads=False, max_workers=4):
     return masks
 
 
-if __name__ == '__main__':
-    parser = argparse.ArgumentParser(description='MDVT mask video generator')
-    parser.add_argument('--color_video', type=str, required=True)
-    parser.add_argument('--max_frames', type=int, default=-1, help='maximum number of frames; -1 = no limit')
-    parser.add_argument('--batch_size', type=int, default=8, help='micro-batch size for rembg')
-    args = parser.parse_args()
+# -----------------------
+# Helpers for batch mode
+# -----------------------
+def _is_txt(path: str) -> bool:
+    return isinstance(path, str) and path.lower().endswith(".txt")
 
-    DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
-    use_threads = (DEVICE == 'cpu')  # threading helps CPU path; on GPU it can hurt
 
-    output_file = args.color_video + '_mask.mkv'
+def _read_list_file(path: str):
+    """
+    Returns a list of stripped lines, ignoring blanks and lines starting with '#'.
+    """
+    items = []
+    with open(path, "r", encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            items.append(line)
+    return items
 
-    if not os.path.isfile(args.color_video):
-        raise Exception("input color_video does not exist")
 
-    cap = cv2.VideoCapture(args.color_video)
+def process_single_video(color_video_path: str, args, DEVICE: str, use_threads: bool, session) -> None:
+    output_file = color_video_path + '_mask.mkv'
+
+    if not os.path.isfile(color_video_path):
+        raise Exception(f"input color_video does not exist: {color_video_path}")
+
+    cap = cv2.VideoCapture(color_video_path)
     if not cap.isOpened():
-        raise RuntimeError(f"Failed to open video: {args.color_video}")
+        raise RuntimeError(f"Failed to open video: {color_video_path}")
 
     frame_width  = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
     frame_height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
     frame_rate   = cap.get(cv2.CAP_PROP_FPS) or 30.0
-
-    # Prepare rembg session (uses onnxruntime-gpu if present)
-    session = new_session()
 
     masks_out = []
     frame_n = 0
@@ -117,3 +126,30 @@ if __name__ == '__main__':
     )
 
     print(f"Done. Wrote: {output_file}  (frames: {len(masks_np)}, batch_size={args.batch_size}, device={DEVICE})")
+
+
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser(description='MDVT mask video generator')
+    parser.add_argument('--color_video', type=str, required=True)
+    parser.add_argument('--max_frames', type=int, default=-1, help='maximum number of frames; -1 = no limit')
+    parser.add_argument('--batch_size', type=int, default=8, help='micro-batch size for rembg')
+    args = parser.parse_args()
+
+    DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
+    use_threads = (DEVICE == 'cpu')  # threading helps CPU path; on GPU it can hurt
+
+    # Prepare rembg session (uses onnxruntime-gpu if present)
+    session = new_session()
+
+    # -----------------------
+    # Single vs Batch logic
+    # -----------------------
+    if _is_txt(args.color_video):
+        video_list = _read_list_file(args.color_video)
+        print(f"Batch mode: {len(video_list)} entries from {args.color_video}")
+        for idx, vid_path in enumerate(video_list, start=1):
+            print(f"\n##### [{idx}/{len(video_list)}] {vid_path} #####")
+            process_single_video(vid_path, args, DEVICE, use_threads, session)
+    else:
+        # Single file (original behavior)
+        process_single_video(args.color_video, args, DEVICE, use_threads, session)

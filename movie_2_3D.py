@@ -97,113 +97,154 @@ if __name__ == '__main__':
     video_files_to_concat = []
 
     parallels = []
-
+    
+    print("Step one: create video files for all scenes")
+    scene_video_files = []
     for scene in scenes:
         print("Handle scene:", scene)
-        infill = True
-        depth_engine = 'vda'
-        if 'Engine' in scene and scene['Engine'] != '':
-            depth_engine = scene['Engine']
-
-        if 'Infill' in scene and scene['Infill'] == 'No':
-            infill = False
 
 
         #generate scene video file
-        scene_video_file = os.path.join(args.output_dir, 'scene_'+str(scene['Scene Number'])+'.mkv')
-        write_frames_to_file(raw_video, int(scene['Length (frames)']), scene_video_file, frame_rate, frame_width, frame_height)
+        scene['scene_video_file'] = os.path.join(args.output_dir, 'scene_'+str(scene['Scene Number'])+'.mkv')
+        
+        if not os.path.exists(scene['scene_video_file']):
+            write_frames_to_file(raw_video, int(scene['Length (frames)']), scene['scene_video_file'], frame_rate, frame_width, frame_height)
+        scene_video_files.append(scene)
+        if args.end_scene == int(scene['Scene Number']):
+            break
+    
+        
+    print("Step two: estimate depth for all scenes")
+    
+    batch_file = args.color_video+'_batching.txt'
+    if os.path.exists(batch_file):
+        os.remove(batch_file)
+        
+    for scene in scene_video_files:
+        scene['depth_video_file'] = scene['scene_video_file'] + "_depth.mkv"
+        scene['xfovs_file'] = scene['depth_video_file'] + "_xfovs.json"
+        scene_org_xfovs_file = scene['depth_video_file'] + "_org_xfovs.json"
+        single_frame_depth_video_file = scene['scene_video_file'] + "_single_frame_depth.mkv"
+        
+        
+        depth_engine = 'vda'
+        if 'Engine' in scene and scene['Engine'] != '':
+            depth_engine = scene['Engine']
+        
 
-        scene_depth_video_file = scene_video_file + "_depth.mkv"
-        scene_convergence_file = scene_depth_video_file + "_convergence_depths.json"
-        scene_xfovs_file = scene_depth_video_file + "_xfovs.json"
-        scene_org_xfovs_file = scene_depth_video_file + "_org_xfovs.json"
-        scene_mask_video_file = scene_video_file + "_mask.mkv"
-        single_frame_depth_video_file = scene_video_file + "_single_frame_depth.mkv"
-
-        scene_xfov = None
-        #Generate scene depth file
-        if depth_engine != 'vda':
+        scene['xfov'] = None
+        #Get Field of view
+        #If we use engine that is not VDA or depthcrafter we need to esitmate accurate FOV and a proper metric reference depth video so we use unik3d for that
+        if depth_engine != 'vda' and depth_engine != 'depthcrafter':
             if not os.path.exists(single_frame_depth_video_file):
                 if not os.path.exists(scene_org_xfovs_file):
-                    subprocess.run(python+" unik3d_video.py --color_video "+scene_video_file, shell=True)
-                    subprocess.run("mv "+scene_xfovs_file+" "+scene_org_xfovs_file, shell=True)
+                    subprocess.run(python+" unik3d_video.py --color_video "+scene['scene_video_file'], shell=True)
+                    subprocess.run("mv "+scene['xfovs_file']+" "+scene_org_xfovs_file, shell=True)
 
                 with open(scene_org_xfovs_file) as json_file_handle:
                     xfovs = json.load(json_file_handle)
-                    scene_xfov = np.mean(xfovs)
-                subprocess.run(python+" unik3d_video.py --xfov "+str(scene_xfov)+" --color_video "+scene_video_file, shell=True)
-                subprocess.run("mv "+scene_depth_video_file+" "+single_frame_depth_video_file, shell=True)
+                    scene['xfov'] = np.mean(xfovs)
+                subprocess.run(python+" unik3d_video.py --xfov "+str(scene['xfov'])+" --color_video "+scene['scene_video_file'], shell=True)
+                subprocess.run("mv "+scene['depth_video_file']+" "+single_frame_depth_video_file, shell=True)
 
             assert is_valid_video(single_frame_depth_video_file), "Could not generate metric reference video file for depthcrafter"
         else:
-            scene_xfov = 42.0
+            scene['xfov'] = 42.0
+        
+        #VDA is batchable so gets its own flow
+        if depth_engine == 'vda':
+            if not os.path.exists(scene['depth_video_file']):
+                with open(batch_file, "a", encoding="utf-8") as f:
+                    f.write(scene['scene_video_file']+"\n")
+        else:
+            if depth_engine == 'depthcrafter':
+                if not os.path.exists(scene['depth_video_file']):
+                    subprocess.run(python+" depthcrafter_video.py --color_video "+scene['scene_video_file']+" --depth_video "+single_frame_depth_video_file, shell=True)
+            else:#geometrycrafter
+                if not os.path.exists(scene['depth_video_file']):
+                    #+" --depth_video "+single_frame_depth_video_file+" --xfov_file "+scene['xfovs_file']
+                    subprocess.run(python+" geometrycrafter_video.py --color_video "+scene['scene_video_file']+" --depth_video "+single_frame_depth_video_file+" --xfov_file "+scene['xfovs_file'], shell=True)
+                    #subprocess.run(python+" geometrycrafter_video.py --color_video "+scene['scene_video_file'], shell=True)
 
-        if depth_engine == 'depthcrafter':
-            if not os.path.exists(scene_depth_video_file):
-                subprocess.run(python+" depthcrafter_video.py --color_video "+scene_video_file+" --depth_video "+single_frame_depth_video_file, shell=True)
-        elif depth_engine == 'vda':
-            if not os.path.exists(scene_depth_video_file):
-                subprocess.run(python+" video_metric_convert.py --color_video "+scene_video_file, shell=True)
-        else:#geometrycrafter
-            if not os.path.exists(scene_depth_video_file):
-                #+" --depth_video "+single_frame_depth_video_file+" --xfov_file "+scene_xfovs_file
-                subprocess.run(python+" geometrycrafter_video.py --color_video "+scene_video_file+" --depth_video "+single_frame_depth_video_file+" --xfov_file "+scene_xfovs_file, shell=True)
-                #subprocess.run(python+" geometrycrafter_video.py --color_video "+scene_video_file, shell=True)
+            assert is_valid_video(scene['depth_video_file']), "Could not generate: "+scene['depth_video_file']
+    
+    if os.path.exists(batch_file):
+        subprocess.run(python+" video_metric_convert.py --color_video "+batch_file, shell=True)
+        os.remove(batch_file)
+    
+    
+    print("Step three: generate masks for focus point")
+    for scene in scene_video_files:
+        scene['mask_video_file'] = scene['scene_video_file'] + "_mask.mkv"
+        if not os.path.exists(scene['mask_video_file']):
+            with open(batch_file, "a", encoding="utf-8") as f:
+                f.write(scene['scene_video_file']+"\n")
+        
+    if os.path.exists(batch_file):
+        subprocess.run(python+" generate_video_mask.py --color_video "+batch_file, shell=True)
+        os.remove(batch_file)
+    
+    
+    print("Step four: find convergence depth for focus point")
+    for scene in scene_video_files:
+        assert is_valid_video(scene['mask_video_file']), "Could find valid mask video: "+scene['mask_video_file']
+        scene['convergence_file'] = scene['depth_video_file'] + "_convergence_depths.json"
+        if not os.path.exists(scene['convergence_file']):
+            subprocess.run(python+" find_convergence_depth.py --depth_video "+scene['depth_video_file']+" --mask_video "+scene['mask_video_file'], shell=True)
+    
+    if args.no_render:
+        exit(0)
+    
+    
+    
+    
+    print("Step five: render SBS frames")
+    for scene in scene_video_files:
+        infill = True
+        if 'Infill' in scene and scene['Infill'] == 'No':
+            infill = False
+        
+        #Generate stereo 3d video and infill mask
+        scene['sbs'] = scene['depth_video_file'] + "_stereo.mkv"
+        scene['sbs_infill'] = scene['sbs'] + "_infillmask.mkv"
+        if not os.path.exists(scene['sbs']):
+            if scene['xfov'] is not None:
+                xfov_str = "--xfov "+str(scene['xfov'])
+            else:
+                xfov_str = "--xfov_file "+scene['xfovs_file']
 
-        assert is_valid_video(scene_depth_video_file), "Could not generate scene_depth_video_file"
+            infm = ''
+            if infill:
+                infm = '--infill_mask'
 
-        if not os.path.exists(scene_mask_video_file):
-            subprocess.run(python+" generate_video_mask.py --color_video "+scene_video_file, shell=True)
+            parallels.append(subprocess.Popen(python+" stereo_rerender.py --color_video "+scene['scene_video_file']+" --convergence_file "+scene['convergence_file']+" "+xfov_str+" --depth_video "+scene['depth_video_file']+" "+infm, shell=True))
 
-        assert is_valid_video(scene_mask_video_file), "Could not generate scene_mask_video_file"
-
-        if not os.path.exists(scene_convergence_file):
-            subprocess.run(python+" find_convergence_depth.py --depth_video "+scene_depth_video_file+" --mask_video "+scene_mask_video_file, shell=True)
-
-        if not args.no_render:
-            #Generate stereo 3d video and infill mask
-            scene_sbs = scene_depth_video_file + "_stereo.mkv"
-            scene_sbs_infill = scene_sbs + "_infillmask.mkv"
-            if not os.path.exists(scene_sbs):
-                if scene_xfov is not None:
-                    xfov_str = "--xfov "+str(scene_xfov)
-                else:
-                    xfov_str = "--xfov_file "+scene_xfovs_file
-
-                infm = ''
-                if infill:
-                    infm = '--infill_mask'
-
-                parallels.append(subprocess.Popen(python+" stereo_rerender.py --color_video "+scene_video_file+" --convergence_file "+scene_convergence_file+" "+xfov_str+" --depth_video "+scene_depth_video_file+" "+infm, shell=True))
-
-            if len(parallels) >= args.parallel:
-                parallels = wait_for_first(parallels)
-
-
-            if args.parallel == 1:
-
-                assert is_valid_video(scene_sbs), "Could not generate stereo video file"
-
-                if args.no_infill or not infill:
-                    video_files_to_concat.append(scene_sbs)
-                else:
-
-                    #Do infill
-                    scene_infilled = scene_sbs+"_infilled.mkv"
-                    if not os.path.exists(scene_infilled) and not skip_last_step:
-                       subprocess.run(python+" stereo_crafter_infill.py --sbs_color_video "+scene_sbs+" --sbs_mask_video "+scene_sbs_infill, shell=True)
-
-                    assert is_valid_video(scene_infilled), "Could not generate infilled stereo video file"
-
-                    video_files_to_concat.append(scene_infilled)
-
-        if args.end_scene == int(scene['Scene Number']):
-            break
-
+        if len(parallels) >= args.parallel:
+            parallels = wait_for_first(parallels)
     for proc in parallels:
         proc.wait()
 
-    if skip_last_step or args.no_render or args.parallel != 1:
+    print("Step six: do SBS infill")
+    for scene in scene_video_files:
+
+        assert is_valid_video(scene['sbs']), "Could not find proper stereo video file to so infill on"+scene['sbs']
+
+        if args.no_infill or not infill:
+            video_files_to_concat.append(scene['sbs'])
+        else:
+
+            #Do infill
+            scene['infilled'] = scene['sbs']+"_infilled.mkv"
+            if not os.path.exists(scene['infilled']) and not skip_last_step:
+               subprocess.run(python+" stereo_crafter_infill.py --sbs_color_video "+scene['sbs']+" --sbs_mask_video "+scene['sbs_infill'], shell=True)
+
+            assert is_valid_video(scene['infilled']), "Could not generate infilled stereo video file"
+
+            video_files_to_concat.append(scene['infilled'])
+
+
+
+    if skip_last_step or args.no_render:
         exit(0)
 
     # Write the ffmpeg concat file
@@ -218,7 +259,21 @@ if __name__ == '__main__':
     mp4_result_video_file = args.output_dir+os.sep+video_name+"_SBS.mp4"
 
     #Use ffmpeg to join all scenes and add back original audio
-    subprocess.run(
+    ret = subprocess.run(
+        "ffmpeg -y -f concat -safe 0 -i "
+        + ffmpeg_concat_file
+        + " -i "
+        + args.color_video
+        + " -map 0:v:0 -map 1:a:0 "
+        + "-c:v libx264 -crf 18 -preset veryfast -pix_fmt yuv420p "
+        + "-c:a copy  -shortest "
+        + mp4_result_video_file,
+        shell=True
+    )
+    
+    #if ffmpeg fails we asumme it is cause the original audiocodec was not aac so we rencode the audio
+    if ret.returncode != 0:
+        subprocess.run(
         "ffmpeg -y -f concat -safe 0 -i "
         + ffmpeg_concat_file
         + " -i "
