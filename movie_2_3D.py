@@ -6,6 +6,7 @@ import time
 import os
 import json
 import numpy as np
+from pathlib import Path
 
 def write_frames_to_file(input_video, nr_frames_to_copy, scene_video_file, frame_rate, frame_width, frame_height):
 
@@ -62,7 +63,7 @@ if __name__ == '__main__':
 
     parser.add_argument('--color_video', type=str, help='video file to use as color input', required=True)
 
-    parser.add_argument('--scene_file', type=str, help='csv from PySceneDetect describing the scenes', required=True)
+    parser.add_argument('--scene_file', type=str, default=None, help='csv from PySceneDetect describing the scenes', required=False)
     parser.add_argument('--csv_delimiter', type=str, default=',', help='Delimiter used in csv', required=False)
 
     parser.add_argument('--output_dir', type=str, default='output', help='folder where output will be placed', required=False)
@@ -81,6 +82,13 @@ if __name__ == '__main__':
 
     if not os.path.exists(args.output_dir):
         os.makedirs(args.output_dir)
+    
+    
+    #if the user did not specify a scene file we create one
+    if args.scene_file is None:
+        subprocess.run("scenedetect -i "+args.color_video+" list-scenes", shell=True)
+        name = Path(args.color_video).with_suffix('').name
+        args.scene_file = f"{name}-Scenes.csv" 
 
     raw_video = cv2.VideoCapture(args.color_video)
     frame_width, frame_height = int(raw_video.get(cv2.CAP_PROP_FRAME_WIDTH)), int(raw_video.get(cv2.CAP_PROP_FRAME_HEIGHT))
