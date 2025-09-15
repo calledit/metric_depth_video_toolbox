@@ -165,9 +165,15 @@ def deal_with_frame_chunk(keep_first_three, chunk, out, keep_last_three):
 
     #TODO: Investigate why the masks almost dont do anything at all, i can invert the mask and get almost the same result
     print("generating left side images")
-    left_frames = generate_infilled_frames(left_input, left_mask_input)
+    if np.all(left_input == 0):
+        left_frames = left_input
+    else:
+        left_frames = generate_infilled_frames(left_input, left_mask_input)
     print("generating right side images")
-    right_frames = generate_infilled_frames(right_input, right_mask_input)
+    if np.all(right_input == 0):
+        right_frames = right_input
+    else:
+        right_frames = generate_infilled_frames(right_input, right_mask_input)
 
     sttart = 0
     if not keep_first_three:
