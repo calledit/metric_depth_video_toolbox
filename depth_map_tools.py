@@ -457,10 +457,14 @@ def create_mesh_from_point_cloud(points, height, width,
                 is_un_used[invalid_vertexes] = True
                 un_used_indices = np.where(is_un_used)[0]
                 
-                triangle_normals = normals / np.linalg.norm(normals,
-                                           axis=1,       # over the 2 components
-                                           keepdims=True # yields shape (N,1)
-                                          )
+                area2 = np.linalg.norm(normals, axis=1)
+                
+                triangle_normals = np.divide(
+                    normals, 
+                    area2[:, None],
+                    out=np.ones_like(normals), ##some normals are invalid if depth is zero so then we just set those normals to one
+                    where=area2[:, None] > 0
+                )
                 
                 # assume triangles_all is (n_triangles, 3), triangle_normals is (n_triangles, 3)
                 n_vertices = vertices.shape[0]
@@ -573,7 +577,7 @@ def render(objects, cam_mat, depth = False, w = None, h = None, extrinsic_matric
         ctr.set_up([0, -1, 0])
         ctr.set_front([0, 0, -1])
         ctr.set_zoom(1)
-        
+        ctr.set_constant_z_near(0.0001) #you cant set near to 0 with open 3d this close to zero this seams good enogh
 
 
         params = ctr.convert_to_pinhole_camera_parameters()
@@ -586,6 +590,8 @@ def render(objects, cam_mat, depth = False, w = None, h = None, extrinsic_matric
 
         #Bug workaround where we scale the geometry insted of the viewport
         scale_up_factor = cam_mat[1][1]/cam_mat[0][0]
+        
+        
         
         for obj in objects:
             obj2 = copy.deepcopy(obj)
