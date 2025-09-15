@@ -5,6 +5,9 @@ CALL "%CONDA%"  create -n mdvt python=3.11 -y
 CALL "%UserProfile%\miniconda3\Scripts\activate.bat" mdvt
 pip install numpy open3d opencv-python
 
+#to use the movie_2_3D.py you need scenedetect
+pip install scenedetect[opencv-headless]
+
 CALL "%CONDA%" install -c conda-forge ffmpeg
 
 echo install ML models and dependencies
