@@ -225,13 +225,13 @@ if __name__ == '__main__':
             if infill:
                 infm = '--infill_mask'
 
-            parallels.append(subprocess.Popen(python+" stereo_rerender.py --color_video "+scene['scene_video_file']+" --convergence_file "+scene['convergence_file']+" "+xfov_str+" --depth_video "+scene['depth_video_file']+" "+infm, shell=True))
+            parallels.append(subprocess.Popen(python+" stereo_rerender.py --green_and_black_infill_mask --color_video "+scene['scene_video_file']+" --convergence_file "+scene['convergence_file']+" "+xfov_str+" --depth_video "+scene['depth_video_file']+" "+infm, shell=True))
 
         if len(parallels) >= args.parallel:
             parallels = wait_for_first(parallels)
     for proc in parallels:
         proc.wait()
-
+    
     print("Step six: do SBS infill")
     for scene in scene_video_files:
 

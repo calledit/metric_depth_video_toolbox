@@ -273,6 +273,7 @@ if __name__ == '__main__':
     parser.add_argument('--touchly_min_depth', default=0, type=float, help='the min depth that touchly is cliped to.', required=False)
     parser.add_argument('--compressed', action='store_true', help='Compress output video (lower quality)', required=False)
     parser.add_argument('--infill_mask', action='store_true', help='Save infill masks alongside output', required=False)
+    parser.add_argument('--green_and_black_infill_mask', action='store_true', help='Dont generate normals forth infill. (mean less usefull infillmask but faster processing)', required=False)
     parser.add_argument('--remove_edges', action='store_true', help='Remove mesh edges not visible in input frames', required=False)
     parser.add_argument('--mask_video', type=str, help='video file to use as mask input to filter out the forground and generate a background version of the mesh that can be used as infill. Requires non moving camera or very good tracking.', required=False)
     parser.add_argument('--save_background', action='store_true', help='Save the compound background as a file. To be ussed as infill.', required=False)
@@ -284,6 +285,9 @@ if __name__ == '__main__':
     # ------------------ Input Validation ------------------
     if args.xfov is None and args.yfov is None and args.xfov_file is None:
         raise ValueError("Error: Either --xfov_file, --xfov or --yfov must be provided.")
+        
+    if args.green_and_black_infill_mask and args.do_basic_infill:
+        raise ValueError("Error: --green_and_black_infill_mask and --do_basic_infill are not compatible with eachother.")
 
     MODEL_maxOUTPUT_depth = args.max_depth
 
@@ -669,9 +673,11 @@ if __name__ == '__main__':
                     points_3d = np.asarray(edge_pcd.points)
                     points_2d = depth_map_tools.project_3d_points_to_2d(points_3d, render_cam_matrix)
                 
-                
-                left_image, left_depth = depth_map_tools.render(to_draw, render_cam_matrix, depth = -2, bg_color = bg_color)
-                
+                #Touchly0 requires a left eye depthmap
+                if args.touchly0:
+                    left_image, left_depth = depth_map_tools.render(to_draw, render_cam_matrix, depth = -2, bg_color = bg_color)
+                else:
+                    left_image = depth_map_tools.render(to_draw, render_cam_matrix, depth = False, bg_color = bg_color)
                 
                 bg_mask = np.all(left_image == bg_color, axis=-1)
                 
@@ -710,10 +716,10 @@ if __name__ == '__main__':
                     # As the area you want to infill from might be coverd in the rotated translated render.
                     
                     mask = np.all(left_image[valid_points[:, 1], valid_points[:, 0]] == bg_color, axis=-1)
-                    
-                    normalized = valid_unprojected_normals[mask]
-                    lengths = np.linalg.norm(normalized, axis=1, keepdims=True)
-                    normalized = normalized / lengths
+                    if not args.green_and_black_infill_mask:
+                        normalized = valid_unprojected_normals[mask]
+                        lengths = np.linalg.norm(normalized, axis=1, keepdims=True)
+                        normalized = normalized / lengths
                 
                 
                 
@@ -727,18 +733,19 @@ if __name__ == '__main__':
                     
                 left_img_mask[bg_mask] = bg_color # We simply hope that there is no normal that is perfectly green when we use green as bg
                 left_image[bg_mask] = np.array([.0,.0,.0])
-                #if the right most pixels are all green set their normals so they get infilled (16 sep 2025 TODO fix bug. i think this sould be applied to both sides and not only when all pixels are green do to convergense)
-                left_img_mask[:, 0][np.all(left_img_mask[:, 0, :]  == bg_color, axis=1)] = np.array([1., 0.5, 0.5])
-                    
-                if edge_pcd is not None:
-                    left_img_mask[valid_points[mask, 1], valid_points[mask, 0]] = (normalized+1)/2
-                green_left = np.all(left_img_mask == bg_color, axis=-1)
-                green_and_black = green_left | np.all(left_img_mask == np.array([.0,.0,.0]), axis=-1)
-                infill_area_mask = (green_and_black*255).astype('uint8')
-                left_img_mask_infilled = cv2.inpaint((left_img_mask*255).astype('uint8'), infill_area_mask, inpaintRadius=3, flags=cv2.INPAINT_TELEA)
-                left_img_mask[green_left] = left_img_mask_infilled[green_left].astype('float32')/255.0
-                left_img_mask = masked_blur((left_img_mask*255).astype('uint8')).astype('float32')/255.0
-                    
+                if not args.green_and_black_infill_mask:
+                    #if the right most pixels are all green set their normals so they get infilled (16 sep 2025 TODO fix bug. i think this sould be applied to both sides and not only when all pixels are green do to convergense)
+                    left_img_mask[:, 0][np.all(left_img_mask[:, 0, :]  == bg_color, axis=1)] = np.array([1., 0.5, 0.5])
+                        
+                    if edge_pcd is not None:
+                        left_img_mask[valid_points[mask, 1], valid_points[mask, 0]] = (normalized+1)/2
+                    green_left = np.all(left_img_mask == bg_color, axis=-1)
+                    green_and_black = green_left | np.all(left_img_mask == np.array([.0,.0,.0]), axis=-1)
+                    infill_area_mask = (green_and_black*255).astype('uint8')
+                    left_img_mask_infilled = cv2.inpaint((left_img_mask*255).astype('uint8'), infill_area_mask, inpaintRadius=3, flags=cv2.INPAINT_TELEA)
+                    left_img_mask[green_left] = left_img_mask_infilled[green_left].astype('float32')/255.0
+                    left_img_mask = masked_blur((left_img_mask*255).astype('uint8')).astype('float32')/255.0
+                        
                 if args.do_basic_infill:
                     left_img_mask_minus = (left_img_mask*2)-1
                     left_image = infill_using_normals(left_image, bg_mask, left_img_mask_minus)
@@ -753,7 +760,7 @@ if __name__ == '__main__':
 
 
                 touchly_left_depth = None
-                #Touchly1 requires a left eye depthmap XXX use dual rendering here to speed things upp
+                
                 if args.touchly0:
                     left_depth8bit = np.rint(np.maximum(0, np.minimum(left_depth, args.touchly_max_depth)-args.touchly_min_depth)*(255/(args.touchly_max_depth-args.touchly_min_depth))).astype(np.uint8)
                     left_depth8bit[left_depth8bit == 0] = 255 # Any pixel at zero depth needs to move back is is non rendered depth buffer(ie things on the side of the mesh)
@@ -781,7 +788,7 @@ if __name__ == '__main__':
                     points_3d = np.asarray(edge_pcd.points)
                     points_2d = depth_map_tools.project_3d_points_to_2d(points_3d, render_cam_matrix)
                 
-                right_image, right_depth = depth_map_tools.render(to_draw, render_cam_matrix, depth = -2, bg_color = bg_color)
+                right_image = depth_map_tools.render(to_draw, render_cam_matrix, depth = False, bg_color = bg_color)
 
                 bg_mask = np.all(right_image == bg_color, axis=-1)
 
@@ -798,10 +805,10 @@ if __name__ == '__main__':
                     valid_colors = edge_colors[valid_mask][depth_order]
                     valid_unprojected_normals = unprojected_normals[valid_mask][depth_order]
                     mask = np.all(right_image[valid_points[:, 1], valid_points[:, 0]] == bg_color, axis=-1)
-                    
-                    normalized = valid_unprojected_normals[mask]
-                    lengths = np.linalg.norm(normalized, axis=1, keepdims=True)
-                    normalized = normalized / lengths
+                    if not args.green_and_black_infill_mask:
+                        normalized = valid_unprojected_normals[mask]
+                        lengths = np.linalg.norm(normalized, axis=1, keepdims=True)
+                        normalized = normalized / lengths
                 
                 right_img_mask = np.zeros((frame_height, frame_width, 3), dtype=np.float64)
                 
@@ -809,20 +816,21 @@ if __name__ == '__main__':
                     
                 right_img_mask[bg_mask] = bg_color # We simply hope that there is no normal that is perfectly green when we use green as bg
                 right_image[bg_mask] = np.array([.0,.0,.0])
-                #if the left most pixels are all green set their normals so they get infilled (16 sep 2025 TODO fix bug. i think this sould be applied to both sides and not only when all pixels are green do to convergense)
-                right_img_mask[:, -1][np.all(right_img_mask[:, -1, :]  == bg_color, axis=1)] = np.array([0., 0.5, 0.5])
                 
-                    
-                if edge_pcd is not None:
-                    #What hapens when two vertexes are antop of eachother?
-                    right_img_mask[valid_points[mask, 1], valid_points[mask, 0]] = (normalized+1)/2
-                green_left = np.all(right_img_mask == bg_color, axis=-1)
-                green_and_black = green_left | np.all(right_img_mask == np.array([.0,.0,.0]), axis=-1)
-                infill_area_mask = (green_and_black*255).astype('uint8')
-                right_img_mask_infilled = cv2.inpaint((right_img_mask*255).astype('uint8'), infill_area_mask, inpaintRadius=3, flags=cv2.INPAINT_TELEA)
-                right_img_mask[green_left] = right_img_mask_infilled[green_left].astype('float32')/255.0
-                right_img_mask = masked_blur((right_img_mask*255).astype('uint8')).astype('float32')/255.0
-                    
+                if not args.green_and_black_infill_mask:
+                    #if the left most pixels are all green set their normals so they get infilled (16 sep 2025 TODO fix bug. i think this sould be applied to both sides and not only when all pixels are green do to convergense)
+                    right_img_mask[:, -1][np.all(right_img_mask[:, -1, :]  == bg_color, axis=1)] = np.array([0., 0.5, 0.5])
+                        
+                    if edge_pcd is not None:
+                        #What hapens when two vertexes are antop of eachother?
+                        right_img_mask[valid_points[mask, 1], valid_points[mask, 0]] = (normalized+1)/2
+                    green_right = np.all(right_img_mask == bg_color, axis=-1)
+                    green_and_black = green_right | np.all(right_img_mask == np.array([.0,.0,.0]), axis=-1)
+                    infill_area_mask = (green_and_black*255).astype('uint8')
+                    right_img_mask_infilled = cv2.inpaint((right_img_mask*255).astype('uint8'), infill_area_mask, inpaintRadius=3, flags=cv2.INPAINT_TELEA)
+                    right_img_mask[green_right] = right_img_mask_infilled[green_right].astype('float32')/255.0
+                    right_img_mask = masked_blur((right_img_mask*255).astype('uint8')).astype('float32')/255.0
+                        
                 if args.do_basic_infill:
                     right_img_mask_minus = (right_img_mask*2)-1
                     right_image = infill_using_normals(right_image, bg_mask, right_img_mask_minus)
