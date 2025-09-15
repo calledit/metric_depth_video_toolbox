@@ -41,8 +41,8 @@ This is mostly a waiting game you can run a few test scenes by using the argumen
 python movie_2_3D.py --color_video ~/Starship.Troopers.mp4 --parallel 8
 ```
 
-When this is all done you will have video scene files for all scenes and two final result files:
-- a Starship.Troopers.mp4_SBS.mp4 that can be sent to most consumer electronics.
+When this is all done you will have video scene files for all scenes and a final result file:
+Starship.Troopers.mp4_SBS.mp4 that can be sent to most consumer electronics.
 
 The result of the first 3 minutes of the example can be seen here:
 https://www.youtube.com/watch?v=NzI8Js6aYiI
