@@ -722,27 +722,28 @@ if __name__ == '__main__':
                     
                 left_img_mask = np.zeros((frame_height, frame_width, 3), dtype=np.float64)
 
+                
+                    
+                    
+                left_img_mask[bg_mask] = bg_color # We simply hope that there is no normal that is perfectly green when we use green as bg
+                left_image[bg_mask] = np.array([.0,.0,.0])
+                #if the right most pixels are all green set their normals so they get infilled
+                left_img_mask[:, 0][np.all(left_img_mask[:, 0, :]  == bg_color, axis=1)] = np.array([1., 0.5, 0.5])
+                    
                 if edge_pcd is not None:
-                    
-                    
-                    left_img_mask[bg_mask] = bg_color # We simply hope that there is no normal that is perfectly green when we use green as bg
-                    left_image[bg_mask] = np.array([.0,.0,.0])
-                    left_img_mask[:, 0][np.all(left_img_mask[:, 0, :]  == bg_color, axis=1)] = np.array([1., 0.5, 0.5])
-                    
-                    
                     left_img_mask[valid_points[mask, 1], valid_points[mask, 0]] = (normalized+1)/2
-                    green_left = np.all(left_img_mask == bg_color, axis=-1)
-                    green_and_black = green_left | np.all(left_img_mask == np.array([.0,.0,.0]), axis=-1)
-                    infill_area_mask = (green_and_black*255).astype('uint8')
-                    left_img_mask_infilled = cv2.inpaint((left_img_mask*255).astype('uint8'), infill_area_mask, inpaintRadius=3, flags=cv2.INPAINT_TELEA)
-                    left_img_mask[green_left] = left_img_mask_infilled[green_left].astype('float32')/255.0
-                    left_img_mask = masked_blur((left_img_mask*255).astype('uint8')).astype('float32')/255.0
+                green_left = np.all(left_img_mask == bg_color, axis=-1)
+                green_and_black = green_left | np.all(left_img_mask == np.array([.0,.0,.0]), axis=-1)
+                infill_area_mask = (green_and_black*255).astype('uint8')
+                left_img_mask_infilled = cv2.inpaint((left_img_mask*255).astype('uint8'), infill_area_mask, inpaintRadius=3, flags=cv2.INPAINT_TELEA)
+                left_img_mask[green_left] = left_img_mask_infilled[green_left].astype('float32')/255.0
+                left_img_mask = masked_blur((left_img_mask*255).astype('uint8')).astype('float32')/255.0
                     
-                    if args.do_basic_infill:
-                        left_img_mask_minus = (left_img_mask*2)-1
-                        left_image = infill_using_normals(left_image, bg_mask, left_img_mask_minus)
-                    else:
-                        left_image[valid_points[mask, 1], valid_points[mask, 0]] = valid_colors[mask]
+                if args.do_basic_infill:
+                    left_img_mask_minus = (left_img_mask*2)-1
+                    left_image = infill_using_normals(left_image, bg_mask, left_img_mask_minus)
+                elif edge_pcd is not None:
+                    left_image[valid_points[mask, 1], valid_points[mask, 0]] = valid_colors[mask]
                     
                 if infill_mask_video is not None:
                     left_img_mask = (left_img_mask*255).astype(np.uint8)
@@ -804,31 +805,29 @@ if __name__ == '__main__':
                 
                 right_img_mask = np.zeros((frame_height, frame_width, 3), dtype=np.float64)
                 
-                if edge_pcd is not None:
-                    
-                    right_img_mask[bg_mask] = bg_color # We simply hope that there is no normal that is perfectly green when we use green as bg
-                    right_image[bg_mask] = np.array([.0,.0,.0])
-                    right_img_mask[:, -1][np.all(right_img_mask[:, -1, :]  == bg_color, axis=1)] = np.array([0., 0.5, 0.5])
-
                 
                     
-                    #if the left most pixels are all green set their normals so they get infilled
+                right_img_mask[bg_mask] = bg_color # We simply hope that there is no normal that is perfectly green when we use green as bg
+                right_image[bg_mask] = np.array([.0,.0,.0])
+                #if the left most pixels are all green set their normals so they get infilled
+                right_img_mask[:, -1][np.all(right_img_mask[:, -1, :]  == bg_color, axis=1)] = np.array([0., 0.5, 0.5])
+                
                     
-                    
+                if edge_pcd is not None:
                     #What hapens when two vertexes are antop of eachother?
                     right_img_mask[valid_points[mask, 1], valid_points[mask, 0]] = (normalized+1)/2
-                    green_left = np.all(right_img_mask == bg_color, axis=-1)
-                    green_and_black = green_left | np.all(right_img_mask == np.array([.0,.0,.0]), axis=-1)
-                    infill_area_mask = (green_and_black*255).astype('uint8')
-                    right_img_mask_infilled = cv2.inpaint((right_img_mask*255).astype('uint8'), infill_area_mask, inpaintRadius=3, flags=cv2.INPAINT_TELEA)
-                    right_img_mask[green_left] = right_img_mask_infilled[green_left].astype('float32')/255.0
-                    right_img_mask = masked_blur((right_img_mask*255).astype('uint8')).astype('float32')/255.0
+                green_left = np.all(right_img_mask == bg_color, axis=-1)
+                green_and_black = green_left | np.all(right_img_mask == np.array([.0,.0,.0]), axis=-1)
+                infill_area_mask = (green_and_black*255).astype('uint8')
+                right_img_mask_infilled = cv2.inpaint((right_img_mask*255).astype('uint8'), infill_area_mask, inpaintRadius=3, flags=cv2.INPAINT_TELEA)
+                right_img_mask[green_left] = right_img_mask_infilled[green_left].astype('float32')/255.0
+                right_img_mask = masked_blur((right_img_mask*255).astype('uint8')).astype('float32')/255.0
                     
-                    if args.do_basic_infill:
-                        right_img_mask_minus = (right_img_mask*2)-1
-                        right_image = infill_using_normals(right_image, bg_mask, right_img_mask_minus)
-                    else:
-                        right_image[valid_points[mask, 1], valid_points[mask, 0]] = valid_colors[mask]
+                if args.do_basic_infill:
+                    right_img_mask_minus = (right_img_mask*2)-1
+                    right_image = infill_using_normals(right_image, bg_mask, right_img_mask_minus)
+                elif edge_pcd is not None:
+                    right_image[valid_points[mask, 1], valid_points[mask, 0]] = valid_colors[mask]
                 
                 if infill_mask_video is not None:
                     right_img_mask = (right_img_mask*255).astype(np.uint8)
