@@ -727,7 +727,7 @@ if __name__ == '__main__':
                     
                 left_img_mask[bg_mask] = bg_color # We simply hope that there is no normal that is perfectly green when we use green as bg
                 left_image[bg_mask] = np.array([.0,.0,.0])
-                #if the right most pixels are all green set their normals so they get infilled
+                #if the right most pixels are all green set their normals so they get infilled (16 sep 2025 TODO fix bug. i think this sould be applied to both sides and not only when all pixels are green do to convergense)
                 left_img_mask[:, 0][np.all(left_img_mask[:, 0, :]  == bg_color, axis=1)] = np.array([1., 0.5, 0.5])
                     
                 if edge_pcd is not None:
@@ -809,7 +809,7 @@ if __name__ == '__main__':
                     
                 right_img_mask[bg_mask] = bg_color # We simply hope that there is no normal that is perfectly green when we use green as bg
                 right_image[bg_mask] = np.array([.0,.0,.0])
-                #if the left most pixels are all green set their normals so they get infilled
+                #if the left most pixels are all green set their normals so they get infilled (16 sep 2025 TODO fix bug. i think this sould be applied to both sides and not only when all pixels are green do to convergense)
                 right_img_mask[:, -1][np.all(right_img_mask[:, -1, :]  == bg_color, axis=1)] = np.array([0., 0.5, 0.5])
                 
                     
