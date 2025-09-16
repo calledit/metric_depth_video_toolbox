@@ -86,9 +86,10 @@ if __name__ == '__main__':
     
     #if the user did not specify a scene file we create one
     if args.scene_file is None:
-        subprocess.run("scenedetect -i "+args.color_video+" list-scenes", shell=True)
         p = Path(args.color_video)
         args.scene_file = p.with_name(p.stem + "-Scenes.csv")
+        if not os.path.exists(args.scene_file):
+            subprocess.run("scenedetect -i "+args.color_video+" list-scenes", shell=True)
 
     raw_video = cv2.VideoCapture(args.color_video)
     frame_width, frame_height = int(raw_video.get(cv2.CAP_PROP_FRAME_WIDTH)), int(raw_video.get(cv2.CAP_PROP_FRAME_HEIGHT))
