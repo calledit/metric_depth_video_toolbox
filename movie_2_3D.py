@@ -54,6 +54,38 @@ def is_valid_video(file_path):
     otherwise returns False.
     """
     return os.path.exists(file_path) and os.path.getsize(file_path) >= 2048
+    
+def validate_video_lengths(scene_video_files):
+    incorrect_files = []
+    
+    for scene in scene_video_files:
+        video_path = scene['infilled']
+        expected_frames = int(scene['Length (frames)'])
+        
+        # Check if file exists
+        if not os.path.isfile(video_path):
+            print(f"❌ File does not exist: {video_path}")
+            incorrect_files.append((video_path, "File not found"))
+            continue
+        
+        cap = cv2.VideoCapture(video_path)
+        if not cap.isOpened():
+            print(f"❌ Could not open file: {video_path}")
+            incorrect_files.append((video_path, "Could not open"))
+            continue
+        
+        actual_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        cap.release()
+        
+        if actual_frames != expected_frames:
+            print(f"⚠️ Mismatch in {video_path}: expected {expected_frames}, got {actual_frames}")
+            incorrect_files.append((video_path, f"Expected {expected_frames}, got {actual_frames}"))
+    
+    if incorrect_files:
+        print(f"Some files had issues delete them and run again: {incorrect_files}")
+        return False
+        
+    return True
 
 if __name__ == '__main__':
 
@@ -260,6 +292,8 @@ if __name__ == '__main__':
         subprocess.run(python+" stereo_crafter_infill.py --sbs_color_video "+batch_file+" --sbs_mask_video "+batch_file2, shell=True)
         os.remove(batch_file)
         os.remove(batch_file2)
+        
+    assert validate_video_lengths(scene_video_files), "Something was wrong with one of the video files"
 
     if skip_last_step or args.no_render:
         exit(0)
