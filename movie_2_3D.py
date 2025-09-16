@@ -115,9 +115,7 @@ if __name__ == '__main__':
 
         #generate scene video file
         scene['scene_video_file'] = os.path.join(args.output_dir, 'scene_'+str(scene['Scene Number'])+'.mkv')
-        
-        if not os.path.exists(scene['scene_video_file']):
-            write_frames_to_file(raw_video, int(scene['Length (frames)']), scene['scene_video_file'], frame_rate, frame_width, frame_height)
+        write_frames_to_file(raw_video, int(scene['Length (frames)']), scene['scene_video_file'], frame_rate, frame_width, frame_height)
         scene_video_files.append(scene)
         if args.end_scene == int(scene['Scene Number']):
             break
@@ -126,8 +124,11 @@ if __name__ == '__main__':
     print("Step two: estimate depth for all scenes")
     
     batch_file = args.color_video+'_batching.txt'
+    batch_file2 = args.color_video+'_batching2.txt'
     if os.path.exists(batch_file):
         os.remove(batch_file)
+    if os.path.exists(batch_file2):
+        os.remove(batch_file2)
         
     for scene in scene_video_files:
         scene['depth_video_file'] = scene['scene_video_file'] + "_depth.mkv"
@@ -201,6 +202,7 @@ if __name__ == '__main__':
         if not os.path.exists(scene['convergence_file']):
             subprocess.run(python+" find_convergence_depth.py --depth_video "+scene['depth_video_file']+" --mask_video "+scene['mask_video_file'], shell=True)
     
+    
     if args.no_render:
         exit(0)
     
@@ -226,7 +228,7 @@ if __name__ == '__main__':
             if infill:
                 infm = '--infill_mask'
 
-            parallels.append(subprocess.Popen(python+" stereo_rerender.py --green_and_black_infill_mask --color_video "+scene['scene_video_file']+" --convergence_file "+scene['convergence_file']+" "+xfov_str+" --depth_video "+scene['depth_video_file']+" "+infm, shell=True))
+            parallels.append(subprocess.Popen(python+" stereo_rerender.py --color_video "+scene['scene_video_file']+" --convergence_file "+scene['convergence_file']+" "+xfov_str+" --depth_video "+scene['depth_video_file']+" "+infm, shell=True))
 
         if len(parallels) >= args.parallel:
             parallels = wait_for_first(parallels)
@@ -245,13 +247,19 @@ if __name__ == '__main__':
             #Do infill
             scene['infilled'] = scene['sbs']+"_infilled.mkv"
             if not os.path.exists(scene['infilled']) and not skip_last_step:
-               subprocess.run(python+" stereo_crafter_infill.py --sbs_color_video "+scene['sbs']+" --sbs_mask_video "+scene['sbs_infill'], shell=True)
+                with open(batch_file, "a", encoding="utf-8") as f:
+                    f.write(scene['sbs']+"\n")
+                with open(batch_file2, "a", encoding="utf-8") as f:
+                    f.write(scene['sbs_infill']+"\n")
 
-            assert is_valid_video(scene['infilled']), "Could not generate infilled stereo video file"
+            #assert is_valid_video(scene['infilled']), "Could not generate infilled stereo video file"
 
             video_files_to_concat.append(scene['infilled'])
 
-
+    if os.path.exists(batch_file):
+        subprocess.run(python+" stereo_crafter_infill.py --sbs_color_video "+batch_file+" --sbs_mask_video "+batch_file2, shell=True)
+        os.remove(batch_file)
+        os.remove(batch_file2)
 
     if skip_last_step or args.no_render:
         exit(0)
