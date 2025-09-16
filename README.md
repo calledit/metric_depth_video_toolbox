@@ -13,6 +13,9 @@ https://youtu.be/nEiUloZ591Q
 Stereo video clip samples can be found here:
 https://github.com/calledit/metric_depth_video_toolbox/releases/tag/Showcase
 
+Demo video of movie 3d conversion using [movie_2_3D.py](movie_2_3D.py)
+https://www.youtube.com/watch?v=PLFjoNgkZDY
+
 ## This Repo consists of:
 1. Tools for generating metric 3D depth videos based on:
    a) the Depth-Anything series of machine learning models.
