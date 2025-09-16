@@ -735,7 +735,10 @@ if __name__ == '__main__':
                 left_image[bg_mask] = np.array([.0,.0,.0])
                 if not args.green_and_black_infill_mask:
                     #if the right most pixels are all green set their normals so they get infilled (16 sep 2025 TODO fix bug. i think this sould be applied to both sides and not only when all pixels are green do to convergense)
-                    left_img_mask[:, 0][np.all(left_img_mask[:, 0, :]  == bg_color, axis=1)] = np.array([1., 0.5, 0.5])
+                    left_img_mask[:, 0][np.all(left_img_mask[:, 0, :]  == bg_color, axis=1)] = np.array([1., 0.5, 0.5])#normal pointing right
+                    left_img_mask[:, -1][np.all(left_img_mask[:, -1, :]  == bg_color, axis=1)] = np.array([0., 0.5, 0.5])#normal pointing left
+                    left_img_mask[0, :][np.all(left_img_mask[0, :, :] == bg_color, axis=1)] = np.array([0.5, 0.5, 0.0])# Top edge (row 0) – normal pointing down
+                    left_img_mask[-1, :][np.all(left_img_mask[-1, :, :] == bg_color, axis=1)] = np.array([0.5, 0.5, 1.0])# Bottom edge (last row) – normal pointing up
                         
                     if edge_pcd is not None:
                         left_img_mask[valid_points[mask, 1], valid_points[mask, 0]] = (normalized+1)/2
@@ -820,6 +823,9 @@ if __name__ == '__main__':
                 if not args.green_and_black_infill_mask:
                     #if the left most pixels are all green set their normals so they get infilled (16 sep 2025 TODO fix bug. i think this sould be applied to both sides and not only when all pixels are green do to convergense)
                     right_img_mask[:, -1][np.all(right_img_mask[:, -1, :]  == bg_color, axis=1)] = np.array([0., 0.5, 0.5])
+                    right_img_mask[:, 0][np.all(right_img_mask[:, 0, :]  == bg_color, axis=1)] = np.array([1., 0.5, 0.5])
+                    right_img_mask[0, :][np.all(right_img_mask[0, :, :] == bg_color, axis=1)] = np.array([0.5, 0.5, 0.0])# Top edge (row 0) – normal pointing down
+                    right_img_mask[-1, :][np.all(right_img_mask[-1, :, :] == bg_color, axis=1)] = np.array([0.5, 0.5, 1.0])# Bottom edge (last row) – normal pointing up
                         
                     if edge_pcd is not None:
                         #What hapens when two vertexes are antop of eachother?
