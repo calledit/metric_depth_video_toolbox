@@ -7,6 +7,7 @@ import os
 import json
 import numpy as np
 from pathlib import Path
+from math import floor
 
 def write_frames_to_file(input_video, nr_frames_to_copy, scene_video_file, frame_rate, frame_width, frame_height):
 
@@ -87,6 +88,79 @@ def validate_video_lengths(scene_video_files):
         
     return True
 
+def _seconds_to_timecode(seconds: float) -> str:
+    ms = round(seconds * 1000)
+    s, ms = divmod(ms, 1000)
+    m, s = divmod(s, 60)
+    h, m = divmod(m, 60)
+    return f"{h:02d}:{m:02d}:{s:02d}.{ms:03d}"
+
+def split_scenes(scenes, max_scene_frames: int = 1500):
+    """
+    Split scenes longer than max_scene_frames while preserving any extra keys
+    present in the input dictionaries. Renumbers 'Scene Number' consecutively.
+
+    Returns a new list of dicts.
+    """
+    out = []
+
+    for scene in scenes:
+        # Parse needed numeric fields (input may be strings)
+        sf = int(scene['Start Frame'])
+        ef = int(scene['End Frame'])
+        ss = float(scene['Start Time (seconds)'])
+        es = float(scene['End Time (seconds)'])
+        length_frames = ef - sf + 1
+
+        # Seconds per frame (constant-rate assumption)
+        spf = (es - ss) / (ef - sf) if ef != sf else 0.0
+
+        def make_chunk_dict(chunk_sf, chunk_ef):
+            chunk_ss = ss + (chunk_sf - sf) * spf
+            chunk_es = ss + (chunk_ef - sf) * spf
+            chunk_len = chunk_ef - chunk_sf + 1
+            # Start with a copy to preserve unknown/extra keys
+            d = scene.copy()
+            # Overwrite computed fields
+            d['Scene Number'] = None  # will be filled later
+            d['Start Frame'] = str(chunk_sf)
+            d['Start Time (seconds)'] = f"{chunk_ss:.3f}"
+            d['Start Timecode'] = _seconds_to_timecode(chunk_ss)
+            d['End Frame'] = str(chunk_ef)
+            d['End Time (seconds)'] = f"{chunk_es:.3f}"
+            d['End Timecode'] = _seconds_to_timecode(chunk_es)
+            d['Length (frames)'] = str(chunk_len)
+            d['Length (seconds)'] = f"{max(0.0, chunk_es - chunk_ss):.3f}"
+            d['Length (timecode)'] = _seconds_to_timecode(max(0.0, chunk_es - chunk_ss))
+            return d
+
+        if length_frames <= 0:
+            # Keep as-is (but still preserve/normalize fields)
+            out.append(make_chunk_dict(sf, ef))
+            continue
+
+        if length_frames <= max_scene_frames:
+            out.append(make_chunk_dict(sf, ef))
+            continue
+
+        # Split into chunks
+        remaining = length_frames
+        chunk_start = sf
+        while remaining > 0:
+            chunk_len = min(remaining, max_scene_frames)
+            chunk_end = chunk_start + chunk_len - 1
+            out.append(make_chunk_dict(chunk_start, chunk_end))
+            remaining -= chunk_len
+            chunk_start = chunk_end + 1
+
+    # Renumber consecutively
+    for i, d in enumerate(out, start=1):
+        d['Scene Number'] = str(i)
+
+    return out
+
+
+
 if __name__ == '__main__':
 
     python = "python"
@@ -104,6 +178,7 @@ if __name__ == '__main__':
 
     parser.add_argument('--no_render', action='store_true', help='Skip rendering and subseqvent steps.', required=False)
     parser.add_argument('--parallel', type=int, default=1, help='Run some steps in parallel, for faster processing.')
+    parser.add_argument('--max_scene_frames', type=int, default=1500, help='Max length of scene in nr of frames, longer scenes will be processed in chunks.')
     parser.add_argument('--no_infill', action='store_true', help='Dont do infill.', required=False)
 
 
@@ -118,10 +193,12 @@ if __name__ == '__main__':
     
     #if the user did not specify a scene file we create one
     if args.scene_file is None:
-        p = Path(args.color_video)
-        args.scene_file = p.with_name(p.stem + "-Scenes.csv")
+        video_name = os.path.splitext(os.path.basename(args.color_video))[0]
+        scene_file = video_name+"-Scenes.csv"
+        args.scene_file = args.output_dir+os.sep+scene_file
         if not os.path.exists(args.scene_file):
             subprocess.run("scenedetect -i "+args.color_video+" list-scenes", shell=True)
+            subprocess.run("mv "+scene_file+" "+args.scene_file, shell=True)
 
     raw_video = cv2.VideoCapture(args.color_video)
     frame_width, frame_height = int(raw_video.get(cv2.CAP_PROP_FRAME_WIDTH)), int(raw_video.get(cv2.CAP_PROP_FRAME_HEIGHT))
@@ -134,6 +211,8 @@ if __name__ == '__main__':
         dict_reader = csv.DictReader(csvfile, delimiter=args.csv_delimiter)
         for row in dict_reader:
             scenes.append(row)
+
+    scenes = split_scenes(scenes, max_scene_frames=args.max_scene_frames)
 
     video_files_to_concat = []
 
@@ -292,6 +371,8 @@ if __name__ == '__main__':
         subprocess.run(python+" stereo_crafter_infill.py --sbs_color_video "+batch_file+" --sbs_mask_video "+batch_file2, shell=True)
         os.remove(batch_file)
         os.remove(batch_file2)
+    
+    print("Step seven: encode all scenes as a new video file")
         
     assert validate_video_lengths(scene_video_files), "Something was wrong with one of the video files"
 
