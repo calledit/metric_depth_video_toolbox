@@ -12,10 +12,12 @@ from diffusers import AutoencoderKLTemporalDecoder, UNetSpatioTemporalConditionM
 from StereoCrafter.pipelines.stereo_video_inpainting import StableVideoDiffusionInpaintingPipeline, tensor2vid
 from scipy.ndimage import binary_dilation
 
+import depth_frames_helper
+
 # -----------------------
 # Config / Globals
 # -----------------------
-num_inference_steps = 3  # More steps look better but are slower
+num_inference_steps = 4  # More steps look better but are slower
 black = np.array([0, 0, 0], dtype=np.uint8)
 blue = np.array([0, 0, 255], dtype=np.uint8)
 pipeline = None
@@ -335,9 +337,10 @@ def process_pair(sbs_color_video_path: str, sbs_mask_video_path: str, args):
 
     mask_video = cv2.VideoCapture(sbs_mask_video_path)
 
+    output_tmp_video_file = sbs_color_video_path + "_tmp_infilled.mkv"
     output_video_file = sbs_color_video_path + "_infilled.mkv"
     codec = cv2.VideoWriter_fourcc(*"FFV1")
-    out = cv2.VideoWriter(output_video_file, codec, fps, out_size)
+    out = cv2.VideoWriter(output_tmp_video_file, codec, fps, out_size)
 
     frame_buffer = []
     first_chunk = True
@@ -348,10 +351,10 @@ def process_pair(sbs_color_video_path: str, sbs_mask_video_path: str, args):
     try:
         while raw_video.isOpened():
             print(f"Frame: {frame_n} {frame_n / max(fps, 1e-6)}s")
-            frame_n += 1
             ret, raw_frame = raw_video.read()
             if not ret:
                 break
+            frame_n += 1
 
             rgb = cv2.cvtColor(raw_frame, cv2.COLOR_BGR2RGB)
 
@@ -392,6 +395,8 @@ def process_pair(sbs_color_video_path: str, sbs_mask_video_path: str, args):
         raw_video.release()
         mask_video.release()
         out.release()
+
+    depth_frames_helper.verify_and_move(output_tmp_video_file, frame_n, output_video_file)
 
     print(f"Done. Wrote: {output_video_file}")
 

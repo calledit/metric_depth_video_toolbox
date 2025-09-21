@@ -143,8 +143,11 @@ def run_on_pair(video_depth_anything, DEVICE, args, color_video_path, depth_vide
 
         depths[i] = reconstructed_metric_depth
 
-    depth_frames_helper.save_depth_video(depths, color_video_path+'_depth.mkv', fps, args.max_depth, width, height)
-    print(f"saved: {color_video_path+'_depth.mkv'}")
+    tmp_file = color_video_path+'_tmp_depth.mkv'
+    output_file = color_video_path+'_depth.mkv'
+    depth_frames_helper.save_depth_video(depths, tmp_file, fps, args.max_depth, width, height)
+    depth_frames_helper.verify_and_move(tmp_file, len(depths), output_file)
+    print(f"saved: {output_file}")
 
 
 if __name__ == '__main__':

@@ -9,10 +9,12 @@ import numpy as np
 from pathlib import Path
 from math import floor
 
+import depth_frames_helper
+
 def write_frames_to_file(input_video, nr_frames_to_copy, scene_video_file, frame_rate, frame_width, frame_height):
 
     out = None
-    if not os.path.exists(scene_video_file):
+    if scene_video_file is not None:
         out = cv2.VideoWriter(scene_video_file, cv2.VideoWriter_fourcc(*"FFV1"), frame_rate, (frame_width, frame_height))
     nr_frames = 1
     while input_video.isOpened():
@@ -220,9 +222,8 @@ if __name__ == '__main__':
     
     print("Step one: create video files for all scenes")
     scene_video_files = []
+    any_left = False
     for scene in scenes:
-        print("Handle scene:", scene)
-
 
         #generate scene video file
         scene['scene_video_file'] = os.path.join(args.output_dir, 'scene_'+str(scene['Scene Number'])+'.mkv')
@@ -235,11 +236,22 @@ if __name__ == '__main__':
         scene['finished'] = False
         if os.path.exists(scene['sbs']) or os.path.exists(scene['infilled']):#dont create file of finished product exists
             scene['finished'] = True
-        if not scene['finished']:
-            write_frames_to_file(raw_video, int(scene['Length (frames)']), scene['scene_video_file'], frame_rate, frame_width, frame_height)
         scene_video_files.append(scene)
+        if not scene['finished'] and not os.path.exists(scene['scene_video_file']):
+            any_left = True
         if args.end_scene == int(scene['Scene Number']):
             break
+
+    if any_left:
+        for scene in scene_video_files:
+            tmp_file = None
+            print("scene:", str(scene['Scene Number']))
+            if not scene['finished'] and not os.path.exists(scene['scene_video_file']):
+                tmp_file = str(scene['scene_video_file'])+ "_tmp.mkv"
+                print("create:", str(scene['scene_video_file']))
+            write_frames_to_file(raw_video, int(scene['Length (frames)']), tmp_file, frame_rate, frame_width, frame_height)
+            if tmp_file is not None:
+                depth_frames_helper.verify_and_move(tmp_file, int(scene['Length (frames)']), scene['scene_video_file'])
     
         
     print("Step two: estimate depth for all scenes")

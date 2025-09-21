@@ -63,6 +63,7 @@ def _read_list_file(path: str):
 
 
 def process_single_video(color_video_path: str, args, DEVICE: str, use_threads: bool, session) -> None:
+    output_tmp_file = color_video_path + '_tmp_mask.mkv'
     output_file = color_video_path + '_mask.mkv'
 
     if not os.path.isfile(color_video_path):
@@ -118,12 +119,14 @@ def process_single_video(color_video_path: str, args, DEVICE: str, use_threads: 
 
     depth_frames_helper.save_grayscale_video(
         masks_np,
-        output_file,
+        output_tmp_file,
         frame_rate,
         255.0,
         frame_width,
         frame_height
     )
+
+    depth_frames_helper.verify_and_move(output_tmp_file, len(masks_np), output_file)
 
     print(f"Done. Wrote: {output_file}  (frames: {len(masks_np)}, batch_size={args.batch_size}, device={DEVICE})")
 

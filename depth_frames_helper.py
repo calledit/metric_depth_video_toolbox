@@ -1,5 +1,6 @@
 import numpy as np
 import cv2
+import os
 
 def encode_depth_as_uint32(depth, max_depth):
     
@@ -116,6 +117,23 @@ def save_depth_video(frames, output_video_path, fps, max_depth_arg, rescale_widt
         out.write(bgr24bit)
 
     out.release()
+
+def verify_and_move(tmp_file, expected_frames, output_file):
+    if not os.path.isfile(tmp_file):
+        return False
+    cap = cv2.VideoCapture(tmp_file)
+    if not cap.isOpened():
+        return False
+
+    actual_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+    cap.release()
+    if actual_frames != expected_frames:
+        print(tmp_file, "not the correct nr of frames ", expected_frames, "!=", actual_frames)
+        return False
+
+    os.rename(tmp_file, output_file)
+
+    return True
 
 def save_grayscale_video(frames, output_video_path, fps, max_depth_arg, rescale_width, rescale_height):
     """

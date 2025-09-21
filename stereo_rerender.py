@@ -376,12 +376,15 @@ if __name__ == '__main__':
     # Determine side-by-side output size
     if args.touchly1:
         output_file = args.depth_video + "_Touchly1."
+        output_tmp_file = args.depth_video + "_tmp_Touchly1."
         out_size = (out_width, out_height*2)
     elif args.touchly0:
         output_file = args.depth_video + "_Touchly0."
+        output_tmp_file = args.depth_video + "_tmp_Touchly0."
         out_size = (out_width*3, out_height)
     else:
         output_file = args.depth_video + "_stereo."
+        output_tmp_file = args.depth_video + "_tmp_stereo."
         out_size = (out_width*2, out_height)
 
     # avc1 seams to be required for Quest 2 if linux complains use mp4v but those video files wont work on Quest 2
@@ -390,16 +393,18 @@ if __name__ == '__main__':
 
     if args.compressed:
         output_file += "mp4"
+        output_tmp_file += "mp4"
         codec = cv2.VideoWriter_fourcc(*"avc1")
     else:
         output_file += "mkv"
+        output_tmp_file += "mkv"
         codec = cv2.VideoWriter_fourcc(*"FFV1")
 
-    out = cv2.VideoWriter(output_file, codec, frame_rate, out_size)
+    out = cv2.VideoWriter(output_tmp_file, codec, frame_rate, out_size)
 
     infill_mask_video = None
     if args.infill_mask:
-        infill_mask_video = cv2.VideoWriter(output_file+"_infillmask.mkv", cv2.VideoWriter_fourcc(*"FFV1"), frame_rate, out_size)
+        infill_mask_video = cv2.VideoWriter(output_tmp_file+"_infillmask.mkv", cv2.VideoWriter_fourcc(*"FFV1"), frame_rate, out_size)
 
     if mask_video is not None:
         # Create background "sphere"
@@ -881,6 +886,7 @@ if __name__ == '__main__':
     # Release resources
     raw_video.release()
     out.release()
+    depth_frames_helper.verify_and_move(output_tmp_file, total_frames, output_file)
     if mask_video is not None:
         mask_video.release()
     
@@ -889,5 +895,6 @@ if __name__ == '__main__':
 
     if infill_mask_video is not None:
         infill_mask_video.release()
+        depth_frames_helper.verify_and_move(output_tmp_file+"_infillmask.mkv", total_frames, output_file+"_infillmask.mkv")
 
     print(f"Processing complete. Output saved to: {output_file}")
