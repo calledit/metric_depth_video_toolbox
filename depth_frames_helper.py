@@ -187,3 +187,20 @@ def save_grayscale_video(frames, output_video_path, fps, max_depth_arg, rescale_
         out.write(bgr)
 
     out.release()
+
+def write_video_frames_to_path(out_video, mask_frames, fps, H0, W0):
+    # ---- write output video ----
+    writer = cv2.VideoWriter(
+        out_video,
+        cv2.VideoWriter_fourcc(*"FFV1"),  # lossless; switch to MJPG/mp4v if needed
+        fps,
+        (W0, H0)
+    )
+    assert writer.isOpened(), "Failed to open VideoWriter (FFV1/MKV). Try MJPG or mp4v if needed."
+    for f in mask_frames:
+        f = cv2.cvtColor(f, cv2.COLOR_RGB2BGR)
+        if f.shape[0] != H0 or f.shape[1] != W0:
+            f = cv2.resize(f, (W0, H0), interpolation=cv2.INTER_NEAREST)
+        writer.write(f)
+    writer.release()
+    print(f"[ok] wrote {len(mask_frames)} frames to {out_video}")
