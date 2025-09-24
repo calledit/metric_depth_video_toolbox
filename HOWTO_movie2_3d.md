@@ -35,7 +35,7 @@ pip install --upgrade scenedetect[opencv-headless]
 
 ## Usage
 
-This is mostly a waiting game you can run a few test scenes by using the argument --end_scene 4 or you can start directly. Progress is saved continuously (But it you abort the process the last scene that was left unfinished will need to be removed and be redone)
+This is mostly a waiting game you can run a few test scenes by using the argument --end_scene 4 or you can start directly. Progress is saved continuously as each step for each scene is finilized.
 
 ```
 python movie_2_3D.py --color_video ~/Starship.Troopers.mp4 --parallel 8
