@@ -17,7 +17,7 @@ import depth_frames_helper
 # -----------------------
 # Config / Globals
 # -----------------------
-num_inference_steps = 4  # More steps look better but are slower
+num_inference_steps = None  # More steps look better but slowe set by arg
 black = np.array([0, 0, 0], dtype=np.uint8)
 blue = np.array([0, 0, 255], dtype=np.uint8)
 pipeline = None
@@ -336,6 +336,11 @@ def process_pair(sbs_color_video_path: str, sbs_mask_video_path: str, args):
     out_size     = (frame_width, frame_height)
 
     mask_video = cv2.VideoCapture(sbs_mask_video_path)
+    m_frame_width  = int(mask_video.get(cv2.CAP_PROP_FRAME_WIDTH))
+    m_frame_height = int(mask_video.get(cv2.CAP_PROP_FRAME_HEIGHT))
+
+    assert frame_width == m_frame_width and frame_height == m_frame_height, "mask ans color video not same resolution"
+
 
     output_tmp_video_file = sbs_color_video_path + "_tmp_infilled.mkv"
     output_video_file = sbs_color_video_path + "_infilled.mkv"
@@ -405,7 +410,7 @@ if __name__ == '__main__':
     parser.add_argument('--sbs_color_video', type=str, required=True, help='side by side stereo video renderd with point clouds in the masked area')
     parser.add_argument('--sbs_mask_video', type=str, required=True, help='side by side stereo video mask')
     parser.add_argument('--max_frames', default=-1, type=int, help='quit after max_frames nr of frames', required=False)
-    parser.add_argument('--num_inference_steps', default=3, type=int, help='Numer of defussion steps. More look better but is slower', required=False)
+    parser.add_argument('--num_inference_steps', default=5, type=int, help='Numer of defussion steps. More look better but is slower', required=False)
     args = parser.parse_args()
 
     num_inference_steps = args.num_inference_steps
