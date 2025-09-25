@@ -178,7 +178,7 @@ def split_scenes(scenes, max_scene_frames: int = 1500):
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description='Takes a movie and converts it in to stereo 3D')
-    parser.add_argument('--color_video', type=str, help='video file to use as color input', required=True)
+    parser.add_argument('--color_video', type=str, default=None, help='video file to use as color input', required=False)
     parser.add_argument('--scene_file', type=str, default=None, help='csv from PySceneDetect describing the scenes', required=False)
     parser.add_argument('--csv_delimiter', type=str, default=',', help='Delimiter used in csv', required=False)
     parser.add_argument('--output_dir', type=str, default='output', help='folder where output will be placed', required=False)
@@ -187,7 +187,15 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument('--parallel', type=int, default=1, help='Run some steps in parallel, for faster processing.')
     parser.add_argument('--max_scene_frames', type=int, default=1500, help='Max length of scene in nr of frames, longer scenes will be processed in chunks.')
     parser.add_argument('--no_infill', action='store_true', help='Dont do infill.', required=False)
-    return parser.parse_args()
+    
+    parser.add_argument('--gui', action='store_true', help='Launch the PySide6 GUI')
+    
+    a = parser.parse_args()
+    
+    if a.color_video is None and not a.gui:
+        raise ValueError("need --color_video")
+
+    return a
 
 
 def ensure_output_dir(path: str) -> None:
@@ -514,6 +522,11 @@ def step7_concat_and_mux(args: argparse.Namespace, video_files_to_concat: List[s
 def main():
     args = parse_args()
     skip_last_step = False
+    
+    if args.gui:
+        from gui_frontend_movie_2_3d import run_gui
+        run_gui(args, main_script_path=__file__)
+        return
 
     ensure_output_dir(args.output_dir)
     ensure_scene_file(args)
