@@ -35,6 +35,8 @@ See [HOWTO.md](https://github.com/calledit/metric_depth_video_toolbox/blob/main/
 
 See [HOWTO_movie2_3d.md](https://github.com/calledit/metric_depth_video_toolbox/blob/main/HOWTO_movie2_3d.md) for a guide on how to convert a full movie into 3D.
 
+Youtube tutorial https://youtu.be/BE_aJCI7DHI for using the Movie 2 3D GUI to convert a movie in to 3D.
+
 See [USAGE.md](https://github.com/calledit/metric_depth_video_toolbox/blob/main/USAGE.md) Info on each tool and the arguments it can take.
 
 ### Camera tracking
