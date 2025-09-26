@@ -184,7 +184,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument('--output_dir', type=str, default='output', help='folder where output will be placed', required=False)
     parser.add_argument('--end_scene', type=int, default=-1, help='Stop after a certain scene nr', required=False)
     parser.add_argument('--no_render', action='store_true', help='Skip rendering and subseqvent steps.', required=False)
-    parser.add_argument('--parallel', type=int, default=1, help='Run some steps in parallel, for faster processing.')
+    parser.add_argument('--parallel', type=int, default=int(os.cpu_count()//2), help='Run some steps in parallel, for faster processing.')
     parser.add_argument('--max_scene_frames', type=int, default=1500, help='Max length of scene in nr of frames, longer scenes will be processed in chunks.')
     parser.add_argument('--no_infill', action='store_true', help='Dont do infill.', required=False)
     
@@ -318,7 +318,7 @@ def step2_estimate_depth(args: argparse.Namespace, scene_video_files: List[Dict]
         scene['xfov'] = None
 
         # If engine not vda/depthcrafter, estimate xfov + metric reference via unik3d
-        if depth_engine not in ('vda', 'depthcrafter'):
+        if depth_engine not in ('vda'):
             if not os.path.exists(single_frame_depth_video_file):
                 if not os.path.exists(scene_org_xfovs_file):
                     if not scene['finished']:
