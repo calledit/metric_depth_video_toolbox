@@ -13,48 +13,7 @@ from depthcrafter.depth_crafter_ppl import DepthCrafterPipeline
 from depthcrafter.unet import DiffusersUNetSpatioTemporalConditionModelDepthCrafter
 from depthcrafter.utils import vis_sequence_depth, save_video, read_video_frames
 
-def save_24bit(frames, output_video_path, fps, max_depth_arg):
-    """
-    Saves depth maps encoded in the R, G and B channels of a video (to increse accuracy as when compared to gray scale)
-    """
-
-
-
-    MODEL_maxOUTPUT_depth = max_depth_arg ### pick a value slitght above max metric depth to save the depth in th video file nicly
-    # if you pick a high value you will lose resolution
-
-    if isinstance(frames, np.ndarray):
-        height = frames.shape[1]
-        width = frames.shape[2]
-        max_depth = frames.max()
-        print("max metric depth: ", max_depth)
-        # incase you did not pick a absolute value we max out (this mean each video will have depth relative to max_depth)
-        # (if you want to use the video as a depth souce a absolute value is prefrable)
-        if MODEL_maxOUTPUT_depth < max_depth:
-            print("warning: output depth is deeper than max_depth. The depth will be clipped")
-        nr_frames = frames.shape[0]
-    else:
-        nr_frames = len(frames)
-        height = frames[0].shape[0]
-        width = frames[0].shape[1]
-
-    out = cv2.VideoWriter(output_video_path, cv2.VideoWriter_fourcc(*"FFV1"), fps, (width, height))
-
-    for i in range(nr_frames):
-        depth = frames[i]
-        scaled_depth = (((255**4)/MODEL_maxOUTPUT_depth)*depth.astype(np.float64)).astype(np.uint32)
-
-        # View the depth as raw bytes: shape (H, W, 4)
-        depth_bytes = scaled_depth.view(np.uint8).reshape(height, width, 4)
-
-
-        R = (depth_bytes[:, :, 3]) # Most significant bits in R and G channel (duplicated to reduce compression artifacts)
-        G = (depth_bytes[:, :, 3])
-        B = (depth_bytes[:, :, 2]) # Least significant bit in blue channel
-        bgr24bit = np.dstack((B, G, R))
-        out.write(bgr24bit)
-
-    out.release()
+import depth_frames_helper
 
 
 def compute_scale_and_shift_full(prediction, target, mask = None):
@@ -286,4 +245,8 @@ if __name__ == "__main__":
     depths = None
     print("Save depth file")
     output_video_path = args.color_video + "_depth.mkv"
-    save_24bit(out_depths, output_video_path, frame_rate, args.max_depth)
+    output_tmp_video_path = args.color_video + "_tmp_depth.mkv"
+    depth_frames_helper.save_depth_video(
+        out_depths, output_tmp_video_path, frame_rate, args.max_depth, frame_width, frame_height
+    )
+    depth_frames_helper.verify_and_move(output_tmp_video_path, len(out_depths), output_video_path)

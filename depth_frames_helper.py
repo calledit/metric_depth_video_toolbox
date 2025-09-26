@@ -130,7 +130,8 @@ def verify_and_move(tmp_file, expected_frames, output_file):
     if actual_frames != expected_frames:
         print(tmp_file, "not the correct nr of frames ", expected_frames, "!=", actual_frames)
         return False
-
+    if os.path.exists(output_file):
+        os.remove(output_file)
     os.rename(tmp_file, output_file)
 
     return True
