@@ -37,6 +37,12 @@ pip install --upgrade scenedetect[opencv-headless]
 
 This is mostly a waiting game you can run a few test scenes by using the argument --end_scene 4 or you can start directly. Progress is saved continuously as each step for each scene is finilized.
 
+Using the GUI:
+```
+Double click start_movie_2_3D.bat
+```
+
+If using cli:
 ```
 python movie_2_3D.py --color_video ~/Starship.Troopers.mp4 --parallel 8
 ```
