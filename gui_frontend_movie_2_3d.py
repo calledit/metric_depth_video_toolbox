@@ -296,14 +296,34 @@ def run_gui(cli_args, main_script_path: str) -> None:
 
     # ---------- Video player ----------
     class VideoPlayer(QtWidgets.QWidget):
-        """QMediaPlayer + QVideoWidget, with simple frame stepping by time offset and a scrub slider."""
+        """QMediaPlayer + stacked viewer: either the video or an overlay message."""
         def __init__(self):
             super().__init__()
+            # Video widget
             self.video_widget = QVideoWidget()
             self.video_widget.setMinimumHeight(420)
             self.video_widget.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Expanding)
             self.mplayer = QtMultimedia.QMediaPlayer(self)
             self.mplayer.setVideoOutput(self.video_widget)
+
+            # Overlay message (separate page)
+            self.overlay_label = QtWidgets.QLabel("No video file exists for this scene yet")
+            self.overlay_label.setAlignment(Qt.AlignCenter)
+            self.overlay_label.setWordWrap(True)
+            self.overlay_label.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Expanding)
+            self.overlay_label.setStyleSheet(
+                "background-color: #1e1e1e; color: #ddd; font-size: 16px; padding: 16px;"
+            )
+
+            # Stacked container to switch between video and overlay
+            self.viewer_stack = QtWidgets.QStackedLayout()
+            self.viewer_stack.addWidget(self.video_widget)      # index 0
+            self.viewer_stack.addWidget(self.overlay_label)     # index 1
+            self.viewer_container = QtWidgets.QWidget()
+            self.viewer_container.setLayout(self.viewer_stack)
+            self.viewer_stack.setCurrentIndex(1)  # start with overlay until a video is set
+
+            self.frame_ms = 33  # ~30fps fallback
             self.frame_ms = 33  # ~30fps fallback
 
             # Scrub slider (milliseconds)
@@ -329,7 +349,7 @@ def run_gui(cli_args, main_script_path: str) -> None:
             ctr.addWidget(self.btn_next)
 
             lay = QtWidgets.QVBoxLayout(self)
-            lay.addWidget(self.video_widget)
+            lay.addWidget(self.viewer_container)
             lay.addWidget(self.slider)
             lay.addLayout(ctr)
 
@@ -352,6 +372,8 @@ def run_gui(cli_args, main_script_path: str) -> None:
             self.btn_play.setChecked(False)
             self.slider.setRange(0, 0)
             self.slider.setValue(0)
+            # show the video page when a valid source is set
+            self.viewer_stack.setCurrentIndex(0)
 
         def _toggle_play(self, playing: bool):
             if playing:
@@ -410,6 +432,8 @@ def run_gui(cli_args, main_script_path: str) -> None:
             self._last_engine_by_row: Dict[int, str] = {}
             # Remember selection across jobs so UI doesn't jump to row 0
             self._selected_row_before_job: Optional[int] = None
+            # Keep full scene list (all scenes), and a visible subset honoring end_scene
+            self.scenes_all: List[SceneRow] = []
 
             # Widgets
             self.scene_list = QtWidgets.QListWidget()
@@ -526,21 +550,48 @@ def run_gui(cli_args, main_script_path: str) -> None:
             # Load scenes and plan paths
             self._load_scenes()
 
-            # Only show the "split into per-scene files" message if we actually need to create any raw scene files
-            if any(not os.path.exists(s.paths['scene_video_file']) for s in self.scenes):
-                QtWidgets.QMessageBox.information(self, 'Scenes', 'The original video will be split into per-scene files.')
+            # If any scene clip is missing, ask to pre-create them now (up to end_scene)
+            missing_any = any(not os.path.exists(s.paths['scene_video_file']) for s in self.scenes)
+            if missing_any:
+                resp = QtWidgets.QMessageBox.question(
+                    self,
+                    'Create per-scene clips?',
+                    'The original video will be split into per-scene files. \nDo you want to create the per-scene clip files now (up to your End Scene setting)?',
+                    QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No,
+                    QtWidgets.QMessageBox.Yes
+                )
+                if resp == QtWidgets.QMessageBox.Yes:
+                    def do_step1_only():
+                        # Open input once
+                        cap, frame_w, frame_h, frame_rate = pipeline.open_input_video(self.color_video)
+                        # Build the subset up to and including end_scene; if end_scene <= 0, use all
+                        limit = self.end_scene if (self.end_scene and self.end_scene > 0) else len(self.scenes_all)
+                        # Ensure limit does not exceed actual scenes
+                        limit = min(limit, len(self.scenes_all))
+                        scene_list = [sr.data for sr in self.scenes_all[:limit]]
+                        pipeline.step1_create_scene_videos(cap, scene_list, frame_rate, frame_w, frame_h)
+                    self._spawn_worker(FuncWorker, do_step1_only, title='Creating per-scene clips')
 
             self._refresh_version_combo()
 
         def _load_scenes(self):
-            self.scenes: List[SceneRow] = []
-            split = pipeline.load_and_split_scenes(self.scene_csv, self.csv_delimiter,
-                                                   getattr(self.args, 'max_scene_frames', 1500))
-            planned = pipeline.plan_scene_files(split, self.output_dir, self.end_scene)
-            for d in planned:
+            # Load ALL scenes from CSV and plan paths for ALL (ignore end_scene here)
+            self.scenes_all = []
+            split_all = pipeline.load_and_split_scenes(self.scene_csv, self.csv_delimiter,
+                                                       getattr(self.args, 'max_scene_frames', 1500))
+            planned_all = pipeline.plan_scene_files(split_all, self.output_dir, -1)
+            for d in planned_all:
                 sr = SceneRow(d)
                 sr.paths = _plan_paths_for_scene(d, self.output_dir)
-                self.scenes.append(sr)
+                self.scenes_all.append(sr)
+
+            # Now compute the visible subset based on end_scene
+            if self.end_scene and self.end_scene > 0:
+                self.scenes = self.scenes_all[:self.end_scene]
+            else:
+                self.scenes = self.scenes_all
+
+            # Populate UI list from visible subset
             self.scene_list.clear()
             for s in self.scenes:
                 self.scene_list.addItem(s.display_name())
@@ -606,10 +657,17 @@ def run_gui(cli_args, main_script_path: str) -> None:
             if p and os.path.exists(p):
                 try:
                     self.player.set_source(p)
+                    # switch to video view
+                    self.player.viewer_stack.setCurrentIndex(0)
                 except Exception as e:
                     self._log(f"Viewer error: {e}")
+                    self.player.overlay_label.setText("Unable to load this video")
+                    self.player.viewer_stack.setCurrentIndex(1)
             else:
-                self.player.mplayer.setSource(QtCore.QUrl())  # black preview
+                # No file yet for this scene/version
+                self.player.mplayer.setSource(QtCore.QUrl())  # clear player
+                self.player.overlay_label.setText("No video file exists for this scene yet")
+                self.player.viewer_stack.setCurrentIndex(1)
 
         def _on_engine_changed(self, eng: str):
             row = self.scene_list.currentRow()
@@ -671,21 +729,21 @@ def run_gui(cli_args, main_script_path: str) -> None:
             row = self.scene_list.currentRow()
             if row < 0:
                 return
-            s = self.scenes[row].data
+            # Operate on the full list; visible subset shares objects at same indices
+            s = self.scenes_all[row].data
             # Map current player time to an absolute frame index in this scene
             ss = float(s['Start Time (seconds)']); es = float(s['End Time (seconds)'])
             sf = int(s['Start Frame']);           ef = int(s['End Frame'])
             spf = (es - ss) / (ef - sf) if ef != sf else 0.0
             cur_sec = self.player.current_seconds()
-            # clamp to scene interval
             cur_sec = min(max(cur_sec, ss + 1e-6), es - 1e-6)
             split_frame = int(sf + (cur_sec - ss) / spf) if spf > 0 else (sf + ef) // 2
 
-            if not _split_scene_at_frame(self.scenes, row, split_frame):
+            if not _split_scene_at_frame(self.scenes_all, row, split_frame):
                 self._log("Split ignored (cursor too close to scene edges).")
                 return
 
-            _renumber_and_rename(self.scenes, row, self.output_dir)
+            _renumber_and_rename(self.scenes_all, row, self.output_dir)
             self._persist_scenes()
             self._reload_after_edit(select_row=row)
 
@@ -789,8 +847,9 @@ def run_gui(cli_args, main_script_path: str) -> None:
                 self.scene_list.setCurrentRow(select_row)
 
         def _persist_scenes(self):
-            _write_full_scene_csv(self.scene_csv, self.scenes, self.csv_delimiter)
-            self._log('Saved scenes CSV with updated numbering/engines.')
+            # Always write ALL scenes to CSV, not just the visible subset
+            _write_full_scene_csv(self.scene_csv, self.scenes_all, self.csv_delimiter)
+            self._log('Saved scenes CSV (all scenes) with updated numbering/engines.')
 
         def _log(self, msg: str):
             self.console.appendPlainText(msg)

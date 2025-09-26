@@ -11,7 +11,7 @@ from math import floor
 from typing import List, Dict, Tuple, Optional
 
 import depth_frames_helper
-
+import shutil
 
 # -------------------------
 # Utility helpers (as-is)
@@ -216,7 +216,7 @@ def ensure_scene_file(args: argparse.Namespace) -> None:
     args.scene_file = os.path.join(args.output_dir, scene_file)
     if not os.path.exists(args.scene_file):
         subprocess.run(f"scenedetect -i {args.color_video} list-scenes", shell=True)
-        subprocess.run(f"mv {scene_file} {args.scene_file}", shell=True)
+        shutil.move(scene_file, args.scene_file)
 
 
 def open_input_video(color_video_path: str):
@@ -323,14 +323,14 @@ def step2_estimate_depth(args: argparse.Namespace, scene_video_files: List[Dict]
                 if not os.path.exists(scene_org_xfovs_file):
                     if not scene['finished']:
                         subprocess.run(f"{python} unik3d_video.py --color_video {scene['scene_video_file']}", shell=True)
-                        subprocess.run(f"mv {scene['xfovs_file']} {scene_org_xfovs_file}", shell=True)
+                        shutil.move(scene['xfovs_file'], scene_org_xfovs_file)
 
                 with open(scene_org_xfovs_file) as json_file_handle:
                     xfovs = json.load(json_file_handle)
                     scene['xfov'] = float(np.mean(xfovs))
                 if not scene['finished']:
                     subprocess.run(f"{python} unik3d_video.py --xfov {scene['xfov']} --color_video {scene['scene_video_file']}", shell=True)
-                    subprocess.run(f"mv {scene['depth_video_file']} {single_frame_depth_video_file}", shell=True)
+                    shutil.move(scene['depth_video_file'], single_frame_depth_video_file)
 
             assert is_valid_video(single_frame_depth_video_file), "Could not generate metric reference video file for depthcrafter"
         else:
