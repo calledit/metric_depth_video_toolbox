@@ -23,34 +23,34 @@ https://github.com/calledit/metric_depth_video_toolbox/releases/tag/Showcase
 
 Convert videos into true metric depth using multiple SOTA models:
 
-- Depth-Anything series  
-- MoGe  
-- UniDepth  
-- UniK3D  
-- DepthPro  
-- DepthCrafter  
-- MVSAnywhere  
+- Depth-Anything series (`video_metric_convert.py`) and (`videoanythingmetric_video.py`)
+- MoGe  (`moge_video.py`)
+- UniDepth  (`unidepth_video.py`)
+- UniK3D  (`unik3d_video.py`)
+- DepthPro  (`depthpro_video.py`)
+- DepthCrafter  (`depthcrafter_video.py`)
+- MVSAnywhere  (`video_mvsa.py`)
 
 ### Stereo / 3D Conversion
 
 - 2D movies → 3D (`movie_2_3D.py`)
-- Stereo rendering from depth
-- Parallax infill & diffusion-based stereo inpainting
+- Stereo rendering from depth (`stereo_rerender.py`)
+- Parallax infill & diffusion-based stereo inpainting (`stereo_crafter_infill.py`)
 
 ### Visualization
 
 - Real-time 3D viewer (`3d_view_depthfile.py`)
-- Novel-view rendering from depth video
+- Novel-view rendering from depth video (`3d_view_depthfile.py`)
 
 ### Camera Tracking & 3D Reconstruction
 
-- Depth-assisted camera tracking
-- Long-term point tracking (CoTracker3)
+- Depth-assisted camera tracking (`sam_track_video.py`) and (`align_3d_points.py`)
+- Long-term point tracking (CoTracker3) (`track_points_in_video.py`)
 - Pose extraction & alignment tools
 
 ### Export Tools
 
-Export to standard formats for DCC tools:
+Export to standard formats for DCC tools: (`convert_metric_depth_video_to_other_format.py`)
 
 - `.ply` point clouds
 - `.obj` meshes
@@ -60,8 +60,8 @@ Export to standard formats for DCC tools:
 
 ### Masking & Cleanup
 
-- Automatic human masking
-- Subtitle/logo inpainting
+- Automatic human masking (`generate_video_mask.py`)
+- Subtitle/logo inpainting (`apply_inpainting.sh`)
 
 ---
 
@@ -69,9 +69,9 @@ Export to standard formats for DCC tools:
 
 | Topic | Link |
 |---|---|
-Beginner guide | [`HOWTO.md`](./HOWTO.md)  
-Movie → 3D guide | [`HOWTO_movie2_3d.md`](./HOWTO_movie2_3d.md)  
-Full tool reference | [`USAGE.md`](./USAGE.md)  
+Beginner guide | [`HOWTO.md`](docs/HOWTO.md)  
+Movie → 3D guide | [`HOWTO_movie2_3d.md`](docs/HOWTO_movie2_3d.md)  
+Full tool reference | [`USAGE.md`](docs/USAGE.md)  
 GUI tutorial video | https://youtu.be/BE_aJCI7DHI  
 
 ---
