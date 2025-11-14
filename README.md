@@ -19,9 +19,9 @@ https://github.com/calledit/metric_depth_video_toolbox/releases/tag/Showcase
 
 ## ✨ Features
 
-### Depth Generation (Metric)
+### Metric Depth Video Generation
 
-Convert videos into true metric depth using multiple SOTA models:
+Convert rgb videos into metric depth videos using multiple SOTA models:
 
 - Depth-Anything series (`video_metric_convert.py`) and (`videoanythingmetric_video.py`)
 - MoGe  (`moge_video.py`)
@@ -34,12 +34,12 @@ Convert videos into true metric depth using multiple SOTA models:
 ### Stereo / 3D Conversion
 
 - 2D movies → 3D (`movie_2_3D.py`)
-- Stereo rendering from depth (`stereo_rerender.py`)
+- Stereo rendering from depth and rgb video (`stereo_rerender.py`)
 - Parallax infill & diffusion-based stereo inpainting (`stereo_crafter_infill.py`)
 
 ### Visualization
 
-- Real-time 3D viewer (`3d_view_depthfile.py`)
+- Real-time 3D viewer for metric depth videos (`3d_view_depthfile.py`)
 - Novel-view rendering from depth video (`3d_view_depthfile.py`)
 
 ### Camera Tracking & 3D Reconstruction
@@ -50,7 +50,7 @@ Convert videos into true metric depth using multiple SOTA models:
 
 ### Export Tools
 
-Export to standard formats for DCC tools: (`convert_metric_depth_video_to_other_format.py`)
+Export metric depth video to standard formats for use in other tools: (`convert_metric_depth_video_to_other_format.py`)
 
 - `.ply` point clouds
 - `.obj` meshes
@@ -60,7 +60,7 @@ Export to standard formats for DCC tools: (`convert_metric_depth_video_to_other_
 
 ### Masking & Cleanup
 
-- Automatic human masking (`generate_video_mask.py`)
+- Automatic main subject masking (`generate_video_mask.py`)
 - Subtitle/logo inpainting (`apply_inpainting.sh`)
 
 ---
@@ -85,9 +85,8 @@ MDVT uses **RGB-encoded 16-bit metric depth**:
 - Default range: **100 meters**
 - Resolution: **~1.5mm depth precision**
 
-Future upgrade options: **24-bit depth** or **log-encoded depth** for long-range accuracy.
+Future upgrade for more precision will be done with: **24-bit depth** or **log-encoded depth** for long-range accuracy.
 
----
 ---
 
 ## ⚙️ Installation
