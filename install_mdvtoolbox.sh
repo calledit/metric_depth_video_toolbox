@@ -45,6 +45,13 @@ if [[ " $@ " =~ " -madpose " ]]; then
 	
 fi
 
+
+#install support for Depth-Anything-3
+if [[ " $@ " =~ " -rembg " ]]; then
+	git clone https://github.com/ByteDance-Seed/Depth-Anything-3
+	
+fi
+
 #install support for rembg masking
 if [[ " $@ " =~ " -rembg " ]]; then
 	apt-get -y install ffmpeg
