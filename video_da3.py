@@ -4,6 +4,7 @@ import sys
 sys.path.append("Depth-Anything-3/src")
 from depth_anything_3.api import DepthAnything3
 from depth_anything_3.utils.pose_align import align_poses_umeyama, _apply_sim3_to_poses
+from depth_anything_3.utils.alignment import least_squares_scale_scalar
 import cv2
 import depth_frames_helper
 import depth_map_tools
@@ -20,7 +21,7 @@ class NumpyEncoder(json.JSONEncoder):
 
 model = None
 
-def do_batch(list_of_ids, intrinsics, extrinsics, images):
+def do_batch(list_of_ids, intrinsics, extrinsics, images, resolution):
     
     picked_imgs = []
     picked_extrs = []
@@ -43,6 +44,7 @@ def do_batch(list_of_ids, intrinsics, extrinsics, images):
         picked_imgs,
         extrinsics = picked_extrs,
         intrinsics = picked_intrs,
+        process_res = resolution
     )
     return prediction
 
@@ -57,9 +59,11 @@ if __name__ == '__main__':
     parser.add_argument('--yfov', type=float, help='fov in deg in the y-direction, calculated from aspectratio and xfov in not given', required=False)
     parser.add_argument("--transformation_file", type=str, default=None)
     parser.add_argument('--xfov_file', type=str, help='alternative to xfov and yfov, json file with one xfov for each frame', required=False)
-    parser.add_argument('--images_per_batch', default=30, type=int, help='nr of images per batch set depening on GPU memmory', required=False)
+    parser.add_argument('--images_per_batch', default=40, type=int, help='nr of images per batch set depening on GPU memmory', required=False)
     parser.add_argument('--batch_overlap', default=6, type=int, help='nr of images that is overlaped from the last batch', required=False)
-    parser.add_argument('--nr_of_ref_frames', default=6, type=int, help='nr of references that will be picked ', required=False)
+    parser.add_argument('--nr_of_ref_frames', default=6, type=int, help='nr of references that will be picked', required=False)
+    parser.add_argument('--da3_resolution', default=504, type=int, help='resolution width used in inference 504 is default 252 good for longer videos with smalelr GPUs', required=False)
+    
     
     args = parser.parse_args()
 
@@ -119,14 +123,15 @@ if __name__ == '__main__':
             extrinsics.append(np.array(transformations[i]).astype(np.float32))
            
      
-    
-    # select reference frames
-    nth_frame = nr_images//args.nr_of_ref_frames
-    
     reference_frame_ids = []
-    for i in range(nr_images):
-        if i % nth_frame == 0:
-            reference_frame_ids.append(i)
+    if args.nr_of_ref_frames != 0:
+        # select reference frames
+        nth_frame = nr_images//args.nr_of_ref_frames
+        
+        
+        for i in range(nr_images):
+            if i % nth_frame == 0:
+                reference_frame_ids.append(i)
     numer_of_refs = len(reference_frame_ids)
     
     args.images_per_batch -= args.nr_of_ref_frames+args.batch_overlap
@@ -148,9 +153,11 @@ if __name__ == '__main__':
     intrin_out = []
     extrin_out = []
     
+    alingnment_depths = None
     alingnment_extrinsics = None
     last_frame = None
     last_frame_tranform = None
+    last_frame_depth = None
     for batch in batches:
         nr_in_batch = len(batch)
         if nr_in_batch != 0:
@@ -163,38 +170,72 @@ if __name__ == '__main__':
                 nr_used_refs = len(to_batch)
                 
             to_batch.extend(batch)
-            prediction = do_batch(to_batch, intrinsics, extrinsics, images)
+            prediction = do_batch(to_batch, intrinsics, extrinsics, images, args.da3_resolution)
+            
+            ref_depths = torch.as_tensor(prediction.depth[:nr_used_refs])
+            
+            if alingnment_depths is None:
+                alingnment_depths = ref_depths
+            
+            if last_frame_depth is not None:
+                batch_alignment_depths = torch.cat(
+                    [alingnment_depths, last_frame_depth],
+                    dim=0
+                )
+                scale_factor = least_squares_scale_scalar(batch_alignment_depths, ref_depths)
+                
+                #We asume that any differance in depth between batches depends on errors in the scale of the hole scene
+                #So we correct for that scale differance herer
+                prediction.extrinsics[:, :, 3] *= float(scale_factor)
+                prediction.depth *= float(scale_factor)
             
             
             ref_extrinsics = prediction.extrinsics[:nr_used_refs]
             
-            
-            
             if alingnment_extrinsics is None:
                 alingnment_extrinsics = ref_extrinsics
             
-            batch_alignment_extrinsics = alingnment_extrinsics
+            
             if last_frame_tranform is not None:
                 batch_alignment_extrinsics = np.concatenate([alingnment_extrinsics, np.array(last_frame_tranform)], axis=0)
                 
-            r, t, s = align_poses_umeyama(batch_alignment_extrinsics, ref_extrinsics, return_aligned=False)
-            
-            aligned_extrinsics = _apply_sim3_to_poses( prediction.extrinsics[nr_used_refs:], r, t, s)
-            
-            #print(aligned_extrinsics)
+                # align_poses_umeyama looks at multiple reference camera positions/rotations and compares them to the prediction
+                # It then tries to correct for the differance
+                try:
+                    r, t, s = align_poses_umeyama(batch_alignment_extrinsics, ref_extrinsics, return_aligned=False)
+                    aligned_extrinsics = _apply_sim3_to_poses( prediction.extrinsics[nr_used_refs:], r, t, s)
+                    ref_extrinsics = _apply_sim3_to_poses( ref_extrinsics, r, t, s)
+                    # prediction.depth /= float(s) # You could correct for the scale differance that is detected in the camera positions. But we are already correcting for depth using depth referances from the last batch you cant do both 
+                except:
+                    pass
                 
-            # Align acording to old extrinsics
-            prediction.extrinsics[:nr_used_refs]
-            #Mabye we should align the depth to?
-            #prediction.depth[:nr_used_refs]
+                # if you are mostly interested in making the scene perceptioanlly smoth use_last_frame_in_batch_to_align is what you want
+                # it is less accurate over the overall scene (so proably worse for 3d construction)but it bridges the gap between between frames beter
+                use_last_frame_in_batch_to_align = True
+                if use_last_frame_in_batch_to_align:
+                    recerence_matrix_4x4 = np.vstack([batch_alignment_extrinsics[-1], np.array([0, 0, 0, 1], dtype=batch_alignment_extrinsics[-1].dtype)])
+                    
+                    predicted_matrix_4x4 = np.vstack([ref_extrinsics[-1], np.array([0, 0, 0, 1], dtype=ref_extrinsics[-1].dtype)])
+                    inverted_prediction = np.linalg.inv(predicted_matrix_4x4)
+                    diff = recerence_matrix_4x4 @ inverted_prediction
+                    
+                    for i, v in enumerate(aligned_extrinsics):
+                        v_4x4 = np.vstack([v, np.array([0, 0, 0, 1], dtype=v.dtype)])
+                        fixd = diff @ v_4x4
+                        aligned_extrinsics[i] = fixd[:3, :]
+                    
+            else:
+                aligned_extrinsics = prediction.extrinsics[nr_used_refs:] #We dont have anything to align to
             
-            #We skip the reference frames
+            
+            prediction.extrinsics[:nr_used_refs]
             depth_out.extend(prediction.depth[nr_used_refs:])
             intrin_out.extend(prediction.intrinsics[nr_used_refs:])
             extrin_out.extend(aligned_extrinsics)
         
             last_frame_tranform = aligned_extrinsics[-args.batch_overlap:]
             last_frame = batch[-args.batch_overlap:]
+            last_frame_depth = torch.as_tensor(prediction.depth[-args.batch_overlap:])
         
 
     depth_frames_helper.save_depth_video(depth_out, output_tmp_video_path, fps, args.max_depth, W, H)
@@ -220,13 +261,6 @@ if __name__ == '__main__':
     
     #DEBUG grayscale out
     max_depth = np.max(depth_out)
-    depth_frames_helper.save_grayscale_video(depth_out, output_video_path+"_grayscale_depth.mkv", fps, max_depth, W, H) # prediction.depth.shape[2], prediction.depth.shape[1]
+    depth_frames_helper.save_grayscale_video(depth_out, output_video_path+"_grayscale_depth.mkv", fps, max_depth, W, H) # # the model output resolution: prediction.depth.shape[2], prediction.depth.shape[1]
     
     
-    # Access results
-    #print(prediction.depth.shape)        # Depth maps: [N, H, W] float32
-    #print(prediction.conf.shape)         # Confidence maps: [N, H, W] float32
-    #print(prediction.extrinsics.shape)   # Camera poses (w2c): [N, 3, 4] float32
-    #print(prediction.intrinsics[0])   # Camera intrinsics: [N, 3, 3] float32
-
-    #print(prediction.extrinsics[0])
