@@ -19,6 +19,20 @@ class NumpyEncoder(json.JSONEncoder):
             return obj.item()
         return super().default(obj)
 
+
+def _is_txt(path):
+    return isinstance(path, str) and path.lower().endswith(".txt")
+
+def _read_list_file(path):
+    items = []
+    with open(path, "r", encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            items.append(line)
+    return items
+
 model = None
 
 def do_batch(list_of_ids, intrinsics, extrinsics, images, resolution):
@@ -48,36 +62,21 @@ def do_batch(list_of_ids, intrinsics, extrinsics, images, resolution):
     )
     return prediction
 
-    
-if __name__ == '__main__':
-    parser = argparse.ArgumentParser(description='MDVT DepthAnythingV3 video converter')
-    parser.add_argument('--color_video', type=str, required=True)
-    parser.add_argument('--max_frames', type=int, default=-1, help='maximum length of the input video, -1 means no limit')
-    parser.add_argument('--max_depth', default=100, type=int, help='the max depth that the video uses', required=False)
-    parser.add_argument('--xfov', type=float, help='fov in deg in the x-direction, calculated from aspectratio and yfov in not given', required=False)
-    parser.add_argument('--yfov', type=float, help='fov in deg in the y-direction, calculated from aspectratio and xfov in not given', required=False)
-    parser.add_argument("--transformation_file", type=str, default=None, help='File with cammera transforms for the video')
-    parser.add_argument('--xfov_file', type=str, help='alternative to xfov and yfov, json file with one xfov for each frame', required=False)
-    parser.add_argument('--images_per_batch', default=40, type=int, help='nr of images per batch; set depening on GPU memmory', required=False)
-    parser.add_argument('--batch_overlap', default=6, type=int, help='nr of images that is overlaped from the last batch', required=False)
-    parser.add_argument('--nr_of_ref_frames', default=6, type=int, help='nr of references that will be picked spaning the video', required=False)
-    parser.add_argument('--da3_resolution', default=504, type=int, help='resolution width used in inference. 504 is default 252 good for longer videos and GPUs with less ram', required=False)
-    
-    
-    args = parser.parse_args()
 
+    
+def _single_run(args, color_video_path):
 
     extrinsics = None
     intrinsics = None
 
     
-    output_tmp_video_path = args.color_video+'_tmp_depth.mkv'
-    output_video_path = args.color_video+'_depth.mkv'
+    output_tmp_video_path = color_video_path+'_tmp_depth.mkv'
+    output_video_path = color_video_path+'_depth.mkv'
     out_xfov_file = output_video_path + "_xfovs.json"
     out_transformations_file = output_video_path + "_transformations.json"
     
     #Load Video in to ram
-    images, fps = depth_frames_helper.load_video_frames_from_path(args.color_video, max_frames = args.max_frames)  # List of image paths, PIL Images, or numpy arrays
+    images, fps = depth_frames_helper.load_video_frames_from_path(color_video_path, max_frames = args.max_frames)  # List of image paths, PIL Images, or numpy arrays
     
     nr_images = len(images)
     H = images[0].shape[0]
@@ -135,19 +134,13 @@ if __name__ == '__main__':
     numer_of_refs = len(reference_frame_ids)
     
     # Create batches
-    args.images_per_batch -= args.nr_of_ref_frames+args.batch_overlap
+    images_per_batch = args.images_per_batch - (args.nr_of_ref_frames+args.batch_overlap)
     batches = []
     for i in range(nr_images):
         if i % args.images_per_batch == 0:
             batches.append([])
         batches[-1].append(i)
     
-    
-    
-    # Load model from Hugging Face Hub
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model = DepthAnything3.from_pretrained("depth-anything/da3nested-giant-large")
-    model = model.to(device=device)
     
     depth_out = []
     intrin_out = []
@@ -267,7 +260,44 @@ if __name__ == '__main__':
     
     
     #DEBUG grayscale out
-    max_depth = np.max(depth_out)
-    depth_frames_helper.save_grayscale_video(depth_out, output_video_path+"_grayscale_depth.mkv", fps, max_depth, W, H) # # the model output resolution: prediction.depth.shape[2], prediction.depth.shape[1]
+    #max_depth = np.max(depth_out)
+    #depth_frames_helper.save_grayscale_video(depth_out, output_video_path+"_grayscale_depth.mkv", fps, max_depth, W, H) # # the model output resolution: prediction.depth.shape[2], prediction.depth.shape[1]
+    
+
+
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser(description='MDVT DepthAnythingV3 video converter')
+    parser.add_argument('--color_video', type=str, required=True)
+    parser.add_argument('--max_frames', type=int, default=-1, help='maximum length of the input video, -1 means no limit')
+    parser.add_argument('--max_depth', default=100, type=int, help='the max depth that the video uses', required=False)
+    parser.add_argument('--xfov', type=float, help='fov in deg in the x-direction, calculated from aspectratio and yfov in not given', required=False)
+    parser.add_argument('--yfov', type=float, help='fov in deg in the y-direction, calculated from aspectratio and xfov in not given', required=False)
+    parser.add_argument("--transformation_file", type=str, default=None, help='File with cammera transforms for the video')
+    parser.add_argument('--xfov_file', type=str, help='alternative to xfov and yfov, json file with one xfov for each frame', required=False)
+    parser.add_argument('--images_per_batch', default=40, type=int, help='nr of images per batch; set depening on GPU memmory', required=False)
+    parser.add_argument('--batch_overlap', default=6, type=int, help='nr of images that is overlaped from the last batch', required=False)
+    parser.add_argument('--nr_of_ref_frames', default=6, type=int, help='nr of references that will be picked spaning the video', required=False)
+    parser.add_argument('--da3_resolution', default=504, type=int, help='resolution width used in inference. 504 is default 252 good for longer videos and GPUs with less ram', required=False)
+
+    args = parser.parse_args()
     
     
+    # Load model from Hugging Face Hub
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    model = DepthAnything3.from_pretrained("depth-anything/da3nested-giant-large")
+    model = model.to(device=device)
+    
+    # -----------------------
+    # Batch mode like video_metric_convert.py
+    # -----------------------
+    if _is_txt(args.color_video):
+        color_list = _read_list_file(args.color_video)
+
+        for idx, c_path in enumerate(color_list, start=1):
+            print(f"\n##### [{idx}/{len(color_list)}] Processing {c_path} #####")
+            # Re-invoke this script logic on each video
+            _single_run(args, c_path)
+
+    else:
+        # Single input video behavior (original code path)
+        _single_run(args, args.color_video)

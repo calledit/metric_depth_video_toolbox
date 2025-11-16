@@ -187,6 +187,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument('--parallel', type=int, default=int(os.cpu_count()//2), help='Run some steps in parallel, for faster processing.')
     parser.add_argument('--max_scene_frames', type=int, default=1500, help='Max length of scene in nr of frames, longer scenes will be processed in chunks.')
     parser.add_argument('--no_infill', action='store_true', help='Dont do infill.', required=False)
+    parser.add_argument('--use_normal_infill', action='store_true', help='Infill using normals.', required=False)
+    
     
     parser.add_argument('--gui', action='store_true', help='Launch the PySide6 GUI')
     
@@ -303,22 +305,28 @@ def step2_estimate_depth(args: argparse.Namespace, scene_video_files: List[Dict]
 
     python = "python"
     batch_file = args.color_video + '_batching.txt'
+    vda_batch_file = args.color_video + '_vda_batching.txt'
+    da3_batch_file = args.color_video + '_da3_batching.txt'
     # Clean batch placeholder
     if os.path.exists(batch_file):
         os.remove(batch_file)
+    if os.path.exists(vda_batch_file):
+        os.remove(vda_batch_file)
+    if os.path.exists(da3_batch_file):
+        os.remove(da3_batch_file)
 
     for scene in scene_video_files:
         scene_org_xfovs_file = scene['depth_video_file'] + "_org_xfovs.json"
         single_frame_depth_video_file = scene['scene_video_file'] + "_single_frame_depth.mkv"
-
-        depth_engine = 'vda'
+        
+        depth_engine = 'da3'
         if 'Engine' in scene and scene['Engine'] != '':
             depth_engine = scene['Engine']
-
+        
         scene['xfov'] = None
 
         # If engine not vda/depthcrafter, estimate xfov + metric reference via unik3d
-        if depth_engine not in ('vda'):
+        if depth_engine not in ('vda', 'da3'):
             if not os.path.exists(single_frame_depth_video_file):
                 if not os.path.exists(scene_org_xfovs_file):
                     if not scene['finished']:
@@ -334,15 +342,23 @@ def step2_estimate_depth(args: argparse.Namespace, scene_video_files: List[Dict]
 
             assert is_valid_video(single_frame_depth_video_file), "Could not generate metric reference video file for depthcrafter"
         else:
-            scene['xfov'] = 42.0
+            #if the engine is VDA we force 42 deg fov not for any special reason but we need som value and fov 42 is a good average that wont look to bad in most scenarios
+            if depth_engine in ('vda'):
+                scene['xfov'] = 42.0
 
         # Generate depth per engine
+        if depth_engine == 'da3':
+            if not os.path.exists(scene['depth_video_file']):
+                if not scene['finished']:
+                    with open(da3_batch_file, "a", encoding="utf-8") as f:
+                        f.write(scene['scene_video_file'] + "\n")
         if depth_engine == 'vda':
             if not os.path.exists(scene['depth_video_file']):
                 if not scene['finished']:
-                    with open(batch_file, "a", encoding="utf-8") as f:
+                    with open(vda_batch_file, "a", encoding="utf-8") as f:
                         f.write(scene['scene_video_file'] + "\n")
-        else:
+        
+        if depth_engine not in ('vda', 'da3'):
             if depth_engine == 'depthcrafter':
                 if not os.path.exists(scene['depth_video_file']):
                     if not scene['finished']:
@@ -355,9 +371,13 @@ def step2_estimate_depth(args: argparse.Namespace, scene_video_files: List[Dict]
             assert is_valid_video(scene['depth_video_file']), "Could not generate: " + scene['depth_video_file']
 
     # Run batch VDA, if any
-    if os.path.exists(batch_file):
-        subprocess.run(f"{python} video_metric_convert.py --color_video {batch_file}", shell=True)
-        os.remove(batch_file)
+    if os.path.exists(vda_batch_file):
+        subprocess.run(f"{python} video_metric_convert.py --color_video {vda_batch_file}", shell=True)
+        os.remove(vda_batch_file)
+    
+    if os.path.exists(da3_batch_file):
+        subprocess.run(f"{python} video_da3.py --color_video {da3_batch_file}", shell=True)
+        os.remove(da3_batch_file)
 
 
 def step3_generate_masks(args: argparse.Namespace, scene_video_files: List[Dict]) -> None:
@@ -424,11 +444,45 @@ def step5_render_sbs(args: argparse.Namespace, scene_video_files: List[Dict]) ->
         proc.wait()
 
 
-def step6_infill_and_collect(args: argparse.Namespace, scene_video_files: List[Dict]) -> List[str]:
+def step6_normal_infill_render_sbs(args: argparse.Namespace, scene_video_files: List[Dict]) -> None:
+    """
+    (Optional) infill SBS using baic normal infill, collect final per-scene video paths to join.
+    """
+    print("Step 6: infill SBS frames (using normals)")
+    python = "python"
+    parallels = []
+    
+    video_files_to_concat = []
+
+    for scene in scene_video_files:
+        if not scene['finished']:
+            assert is_valid_video(scene['sbs']), "Could not find proper stereo video file to do infill on " + scene['sbs']
+        
+        # If infill disabled globally or per-scene, skip infill step
+        do_infill = (not args.no_infill) and scene.get('infill', True)
+        if not do_infill:
+            video_files_to_concat.append(scene['sbs'])
+            continue
+        
+        if not os.path.exists(scene['infilled']):
+            cmd = f"{python} basic_nomal_infill.py --sbs_color_video {scene['sbs']} --sbs_mask_video {scene['sbs_infill']}"
+            parallels.append(subprocess.Popen(cmd, shell=True))
+        
+        video_files_to_concat.append(scene['infilled'])
+
+        if len(parallels) >= args.parallel:
+            parallels = wait_for_first(parallels)
+
+    for proc in parallels:
+        proc.wait()
+    
+    return video_files_to_concat
+
+def step6_stereocrafter_infill_and_collect(args: argparse.Namespace, scene_video_files: List[Dict]) -> List[str]:
     """
     (Optional) infill SBS, collect final per-scene video paths to join.
     """
-    print("Step six: do SBS infill")
+    print("Step six: do SBS infill using (stereocrafter)")
 
     python = "python"
     batch_file = args.color_video + '_batching.txt'
@@ -555,7 +609,10 @@ def main():
     step5_render_sbs(args, scene_video_files)
 
     # Step 6: infill & collect outputs
-    video_files_to_concat = step6_infill_and_collect(args, scene_video_files)
+    if args.use_normal_infill:
+        video_files_to_concat = step6_normal_infill_render_sbs(args, scene_video_files)
+    else:
+        video_files_to_concat = step6_infill_and_collect(args, scene_video_files)
 
     # Validate before final concat (preserves original assert)
     assert validate_video_lengths(scene_video_files), "Something was wrong with one of the video files"

@@ -248,7 +248,7 @@ if __name__ == '__main__':
             'into a stereoscopic 3D side-by-side output for VR/3D TVs.'
         )
     )
-
+    parser.add_argument('--master_xfov', type=float, default=45.0, help='Intended master FOV. How large FOV the screen will be from the viewing individuals point of view. Default 25 deg represents a normal home setup with a sofa and a TV. A cinema master would be about 40 deg. A vr master, about 70 deg', required=False)
     parser.add_argument('--depth_video', type=str, help='Path to input depth-encoded video file', required=True)
     parser.add_argument('--color_video', type=str, help='Path to input color video file', required=False)
     parser.add_argument('--xfov', type=float, help='Horizontal FOV in degrees', required=False)
@@ -481,6 +481,9 @@ if __name__ == '__main__':
         else:
             xf = args.xfov
             yf = args.yfov
+        
+        
+        frame_master_fov = args.master_xfov
 
         cam_matrix = depth_map_tools.compute_camera_matrix(xf, yf, frame_width, frame_height)
         render_cam_matrix = cam_matrix
@@ -491,9 +494,14 @@ if __name__ == '__main__':
             if max_fov >= 180:
                 raise ValueError("fov cant be 180 or over, the tool is not built to handle fisheye distorted input video")
             render_fov = max(75, max_fov)
+            frame_master_fov = render_fov
             render_cam_matrix = depth_map_tools.compute_camera_matrix(render_fov, render_fov, out_width, out_height)
-
-
+        
+        scale_disp = math.tan(math.radians(frame_master_fov/2)) / math.tan(math.radians(xf/2))
+        master_fov_scale_depth = 1.0 / scale_disp
+        
+        #scale the depth to coutn for the user viewing the video a difrent FOV than it was filmed with
+        depth *= master_fov_scale_depth
 
         edge_pcd = None
 
@@ -660,6 +668,11 @@ if __name__ == '__main__':
                         print("Convergence distance is zero, skipping convergence")
                         convergence_distance = None
                     else:
+                        
+                        #correct convergence_distance for master scale depth
+                        convergence_distance *= master_fov_scale_depth
+                        
+                        #calc convergence angles
                         convergence_angle_rad = convergence_angle(convergence_distance, args.pupillary_distance/1000)
                         convergence_rotation_plus = mesh.get_rotation_matrix_from_xyz((0, convergence_angle_rad, 0))
                         convergence_rotation_minus = mesh.get_rotation_matrix_from_xyz((0, -convergence_angle_rad, 0))
@@ -739,7 +752,7 @@ if __name__ == '__main__':
                 left_img_mask[bg_mask] = bg_color # We simply hope that there is no normal that is perfectly green when we use green as bg
                 left_image[bg_mask] = np.array([.0,.0,.0])
                 if not args.green_and_black_infill_mask:
-                    #if the right most pixels are all green set their normals so they get infilled (16 sep 2025 TODO fix bug. i think this sould be applied to both sides and not only when all pixels are green do to convergense)
+                    #if the right most pixels are all green set their normals so they get infilled
                     left_img_mask[:, 0][np.all(left_img_mask[:, 0, :]  == bg_color, axis=1)] = np.array([1., 0.5, 0.5])#normal pointing right
                     left_img_mask[:, -1][np.all(left_img_mask[:, -1, :]  == bg_color, axis=1)] = np.array([0., 0.5, 0.5])#normal pointing left
                     left_img_mask[0, :][np.all(left_img_mask[0, :, :] == bg_color, axis=1)] = np.array([0.5, 0.5, 0.0])# Top edge (row 0) – normal pointing down

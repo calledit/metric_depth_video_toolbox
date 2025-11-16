@@ -52,7 +52,7 @@ class SceneRow:
         return self.data.get('End Timecode', '')
 
     def engine(self) -> str:
-        return self.data.get('Engine', '') or 'vda'
+        return self.data.get('Engine', '') or 'da3'
 
     def set_engine(self, eng: str) -> None:
         self.data['Engine'] = eng
@@ -446,7 +446,7 @@ def run_gui(cli_args, main_script_path: str) -> None:
             # Right-side controls
             self.version_combo = QtWidgets.QComboBox()
             self.engine_combo = QtWidgets.QComboBox()
-            self.engine_combo.addItems(['vda', 'depthcrafter', 'geometrycrafter'])
+            self.engine_combo.addItems(['da3', 'vda', 'depthcrafter', 'geometrycrafter'])
             self.btn_split = QtWidgets.QPushButton('Split scene before current frame')
             self.btn_convert_scene = QtWidgets.QPushButton('Convert This Scene')
 
