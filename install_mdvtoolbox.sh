@@ -15,7 +15,7 @@ elif [ "$(uname -o)" == "Msys" ]; then
 fi
 
 
-$PIP install open3d numpy opencv-python
+$PIP install open3d numpy opencv-python glfw PyOpenGL
 
 #Stuff required for Depth-Anything and other third party tools
 $PIP install einops easydict imageio xformers==0.0.29 tqdm

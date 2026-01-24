@@ -188,6 +188,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument('--max_scene_frames', type=int, default=1500, help='Max length of scene in nr of frames, longer scenes will be processed in chunks.')
     parser.add_argument('--no_infill', action='store_true', help='Dont do infill.', required=False)
     parser.add_argument('--use_normal_infill', action='store_true', help='Infill using normals.', required=False)
+    parser.add_argument('--use_stereo_dissoclusion_net', action='store_true', help='Infill using stereo_dissoclusion_net.', required=False)
+    
     
     
     parser.add_argument('--gui', action='store_true', help='Launch the PySide6 GUI')
@@ -430,11 +432,14 @@ def step5_render_sbs(args: argparse.Namespace, scene_video_files: List[Dict]) ->
                 xfov_str = f"--xfov {scene['xfov']}"
             else:
                 xfov_str = f"--xfov_file {scene['xfovs_file']}"
+                
+            edge_removal = ''#'--dont_remove_edges'
+            
 
             infm = '--infill_mask' if scene.get('infill', True) else ''
 
             if not scene['finished']:
-                cmd = f"{python} stereo_rerender.py --color_video {scene['scene_video_file']} --convergence_file {scene['convergence_file']} {xfov_str} --depth_video {scene['depth_video_file']} {infm}"
+                cmd = f"{python} stereo_rerender.py --color_video {scene['scene_video_file']} --convergence_file {scene['convergence_file']} {xfov_str} --depth_video {scene['depth_video_file']} {edge_removal} {infm}"
                 parallels.append(subprocess.Popen(cmd, shell=True))
 
             if len(parallels) >= args.parallel:
@@ -443,8 +448,17 @@ def step5_render_sbs(args: argparse.Namespace, scene_video_files: List[Dict]) ->
     for proc in parallels:
         proc.wait()
 
-
-def step6_normal_infill_render_sbs(args: argparse.Namespace, scene_video_files: List[Dict]) -> None:
+def step6_infill_and_collect(args: argparse.Namespace, scene_video_files: List[Dict]):
+    if args.use_normal_infill:
+        video_files_to_concat = step6_normal_infill_render_sbs(args, scene_video_files)
+    elif args.use_stereo_dissoclusion_net:
+        video_files_to_concat = step6_stereo_dissoclusion_net_infill_and_collect(args, scene_video_files)
+    else:
+        video_files_to_concat = step6_stereocrafter_infill_and_collect(args, scene_video_files)
+    
+    return video_files_to_concat
+        
+def step6_normal_infill_render_sbs(args: argparse.Namespace, scene_video_files: List[Dict]):
     """
     (Optional) infill SBS using baic normal infill, collect final per-scene video paths to join.
     """
@@ -477,7 +491,7 @@ def step6_normal_infill_render_sbs(args: argparse.Namespace, scene_video_files: 
         proc.wait()
     
     return video_files_to_concat
-
+    
 def step6_stereocrafter_infill_and_collect(args: argparse.Namespace, scene_video_files: List[Dict]) -> List[str]:
     """
     (Optional) infill SBS, collect final per-scene video paths to join.
@@ -517,6 +531,54 @@ def step6_stereocrafter_infill_and_collect(args: argparse.Namespace, scene_video
         subprocess.run(f"{python} stereo_crafter_infill.py --sbs_color_video {batch_file} --sbs_mask_video {batch_file2}", shell=True)
         os.remove(batch_file)
         os.remove(batch_file2)
+    
+    return video_files_to_concat
+
+def step6_stereo_dissoclusion_net_infill_and_collect(args: argparse.Namespace, scene_video_files: List[Dict]) -> List[str]:
+    """
+    (Optional) infill SBS, collect final per-scene video paths to join.
+    """
+    print("Step six: do SBS infill using (stereo_dissoclusion_net)")
+
+    python = "python"
+    batch_file = args.color_video + '_batching.txt'
+    batch_file2 = args.color_video + '_batching2.txt'
+    batch_file3 = args.color_video + '_batching3.txt'
+    if os.path.exists(batch_file):
+        os.remove(batch_file)
+    if os.path.exists(batch_file2):
+        os.remove(batch_file2)
+    if os.path.exists(batch_file3):
+        os.remove(batch_file3)
+
+    video_files_to_concat = []
+
+    for scene in scene_video_files:
+        if not scene['finished']:
+            assert is_valid_video(scene['sbs']), "Could not find proper stereo video file to do infill on " + scene['sbs']
+
+        # If infill disabled globally or per-scene, skip infill step
+        do_infill = (not args.no_infill) and scene.get('infill', True)
+        if not do_infill:
+            video_files_to_concat.append(scene['sbs'])
+            continue
+
+        # Queue infill work
+        if not os.path.exists(scene['infilled']):
+            with open(batch_file, "a", encoding="utf-8") as f:
+                f.write(scene['sbs'] + "\n")
+            with open(batch_file2, "a", encoding="utf-8") as f:
+                f.write(scene['sbs_infill'] + "\n")
+            with open(batch_file2, "a", encoding="utf-8") as f:
+                f.write(scene['sbs_depth'] + "\n")
+
+        video_files_to_concat.append(scene['infilled'])
+
+    if os.path.exists(batch_file):
+        subprocess.run(f"{python} stereo_dissoclusion_net_infill.py --sbs_color_video {batch_file} --sbs_mask_video {batch_file2} --sbs_depth_video {batch_file2}", shell=True)
+        os.remove(batch_file)
+        os.remove(batch_file2)
+        os.remove(batch_file3)
 
     return video_files_to_concat
 
@@ -609,10 +671,7 @@ def main():
     step5_render_sbs(args, scene_video_files)
 
     # Step 6: infill & collect outputs
-    if args.use_normal_infill:
-        video_files_to_concat = step6_normal_infill_render_sbs(args, scene_video_files)
-    else:
-        video_files_to_concat = step6_infill_and_collect(args, scene_video_files)
+    video_files_to_concat = step6_infill_and_collect(args, scene_video_files)
 
     # Validate before final concat (preserves original assert)
     assert validate_video_lengths(scene_video_files), "Something was wrong with one of the video files"

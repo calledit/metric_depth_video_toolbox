@@ -8,7 +8,7 @@ CALL "%CONDA%" tos accept --override-channels --channel https://repo.anaconda.co
 
 CALL "%CONDA%"  create -n mdvt python=3.11 -y
 CALL "%UserProfile%\miniconda3\Scripts\activate.bat" mdvt
-pip install numpy open3d opencv-python
+pip install numpy open3d opencv-python glfw PyOpenGL
 
 #to use the movie_2_3D.py you need scenedetect and PySide6 for GUI
 pip install scenedetect[opencv-headless] PySide6

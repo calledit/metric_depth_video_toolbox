@@ -1,7 +1,8 @@
 import torch
 import numpy as np
 import sys
-sys.path.append("Depth-Anything-3/src")
+import os
+sys.path.append(os.path.dirname(os.path.abspath(__file__))+os.sep+"Depth-Anything-3"+os.sep+"src")
 from depth_anything_3.api import DepthAnything3
 from depth_anything_3.utils.pose_align import align_poses_umeyama, _apply_sim3_to_poses
 from depth_anything_3.utils.alignment import least_squares_scale_scalar
@@ -263,6 +264,13 @@ def _single_run(args, color_video_path):
     #max_depth = np.max(depth_out)
     #depth_frames_helper.save_grayscale_video(depth_out, output_video_path+"_grayscale_depth.mkv", fps, max_depth, W, H) # # the model output resolution: prediction.depth.shape[2], prediction.depth.shape[1]
     
+def load_model():
+    global model
+    # Load model from Hugging Face Hub
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    model = DepthAnything3.from_pretrained("depth-anything/da3nested-giant-large")
+    model = model.to(device=device)
+    return model
 
 
 if __name__ == '__main__':
@@ -282,10 +290,7 @@ if __name__ == '__main__':
     args = parser.parse_args()
     
     
-    # Load model from Hugging Face Hub
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model = DepthAnything3.from_pretrained("depth-anything/da3nested-giant-large")
-    model = model.to(device=device)
+    load_model()
     
     # -----------------------
     # Batch mode like video_metric_convert.py

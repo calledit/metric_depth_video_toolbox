@@ -73,12 +73,54 @@ def decode_rgb_as_data(rgb, frame_width, frame_height, bit16 = False):
         depth_unit[..., 2] = rgb[..., 1]
     
     return data
+    
+def rescale_image(img, side_length, mode="max"):
+    """
+    Rescale image so either the longest or shortest side becomes `side_length`.
+
+    mode: "max" → longest side becomes `side_length`
+          "min" → shortest side becomes `side_length`
+    """
+
+    h, w = img.shape[:2]
+
+    if mode == "max":
+        scale = side_length / max(h, w)
+    elif mode == "min":
+        scale = side_length / min(h, w)
+    else:
+        raise ValueError("mode must be 'max' or 'min'")
+
+    new_w = int(w * scale)
+    new_h = int(h * scale)
+
+    return cv2.resize(img, (new_w, new_h), interpolation=cv2.INTER_AREA)
 
 def decode_rgb_depth_frame(rgb, max_depth, bit16):
     frame_height = rgb.shape[0]
     frame_width = rgb.shape[1]
     encoded_value = decode_rgb_as_data(rgb, frame_width, frame_height, bit16)
     return decode_uint32_as_depth(encoded_value, max_depth)
+
+def normalize_depth(d):
+    d = d.astype(np.float32)
+    
+    # keep only valid numbers
+    d_valid = d[np.isfinite(d)]
+    if d_valid.size == 0:
+        return None
+
+    # compute percentiles
+    d_min = np.percentile(d_valid, 1)
+    d_max = np.percentile(d_valid, 99)
+
+    # degenerate case: no variation
+    if d_max <= d_min + 1e-6:
+        # return a flat image (e.g. zeros)
+        return np.zeros_like(d, dtype=np.float32)
+
+    # normal case
+    return np.clip((d - d_min) / (d_max - d_min), 0, 1).reshape(d.shape)
 
 def save_depth_video(frames, output_video_path, fps, max_depth_arg, rescale_width, rescale_height):
     """

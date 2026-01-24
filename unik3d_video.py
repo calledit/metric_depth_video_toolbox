@@ -9,7 +9,7 @@ import depth_frames_helper
 import depth_map_tools
 
 import sys
-sys.path.append("UniK3D")
+sys.path.append(os.path.dirname(os.path.abspath(__file__))+os.sep+"UniK3D")
 from unik3d.models import UniK3D
 from unik3d.utils.camera import Pinhole
 
@@ -100,7 +100,16 @@ def estimate_focal_lengths(projected_points: torch.Tensor, width: int, height: i
 
     return fx, fy
 
+def load_model():
+    DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
+    model = UniK3D.from_pretrained("lpiccinelli/unik3d-vitl")
 
+    model.resolution_level = 9
+    model.interpolation_mode = "bilinear"
+
+    model = model.to(DEVICE).eval()
+
+    return model
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='MDVT UniK3D video converter')
     parser.add_argument('--color_video', type=str, required=True)
@@ -116,7 +125,7 @@ if __name__ == '__main__':
     if args.xfov is None and args.yfov is None:
         use_fov = False
 
-    DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
+    
 
 
 
@@ -133,13 +142,8 @@ if __name__ == '__main__':
     if use_fov:
         cam_matrix = depth_map_tools.compute_camera_matrix(args.xfov, args.yfov, frame_width, frame_height).astype(np.float32)
 
-    model = UniK3D.from_pretrained("lpiccinelli/unik3d-vitl")
-
-    model.resolution_level = 9
-    model.interpolation_mode = "bilinear"
-
-    model = model.to(DEVICE).eval()
-
+    model = load_model()
+    
     depths = []
 
     output_tmp_video_path = args.color_video+'_tmp_depth.mkv'

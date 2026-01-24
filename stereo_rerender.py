@@ -152,7 +152,7 @@ def masked_blur(img, ksize=(6,6), sigma=0):
 
     return np.clip(out, 0, 255).astype(np.uint8)
     
-def infill_using_normals(color_img, hole_mask, normal_map, max_steps=30):
+def infill_using_normals(color_img, hole_mask, normal_map, max_steps=400):
     """
     Fill black "holes" in `color_img` by marching along surface normals
     obtained from `normal_map`. Stops after `max_steps` or upon hitting
@@ -238,6 +238,21 @@ def infill_using_normals(color_img, hole_mask, normal_map, max_steps=30):
     out[ys0, xs0] = color_img[ys1, xs1]
 
     return out
+    
+
+from scipy.signal import savgol_filter
+def curve_fit(values):
+    y = np.array(values)
+    
+    # append the last 50 values again to smoth of the end
+    n_tail = 50
+    tail = y[-n_tail:]           
+    y_ext = np.concatenate([y, tail]) 
+    
+    y_smooth = savgol_filter(y_ext, window_length=100, polyorder=2)
+    
+    y_smooth = y_smooth[:-n_tail]
+    return y_smooth
 
 if __name__ == '__main__':
 
@@ -266,6 +281,8 @@ if __name__ == '__main__':
     parser.add_argument('--convergence_file', type=str, help='json file with convergence data for each frame.', required=False)
 
     parser.add_argument('--dont_place_points_in_edges', action='store_true', help='Skip adding edge points for infill', required=False)
+    
+    parser.add_argument('--dont_remove_edges', action='store_true', help='Skip removing edges', required=False)
 
     parser.add_argument('--do_basic_infill', action='store_true', help='Use basic in-house infill algorithm.', required=False)
     parser.add_argument('--touchly1', action='store_true', help='Render in touchly1 format (mono+depth)', required=False)
@@ -278,6 +295,9 @@ if __name__ == '__main__':
     parser.add_argument('--mask_video', type=str, help='video file to use as mask input to filter out the forground and generate a background version of the mesh that can be used as infill. Requires non moving camera or very good tracking.', required=False)
     parser.add_argument('--save_background', action='store_true', help='Save the compound background as a file. To be ussed as infill.', required=False)
     parser.add_argument('--load_background', help='Load the compound background as a file. To be used as infill.', required=False)
+    
+    parser.add_argument('--create_sbs_depth_video', action='store_true', help='Save a depth version of the final sbs video', required=False)
+    
 
 
     args = parser.parse_args()
@@ -313,6 +333,7 @@ if __name__ == '__main__':
             raise FileNotFoundError(f"Convergence file not found: {args.convergence_file}")
         with open(args.convergence_file) as json_file_handle:
             convergence_depths = json.load(json_file_handle)
+            convergence_depths = curve_fit(convergence_depths)
 
     xfovs = None
     if args.xfov_file:
@@ -403,8 +424,11 @@ if __name__ == '__main__':
     out = cv2.VideoWriter(output_tmp_file, codec, frame_rate, out_size)
 
     infill_mask_video = None
+    out_sbs_depth_video = None
     if args.infill_mask:
         infill_mask_video = cv2.VideoWriter(output_tmp_file+"_infillmask.mkv", cv2.VideoWriter_fourcc(*"FFV1"), frame_rate, out_size)
+    if args.create_sbs_depth_video:
+        out_sbs_depth_video = cv2.VideoWriter(output_tmp_file+"_depth.mkv", cv2.VideoWriter_fourcc(*"FFV1"), frame_rate, out_size)
 
     if mask_video is not None:
         # Create background "sphere"
@@ -504,6 +528,9 @@ if __name__ == '__main__':
         depth *= master_fov_scale_depth
 
         edge_pcd = None
+        
+        left_depth = None
+        right_depth = None
 
         if transformations is None and args.touchly1: #Fast path we can skip the full render pass
             depth8bit = np.rint(np.maximum(0, np.minimum(depth, args.touchly_max_depth)-args.touchly_min_depth)*(255/(args.touchly_max_depth-args.touchly_min_depth))).astype(np.uint8)
@@ -528,6 +555,9 @@ if __name__ == '__main__':
             remove_edges = False
             if args.infill_mask or args.remove_edges or args.do_basic_infill:
                 remove_edges = True
+            
+            if args.dont_remove_edges:
+                remove_edges = False
 
             of_by_one = True
             if args.render_as_pointcloud:
@@ -691,11 +721,8 @@ if __name__ == '__main__':
                     points_3d = np.asarray(edge_pcd.points)
                     points_2d = depth_map_tools.project_3d_points_to_2d(points_3d, render_cam_matrix)
                 
-                #Touchly0 requires a left eye depthmap
-                if args.touchly0:
-                    left_image, left_depth = depth_map_tools.render(to_draw, render_cam_matrix, depth = -2, bg_color = bg_color)
-                else:
-                    left_image = depth_map_tools.render(to_draw, render_cam_matrix, depth = False, bg_color = bg_color)
+                
+                left_image, left_depth = depth_map_tools.render(to_draw, render_cam_matrix, depth = -2, bg_color = bg_color)
                 
                 bg_mask = np.all(left_image == bg_color, axis=-1)
                 
@@ -809,7 +836,7 @@ if __name__ == '__main__':
                     points_3d = np.asarray(edge_pcd.points)
                     points_2d = depth_map_tools.project_3d_points_to_2d(points_3d, render_cam_matrix)
                 
-                right_image = depth_map_tools.render(to_draw, render_cam_matrix, depth = False, bg_color = bg_color)
+                right_image, right_depth = depth_map_tools.render(to_draw, render_cam_matrix, depth = -2, bg_color = bg_color)
 
                 bg_mask = np.all(right_image == bg_color, axis=-1)
 
@@ -886,7 +913,17 @@ if __name__ == '__main__':
 
                     out_mask_image = cv2.hconcat(imgs)
                     infill_mask_video.write(cv2.cvtColor(out_mask_image, cv2.COLOR_RGB2BGR))
-
+                    
+        if out_sbs_depth_video is not None and left_depth is not None and right_depth is not None:
+            
+            encoded_depth = depth_frames_helper.encode_depth_as_uint32(left_depth, MODEL_maxOUTPUT_depth)
+            bgr_depth_left = depth_frames_helper.encode_data_as_BGR(encoded_depth, frame_width, frame_height, bit16 = True)
+            
+            encoded_depth = depth_frames_helper.encode_depth_as_uint32(right_depth, MODEL_maxOUTPUT_depth)
+            bgr_depth_right = depth_frames_helper.encode_data_as_BGR(encoded_depth, frame_width, frame_height, bit16 = True)
+            
+            out_depth = cv2.hconcat([bgr_depth_left, bgr_depth_right])
+            out_sbs_depth_video.write(out_depth)
 
         out.write(cv2.cvtColor(out_image, cv2.COLOR_RGB2BGR))
 
@@ -909,5 +946,10 @@ if __name__ == '__main__':
     if infill_mask_video is not None:
         infill_mask_video.release()
         depth_frames_helper.verify_and_move(output_tmp_file+"_infillmask.mkv", total_frames, output_file+"_infillmask.mkv")
+    
+    if out_sbs_depth_video is not None:
+        out_sbs_depth_video.release()
+        depth_frames_helper.verify_and_move(output_tmp_file+"_depth.mkv", total_frames, output_file+"_depth.mkv")
+    
 
     print(f"Processing complete. Output saved to: {output_file}")

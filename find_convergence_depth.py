@@ -82,10 +82,11 @@ if __name__ == '__main__':
     if raw_video is not None:
         raw_video.release()
 
-    avg_convergence_depth = float(np.array(convergence_depths).mean())
-    save_convergence_depths = []
-    for i in range(frame_n):
-        save_convergence_depths.append(avg_convergence_depth)
+    #avg_convergence_depth = float(np.array(convergence_depths).mean())
+    #save_convergence_depths = []
+    #for i in range(frame_n):
+    #    save_convergence_depths.append(avg_convergence_depth)
+    save_convergence_depths = convergence_depths
 
     with open(out_file, "w") as json_file_handle:
         json_file_handle.write(json.dumps(save_convergence_depths, cls=NumpyEncoder))
