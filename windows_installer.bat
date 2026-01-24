@@ -8,12 +8,14 @@ CALL "%CONDA%" tos accept --override-channels --channel https://repo.anaconda.co
 
 CALL "%CONDA%"  create -n mdvt python=3.11 -y
 CALL "%UserProfile%\miniconda3\Scripts\activate.bat" mdvt
+
+
 pip install numpy open3d opencv-python glfw PyOpenGL
 
-#to use the movie_2_3D.py you need scenedetect and PySide6 for GUI
+rem to use the movie_2_3D.py you need scenedetect and PySide6 for GUI
 pip install scenedetect[opencv-headless] PySide6
 
-CALL "%CONDA%" install -c conda-forge ffmpeg
+
 
 echo install ML models and dependencies
 echo install torch with cuda support
@@ -51,6 +53,9 @@ cd ..
 rem copy over function file to be able to import vda metric
 xcopy "other\metric_dpt_func.py" "Video-Depth-Anything\Depth-Anything-V2\metric_depth\" /K
 
+echo install da3
+git clone https://github.com/ByteDance-Seed/Depth-Anything-3
+
 echo install of depth estimator done
 
 
@@ -86,3 +91,7 @@ echo install Unikd3D model
 git clone https://github.com/lpiccinelli-eth/UniK3D
 
 pip install timm wandb
+
+
+echo install ffmpeg for muxing final result
+CALL "%CONDA%" install -c conda-forge ffmpeg

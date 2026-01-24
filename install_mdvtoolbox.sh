@@ -47,7 +47,7 @@ fi
 
 
 #install support for Depth-Anything-3
-if [[ " $@ " =~ " -rembg " ]]; then
+if [[ " $@ " =~ " -da3 " ]]; then
 	git clone https://github.com/ByteDance-Seed/Depth-Anything-3
 	
 fi
