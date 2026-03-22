@@ -56,6 +56,8 @@ xcopy "other\metric_dpt_func.py" "Video-Depth-Anything\Depth-Anything-V2\metric_
 echo install da3
 git clone https://github.com/ByteDance-Seed/Depth-Anything-3
 
+pip install moviepy==1.0.3 addict plyfile pycolmap trimesh evo
+
 echo install of depth estimator done
 
 
@@ -78,6 +80,16 @@ git clone https://huggingface.co/TencentARC/StereoCrafter
 cd .. 
 cd ..
 echo infill model installed
+
+
+echo installing infill modell m2svid
+
+
+echo infill model installed
+git clone https://github.com/google-research/m2svid
+
+pip install OmegaConf kornia open-clip-torch pytorch_lightning pytorch-msssim
+rem pip install pytorch_lightning ffmpeg-python omegaconf kornia open-clip-torch pytorch-msssim av==10.0.0
 
 echo install masking dependencies
 pip install rembg[gpu] filetype watchdog aiohttp asyncer gradio
