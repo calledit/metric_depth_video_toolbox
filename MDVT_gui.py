@@ -672,6 +672,7 @@ class ProjectInitScreen(QtWidgets.QWidget):
                     "Engine":              cfg.get("depth_engine", "da3"),
                     "Infill":              cfg.get("infill_engine", "m2svid"),
                     "do_infill":           True,
+                    "do_convergence":      True,
                 }]
             else:
                 print("Running scene detection…")
@@ -860,7 +861,11 @@ class ProjectViewScreen(QtWidgets.QWidget):
 
         self.chk_infill = QtWidgets.QCheckBox("Enable infill for this scene")
         self.chk_infill.setChecked(True)
-        sc_lay.addWidget(self.chk_infill, 1, 0, 1, 2)
+        sc_lay.addWidget(self.chk_infill, 1, 0)
+
+        self.chk_convergence = QtWidgets.QCheckBox("Render with convergence")
+        self.chk_convergence.setChecked(True)
+        sc_lay.addWidget(self.chk_convergence, 1, 1)
 
         self.btn_split = QtWidgets.QPushButton("✂  Split at Current Frame")
         sc_lay.addWidget(self.btn_split, 1, 2, 1, 2)
@@ -964,6 +969,7 @@ class ProjectViewScreen(QtWidgets.QWidget):
         self.combo_depth.currentTextChanged.connect(self._on_depth_changed)
         self.combo_infill.currentTextChanged.connect(self._on_infill_changed)
         self.chk_infill.toggled.connect(self._on_infill_toggled)
+        self.chk_convergence.toggled.connect(self._on_convergence_toggled)
         self.btn_split.clicked.connect(self._on_split)
         self.btn_convert_scene.clicked.connect(self._on_convert_scene)
         self.btn_convert_all.clicked.connect(self._on_convert_all)
@@ -1037,12 +1043,13 @@ class ProjectViewScreen(QtWidgets.QWidget):
             return
 
         # Update per-scene controls without triggering saves
-        for w in (self.combo_depth, self.combo_infill, self.chk_infill):
+        for w in (self.combo_depth, self.combo_infill, self.chk_infill, self.chk_convergence):
             w.blockSignals(True)
         self.combo_depth.setCurrentText(s.get("Engine", self._cfg.get("depth_engine", "da3")))
         self.combo_infill.setCurrentText(s.get("Infill", self._cfg.get("infill_engine", "m2svid")))
         self.chk_infill.setChecked(s.get("do_infill", True))
-        for w in (self.combo_depth, self.combo_infill, self.chk_infill):
+        self.chk_convergence.setChecked(s.get("do_convergence", True))
+        for w in (self.combo_depth, self.combo_infill, self.chk_infill, self.chk_convergence):
             w.blockSignals(False)
 
         status = scene_status(s, self._project_dir)
@@ -1080,6 +1087,10 @@ class ProjectViewScreen(QtWidgets.QWidget):
     def _on_infill_toggled(self, checked: bool) -> None:
         s = self._current_scene()
         if s: s["do_infill"] = checked; self._save_scenes()
+
+    def _on_convergence_toggled(self, checked: bool) -> None:
+        s = self._current_scene()
+        if s: s["do_convergence"] = checked; self._save_scenes()
 
     def _save_scenes(self) -> None:
         self._cfg["scenes"] = self._scenes
@@ -1189,7 +1200,8 @@ class ProjectViewScreen(QtWidgets.QWidget):
 
             sd = scene_snap.copy()
             sd.update(plan_paths(sd, project_dir))
-            sd["infill"]   = sd.get("do_infill", True)
+            sd["infill"]       = sd.get("do_infill", True)
+            sd["convergence"]  = sd.get("do_convergence", True)
             sd["finished"] = os.path.exists(sd["sbs"]) or os.path.exists(sd["infilled"])
 
             cap = cv2.VideoCapture(a.color_video)
@@ -1243,7 +1255,8 @@ class ProjectViewScreen(QtWidgets.QWidget):
             for s in scenes_snap:
                 sd = s.copy()
                 sd.update(plan_paths(sd, project_dir))
-                sd["infill"]   = sd.get("do_infill", True)
+                sd["infill"]      = sd.get("do_infill", True)
+                sd["convergence"] = sd.get("do_convergence", True)
                 sd["finished"] = os.path.exists(sd["sbs"]) or os.path.exists(sd["infilled"])
                 full_scenes.append(sd)
 

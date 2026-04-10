@@ -57,6 +57,12 @@ class SceneRow:
     def set_engine(self, eng: str) -> None:
         self.data['Engine'] = eng
 
+    def convergence(self) -> bool:
+        return not (self.data.get('Convergence', '') == 'No')
+
+    def set_convergence(self, value: bool) -> None:
+        self.data['Convergence'] = '' if value else 'No'
+
     def display_name(self) -> str:
         return f"#{self.number:03d}  {self.start_tc()} → {self.end_tc()}  ({self.len_frames()} fr)"
 
@@ -85,7 +91,7 @@ def _write_full_scene_csv(scene_csv_path: str, rows: List[SceneRow], csv_delimit
     fieldnames = [
         'Scene Number','Start Time (seconds)','Start Timecode','Start Frame',
         'End Time (seconds)','End Timecode','End Frame', 'Length (frames)',
-        'Length (seconds)','Length (timecode)', 'Engine','Infill'
+        'Length (seconds)','Length (timecode)', 'Engine','Infill','Convergence'
     ]
     with open(scene_csv_path, 'w', newline='') as f:
         f.write('Timecode List\n')   # first line ignored by loader
@@ -447,6 +453,8 @@ def run_gui(cli_args, main_script_path: str) -> None:
             self.version_combo = QtWidgets.QComboBox()
             self.engine_combo = QtWidgets.QComboBox()
             self.engine_combo.addItems(['da3', 'vda', 'depthcrafter', 'geometrycrafter'])
+            self.convergence_check = QtWidgets.QCheckBox()
+            self.convergence_check.setChecked(True)
             self.btn_split = QtWidgets.QPushButton('Split scene before current frame')
             self.btn_convert_scene = QtWidgets.QPushButton('Convert This Scene')
 
@@ -469,6 +477,9 @@ def run_gui(cli_args, main_script_path: str) -> None:
             rr += 1
             form.addWidget(QtWidgets.QLabel('Engine:'), rr, 0)
             form.addWidget(self.engine_combo, rr, 1)
+            rr += 1
+            form.addWidget(QtWidgets.QLabel('Render with convergence:'), rr, 0)
+            form.addWidget(self.convergence_check, rr, 1)
 
             actions = QtWidgets.QHBoxLayout()
             actions.addWidget(self.btn_split)
@@ -512,6 +523,7 @@ def run_gui(cli_args, main_script_path: str) -> None:
             self.scene_list.currentRowChanged.connect(self._on_select_scene)
             self.version_combo.currentIndexChanged.connect(self._update_player_source)
             self.engine_combo.currentTextChanged.connect(self._on_engine_changed)
+            self.convergence_check.stateChanged.connect(self._on_convergence_changed)
             self.btn_split.clicked.connect(self._on_split_clicked)
             self.btn_convert_scene.clicked.connect(self._on_convert_scene)
             self.btn_process_all.clicked.connect(self._on_process_all)
@@ -608,6 +620,9 @@ def run_gui(cli_args, main_script_path: str) -> None:
             self.engine_combo.blockSignals(True)
             self.engine_combo.setCurrentText(s.engine())
             self.engine_combo.blockSignals(False)
+            self.convergence_check.blockSignals(True)
+            self.convergence_check.setChecked(s.convergence())
+            self.convergence_check.blockSignals(False)
             self._refresh_version_combo()
             self._update_player_source()
 
@@ -724,6 +739,13 @@ def run_gui(cli_args, main_script_path: str) -> None:
             # refresh full state to avoid stale UI after engine change
             self._reload_after_edit(select_row=row)
             self._update_player_source()
+
+        def _on_convergence_changed(self, state):
+            row = self.scene_list.currentRow()
+            if row < 0 or row >= len(self.scenes):
+                return
+            self.scenes[row].set_convergence(bool(state))
+            self._persist_scenes()
 
         def _on_split_clicked(self):
             row = self.scene_list.currentRow()

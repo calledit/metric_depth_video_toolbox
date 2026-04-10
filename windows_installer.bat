@@ -31,24 +31,12 @@ rem Video-Depth-Anything
 git clone https://github.com/DepthAnything/Video-Depth-Anything
 cd Video-Depth-Anything
 git checkout 3628f50d55e81183c7cc7025f2c22190fa37ef28
-mkdir checkpoints
-cd checkpoints
-curl -O -L https://huggingface.co/depth-anything/Video-Depth-Anything-Large/resolve/main/video_depth_anything_vitl.pth
-cd ..
 
-rem install Depth-Anything-V2
+rem install Depth-Anything-V2 inside Video-Depth-Anything
 git clone https://github.com/DepthAnything/Depth-Anything-V2
-cd Depth-Anything-V2
-
-cd metric_depth
-mkdir checkpoints
-cd checkpoints
-curl -O -L https://huggingface.co/depth-anything/Depth-Anything-V2-Metric-Hypersim-Large/resolve/main/depth_anything_v2_metric_hypersim_vitl.pth
 cd ..
 
-cd ..
-cd ..
-cd ..
+python download_weights.py vda
 
 rem copy over function file to be able to import vda metric
 xcopy "other\metric_dpt_func.py" "Video-Depth-Anything\Depth-Anything-V2\metric_depth\" /K
@@ -65,20 +53,10 @@ echo install of depth estimator done
 
 echo installing infill modell StereoCrafter
 
-rem this askes for credentials which are not techinically required do it manually instead of using --recursive
 git clone --recursive https://github.com/TencentARC/StereoCrafter
-cd StereoCrafter
-
 pip install transformers diffusers accelerate scipy
+python download_weights.py stereocrafter
 
-# in StereoCrafter project root directory
-mkdir weights
-cd ./weights
-
-git clone https://huggingface.co/TencentARC/StereoCrafter
-
-cd .. 
-cd ..
 echo infill model installed
 
 echo installing infill modell m2svid
@@ -92,8 +70,8 @@ echo installing infill modell m2svid
 echo infill model installed
 git clone https://github.com/google-research/m2svid
 
-pip install OmegaConf kornia open-clip-torch pytorch_lightning pytorch-msssim
-rem pip install pytorch_lightning ffmpeg-python omegaconf kornia open-clip-torch pytorch-msssim av==10.0.0
+pip install OmegaConf kornia open-clip-torch pytorch_lightning pytorch-msssim gdown
+python download_weights.py m2svid
 
 echo install masking dependencies
 pip install rembg[gpu] filetype watchdog aiohttp asyncer gradio

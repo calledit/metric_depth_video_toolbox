@@ -262,6 +262,9 @@ def plan_scene_files(scenes: List[Dict], output_dir: str, end_scene: int) -> Lis
         # Per-scene infill preference
         scene['infill'] = not ('Infill' in scene and scene['Infill'] == 'No')
 
+        # Per-scene convergence preference
+        scene['convergence'] = not ('Convergence' in scene and scene['Convergence'] == 'No')
+
         # 'finished' if either stereo or infilled exists
         scene['finished'] = os.path.exists(scene['sbs']) or os.path.exists(scene['infilled'])
 
@@ -435,9 +438,10 @@ def step5_render_sbs(args: argparse.Namespace, scene_video_files: List[Dict]) ->
             
 
             infm = '--infill_mask' if scene.get('infill', True) else ''
+            conv_str = f"--convergence_file {scene['convergence_file']}" if scene.get('convergence', True) else ''
 
             if not scene['finished']:
-                cmd = f"{python} stereo_rerender.py --color_video {scene['scene_video_file']} --convergence_file {scene['convergence_file']} {xfov_str} --depth_video {scene['depth_video_file']} {edge_removal} {infm}"
+                cmd = f"{python} stereo_rerender.py --color_video {scene['scene_video_file']} {conv_str} {xfov_str} --depth_video {scene['depth_video_file']} {edge_removal} {infm}"
                 parallels.append(subprocess.Popen(cmd, shell=True))
 
             if len(parallels) >= args.parallel:
@@ -655,21 +659,33 @@ def step7_concat_and_mux(args: argparse.Namespace, video_files_to_concat: List[s
     video_name = os.path.basename(args.color_video)
     mp4_result_video_file = os.path.join(args.output_dir, video_name + "_SBS.mp4")
 
+    try:
+        has_audio = subprocess.run(
+            "ffprobe -v error -select_streams a:0 -show_entries stream=codec_type -of csv=p=0 "
+            + args.color_video,
+            shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE
+        ).stdout.strip() == b"audio"
+    except Exception:
+        has_audio = True
+
+    if has_audio:
+        audio_args = " -map 0:v:0 -map 1:a:0 -c:a copy -shortest "
+    else:
+        audio_args = " -map 0:v:0 "
+
     ret = subprocess.run(
         "ffmpeg -y -f concat -safe 0 -i "
         + ffmpeg_concat_file
-        + " -i "
-        + args.color_video
+        + (" -i " + args.color_video if has_audio else "")
         + " -metadata:s:v:0 stereo_mode=left_right -x264opts \"frame-packing=3\""
-        + " -map 0:v:0 -map 1:a:0 "
+        + audio_args
         + "-c:v libx264 -crf 18 -preset veryfast -pix_fmt yuv420p "
-        + "-c:a copy  -shortest "
         + mp4_result_video_file,
         shell=True
     )
 
-    # If ffmpeg fails, re-encode audio to AAC
-    if ret.returncode != 0:
+    # If ffmpeg fails and video has audio, re-encode audio to AAC
+    if ret.returncode != 0 and has_audio:
         subprocess.run(
             "ffmpeg -y -f concat -safe 0 -i "
             + ffmpeg_concat_file
