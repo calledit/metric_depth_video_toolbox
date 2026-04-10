@@ -253,6 +253,10 @@ def load_video_frames_from_path(video_path, start_frame=0, max_frames=-1):
     Load frames from a video file with OpenCV (BGR uint8).
     Returns (frames, fps).
     """
+    
+    if not os.path.exists(video_path):
+        raise Exception("video file: "+ video_path + " does not exist")
+    
     cap = cv2.VideoCapture(video_path)
     assert cap.isOpened(), f"Failed to open video: {video_path}"
 

@@ -129,9 +129,12 @@ def _single_run(args, color_video_path):
     if args.nr_of_ref_frames != 0:
         nth_frame = nr_images//args.nr_of_ref_frames
         
-        for i in range(nr_images):
-            if i % nth_frame == 0:
-                reference_frame_ids.append(i)
+        if nth_frame != 0:
+            for i in range(nr_images):
+                if i % nth_frame == 0:
+                    reference_frame_ids.append(i)
+        else:
+            reference_frame_ids.append(0)
     numer_of_refs = len(reference_frame_ids)
     
     # Create batches

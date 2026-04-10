@@ -186,9 +186,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument('--no_render', action='store_true', help='Skip rendering and subseqvent steps.', required=False)
     parser.add_argument('--parallel', type=int, default=int(os.cpu_count()//2), help='Run some steps in parallel, for faster processing.')
     parser.add_argument('--max_scene_frames', type=int, default=1500, help='Max length of scene in nr of frames, longer scenes will be processed in chunks.')
-    parser.add_argument('--no_infill', action='store_true', help='Dont do infill.', required=False)
-    parser.add_argument('--use_normal_infill', action='store_true', help='Infill using normals.', required=False)
-    parser.add_argument('--use_stereo_dissoclusion_net', action='store_true', help='Infill using stereo_dissoclusion_net.', required=False)
+    parser.add_argument('--infill_engine', type=str, default='stereocrafter', help='What infill engine to use. (none, normals, stereo_dissoclusion_net, stereocrafter, m2svid)', required=False)
     
     
     
@@ -449,12 +447,17 @@ def step5_render_sbs(args: argparse.Namespace, scene_video_files: List[Dict]) ->
         proc.wait()
 
 def step6_infill_and_collect(args: argparse.Namespace, scene_video_files: List[Dict]):
-    if args.use_normal_infill:
+    #none, normals, stereo_dissoclusion_net, stereocrafter, m2svid
+    if args.infill_engine == 'normals':
         video_files_to_concat = step6_normal_infill_render_sbs(args, scene_video_files)
-    elif args.use_stereo_dissoclusion_net:
+    elif args.infill_engine == 'stereo_dissoclusion_net':
         video_files_to_concat = step6_stereo_dissoclusion_net_infill_and_collect(args, scene_video_files)
-    else:
+    elif args.infill_engine == 'stereocrafter':
         video_files_to_concat = step6_stereocrafter_infill_and_collect(args, scene_video_files)
+    elif args.infill_engine == 'm2svid':
+        video_files_to_concat = step6_m2svid_infill_and_collect(args, scene_video_files)
+    else:
+        raise Exception(f"unknown infill engine: {args.infill_engine}")
     
     return video_files_to_concat
         
@@ -473,7 +476,7 @@ def step6_normal_infill_render_sbs(args: argparse.Namespace, scene_video_files: 
             assert is_valid_video(scene['sbs']), "Could not find proper stereo video file to do infill on " + scene['sbs']
         
         # If infill disabled globally or per-scene, skip infill step
-        do_infill = (not args.no_infill) and scene.get('infill', True)
+        do_infill = (not args.infill_engine == 'none') and scene.get('infill', True)
         if not do_infill:
             video_files_to_concat.append(scene['sbs'])
             continue
@@ -491,7 +494,55 @@ def step6_normal_infill_render_sbs(args: argparse.Namespace, scene_video_files: 
         proc.wait()
     
     return video_files_to_concat
+
+def step6_m2svid_infill_and_collect(args: argparse.Namespace, scene_video_files: List[Dict]) -> List[str]:
+    """
+    (Optional) infill SBS, collect final per-scene video paths to join.
+    """
+    print("Step six: do SBS infill using (m2svid)")
+
+    python = "python"
+    batch_file = args.color_video + '_batching.txt'
+    batch_file2 = args.color_video + '_batching2.txt'
+    batch_file3 = args.color_video + '_batching3.txt'
+    if os.path.exists(batch_file):
+        os.remove(batch_file)
+    if os.path.exists(batch_file2):
+        os.remove(batch_file2)
+    if os.path.exists(batch_file3):
+        os.remove(batch_file3)
+
+    video_files_to_concat = []
+
+    for scene in scene_video_files:
+        if not scene['finished']:
+            assert is_valid_video(scene['sbs']), "Could not find proper stereo video file to do infill on " + scene['sbs']
+
+        # If infill disabled globally or per-scene, skip infill step
+        do_infill = (not args.infill_engine == 'none') and scene.get('infill', True)
+        if not do_infill:
+            video_files_to_concat.append(scene['sbs'])
+            continue
+
+        # Queue infill work
+        if not os.path.exists(scene['infilled']):
+            with open(batch_file, "a", encoding="utf-8") as f:
+                f.write(scene['sbs'] + "\n")
+            with open(batch_file2, "a", encoding="utf-8") as f:
+                f.write(scene['sbs_infill'] + "\n")
+            with open(batch_file3, "a", encoding="utf-8") as f:
+                f.write(scene['scene_video_file'] + "\n")
+
+        video_files_to_concat.append(scene['infilled'])
+
+    if os.path.exists(batch_file):
+        subprocess.run(f"{python} m2svid_infill.py --color_video {batch_file3} --sbs_color_video {batch_file} --sbs_mask_video {batch_file2}", shell=True)
+        os.remove(batch_file)
+        os.remove(batch_file2)
+        os.remove(batch_file3)
     
+    return video_files_to_concat
+
 def step6_stereocrafter_infill_and_collect(args: argparse.Namespace, scene_video_files: List[Dict]) -> List[str]:
     """
     (Optional) infill SBS, collect final per-scene video paths to join.
@@ -513,7 +564,7 @@ def step6_stereocrafter_infill_and_collect(args: argparse.Namespace, scene_video
             assert is_valid_video(scene['sbs']), "Could not find proper stereo video file to do infill on " + scene['sbs']
 
         # If infill disabled globally or per-scene, skip infill step
-        do_infill = (not args.no_infill) and scene.get('infill', True)
+        do_infill = (not args.infill_engine == 'none') and scene.get('infill', True)
         if not do_infill:
             video_files_to_concat.append(scene['sbs'])
             continue
@@ -558,7 +609,7 @@ def step6_stereo_dissoclusion_net_infill_and_collect(args: argparse.Namespace, s
             assert is_valid_video(scene['sbs']), "Could not find proper stereo video file to do infill on " + scene['sbs']
 
         # If infill disabled globally or per-scene, skip infill step
-        do_infill = (not args.no_infill) and scene.get('infill', True)
+        do_infill = (not args.infill_engine == 'none') and scene.get('infill', True)
         if not do_infill:
             video_files_to_concat.append(scene['sbs'])
             continue
@@ -609,6 +660,7 @@ def step7_concat_and_mux(args: argparse.Namespace, video_files_to_concat: List[s
         + ffmpeg_concat_file
         + " -i "
         + args.color_video
+        + " -metadata:s:v:0 stereo_mode=left_right -x264opts \"frame-packing=3\""
         + " -map 0:v:0 -map 1:a:0 "
         + "-c:v libx264 -crf 18 -preset veryfast -pix_fmt yuv420p "
         + "-c:a copy  -shortest "
@@ -623,6 +675,7 @@ def step7_concat_and_mux(args: argparse.Namespace, video_files_to_concat: List[s
             + ffmpeg_concat_file
             + " -i "
             + args.color_video
+            + " -metadata:s:v:0 stereo_mode=left_right -x264opts \"frame-packing=3\""
             + " -map 0:v:0 -map 1:a:0 "
             + "-c:v libx264 -crf 18 -preset veryfast -pix_fmt yuv420p "
             + "-c:a aac -shortest "

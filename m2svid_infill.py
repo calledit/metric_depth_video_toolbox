@@ -16,7 +16,6 @@ from omegaconf import OmegaConf
 import sys
 sys.path.append(os.path.dirname(os.path.abspath(__file__))+os.sep+"m2svid")
 sys.path.append(os.path.dirname(os.path.abspath(__file__))+os.sep+"m2svid/third_party/Hi3D-Official/")
-#sys.path.append(os.path.dirname(os.path.abspath(__file__))+os.sep+"m2svid/third_party/pytorch-msssim/")
 
 from sgm.util import instantiate_from_config
 
@@ -31,6 +30,7 @@ num_inference_steps = None  # More steps look better but slowe set by arg
 black = np.array([0, 0, 0], dtype=np.uint8)
 blue = np.array([0, 0, 255], dtype=np.uint8)
 pipeline = None
+apply_edge_blending = False
 
 # Allow only ONE generate_infilled_frames on GPU at any time.
 _GPU_GATE = Semaphore(1)
@@ -348,28 +348,31 @@ def deal_with_frame_chunk(keep_first_three, chunk, out, keep_last_three, frame_w
 
         left_org_img[~left_black_mask]  = left_img[~left_black_mask]
         right_org_img[~right_black_mask] = right_img[~right_black_mask]
-
+        
         basic_out_image = cv2.hconcat([left_org_img, right_org_img])
         basic_out_image_uint8 = np.clip(basic_out_image, 0, 255).astype(np.uint8)
         proccessed_frames.append(basic_out_image_uint8)
+        
+        if apply_edge_blending:
+            # Edge blending to avoid halos
+            right_mask_blue = mark_lower_side(right_mask)
+            right_backedge_mask = np.all(right_mask_blue == blue, axis=-1)
+            left_mask_blue = mark_lower_side(left_mask)
+            left_backedge_mask = np.all(left_mask_blue == blue, axis=-1)
 
-        # Edge blending to avoid halos
-        right_mask_blue = mark_lower_side(right_mask)
-        right_backedge_mask = np.all(right_mask_blue == blue, axis=-1)
-        left_mask_blue = mark_lower_side(left_mask)
-        left_backedge_mask = np.all(left_mask_blue == blue, axis=-1)
+            right_backedge_mask = binary_dilation(right_backedge_mask, iterations=6)
+            left_backedge_mask  = binary_dilation(left_backedge_mask,  iterations=6)
 
-        right_backedge_mask = binary_dilation(right_backedge_mask, iterations=6)
-        left_backedge_mask  = binary_dilation(left_backedge_mask,  iterations=6)
+            right_alpha = cv2.GaussianBlur(right_backedge_mask.astype(np.float32), (15, 15), 0)[..., np.newaxis]
+            left_alpha  = cv2.GaussianBlur(left_backedge_mask.astype(np.float32),  (15, 15), 0)[..., np.newaxis]
 
-        right_alpha = cv2.GaussianBlur(right_backedge_mask.astype(np.float32), (15, 15), 0)[..., np.newaxis]
-        left_alpha  = cv2.GaussianBlur(left_backedge_mask.astype(np.float32),  (15, 15), 0)[..., np.newaxis]
+            left_img  = left_alpha * left_img + (1 - left_alpha) * left_org_img
+            right_img = right_alpha * right_img + (1 - right_alpha) * right_org_img
 
-        left_img  = left_alpha * left_img + (1 - left_alpha) * left_org_img
-        right_img = right_alpha * right_img + (1 - right_alpha) * right_org_img
-
-        out_image = cv2.hconcat([left_img, right_img])
-        out_image_uint8 = np.clip(out_image, 0, 255).astype(np.uint8)
+            out_image = cv2.hconcat([left_img, right_img])
+            out_image_uint8 = np.clip(out_image, 0, 255).astype(np.uint8)
+        else:
+            out_image_uint8 = basic_out_image_uint8
         out.write(cv2.cvtColor(out_image_uint8, cv2.COLOR_RGB2BGR))
 
     return proccessed_frames
@@ -510,11 +513,16 @@ if __name__ == '__main__':
     parser.add_argument('--sbs_mask_video', type=str, required=True, help='side by side stereo video mask')
     parser.add_argument('--max_frames', default=-1, type=int, help='quit after max_frames nr of frames', required=False)
     parser.add_argument('--num_inference_steps', default=5, type=int, help='Numer of defussion steps. More look better but is slower', required=False)
+    parser.add_argument('--apply_edge_blending', action='store_true', help='applies blending of the downward facing side of edges to reduce halo effect', required=False)
     args = parser.parse_args()
 
     num_inference_steps = args.num_inference_steps
 
     DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
+    
+    
+    apply_edge_blending = args.apply_edge_blending
+    
 
     # -----------------------
     # Load pipeline once (shared)
