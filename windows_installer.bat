@@ -13,7 +13,7 @@ CALL "%UserProfile%\miniconda3\Scripts\activate.bat" mdvt
 pip install numpy open3d opencv-python glfw PyOpenGL
 
 rem to use the movie_2_3D.py you need scenedetect and PySide6 for GUI
-pip install scenedetect[opencv-headless] PySide6
+pip install scenedetect[opencv-headless]
 
 
 
@@ -81,7 +81,11 @@ cd ..
 cd ..
 echo infill model installed
 
+echo installing infill modell m2svid
+git clone https://github.com/calledit/StereoProPainter
 
+
+echo infill model installed
 echo installing infill modell m2svid
 
 
