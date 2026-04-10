@@ -13,7 +13,6 @@ CALL "%UserProfile%\miniconda3\Scripts\activate.bat" mdvt
 pip install numpy open3d opencv-python glfw PyOpenGL
 
 rem to use the movie_2_3D.py you need scenedetect and PySide6 for GUI
-rem PySide6 needs to be installed first as otherwise dlls from later packge means PySide6 wont install properly
 pip install scenedetect[opencv-headless] PySide6
 
 
@@ -111,4 +110,5 @@ pip install timm wandb
 
 
 echo install ffmpeg for muxing final result
-CALL "%CONDA%" install -c conda-forge ffmpeg
+rem install ffmpeg using winget instead of conda as the conda install breaks PySide6
+winget install ffmpeg
