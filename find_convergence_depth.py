@@ -76,6 +76,8 @@ if __name__ == '__main__':
         if mesured_pixels.size != 0:
             convergence_depth = mesured_pixels.mean()
             convergence_depths.append(float(convergence_depth))
+        else:
+            convergence_depths.append(float('nan'))
 
         frame_n += 1
 

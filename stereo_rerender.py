@@ -241,6 +241,15 @@ def infill_using_normals(color_img, hole_mask, normal_map, max_steps=400):
     
 
 from scipy.signal import savgol_filter
+def fill_nan_with_closest(values):
+    non_nan_indices = [i for i, v in enumerate(values) if not math.isnan(v)]
+    if non_nan_indices:
+        for i, v in enumerate(values):
+            if math.isnan(v):
+                closest = min(non_nan_indices, key=lambda j: abs(j - i))
+                values[i] = values[closest]
+    return values
+
 def curve_fit(values):
     y = np.array(values)
     
@@ -332,7 +341,7 @@ if __name__ == '__main__':
         if not os.path.isfile(args.convergence_file):
             raise FileNotFoundError(f"Convergence file not found: {args.convergence_file}")
         with open(args.convergence_file) as json_file_handle:
-            convergence_depths = json.load(json_file_handle)
+            convergence_depths = fill_nan_with_closest(json.load(json_file_handle))
             convergence_depths = curve_fit(convergence_depths)
 
     xfovs = None
