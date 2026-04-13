@@ -29,7 +29,7 @@ from PySide6.QtCore import Qt
 PROJECTS_DIR = Path.home() / "mdvt_projects"
 
 DEPTH_ENGINES  = ["da3", "vda", "depthcrafter", "geometrycrafter"]
-INFILL_ENGINES = ["m2svid", "normals", "stereocrafter", "stereo_dissoclusion_net", "none"]
+INFILL_ENGINES = ["inspatio_world", "m2svid", "normals", "stereocrafter", "stereo_dissoclusion_net", "none"]
 
 VERSION_LABELS: List[tuple[str, str]] = [
     ("Scene (raw)",       "scene_video_file"),
@@ -164,7 +164,7 @@ def create_project(video_path: str) -> Path:
     cfg: Dict[str, Any] = {
         "main_video_file": video_path,
         "depth_engine": "da3",
-        "infill_engine": "m2svid",
+        "infill_engine": "inspatio_world",
         "parallel": max(1, (os.cpu_count() or 2) // 2),
         "scenes": [],
     }
@@ -670,7 +670,7 @@ class ProjectInitScreen(QtWidgets.QWidget):
                     "Length (seconds)":    f"{limit_s:.3f}",
                     "Length (timecode)":   _seconds_to_timecode(limit_s),
                     "Engine":              cfg.get("depth_engine", "da3"),
-                    "Infill":              cfg.get("infill_engine", "m2svid"),
+                    "Infill":              cfg.get("infill_engine", "inspatio_world"),
                     "do_infill":           True,
                     "do_convergence":      True,
                 }]
@@ -723,7 +723,7 @@ class ProjectInitScreen(QtWidgets.QWidget):
                         "Length (seconds)":     f"{ls:.3f}",
                         "Length (timecode)":    _seconds_to_timecode(ls),
                         "Engine":               cfg.get("depth_engine", "da3"),
-                        "Infill":               cfg.get("infill_engine", "m2svid"),
+                        "Infill":               cfg.get("infill_engine", "inspatio_world"),
                         "do_infill":            True,
                     }
                     scenes.append(d)
@@ -994,7 +994,7 @@ class ProjectViewScreen(QtWidgets.QWidget):
         for widget in (self.combo_global_depth, self.combo_global_infill, self.spin_parallel):
             widget.blockSignals(True)
         self.combo_global_depth.setCurrentText(self._cfg.get("depth_engine", "da3"))
-        self.combo_global_infill.setCurrentText(self._cfg.get("infill_engine", "m2svid"))
+        self.combo_global_infill.setCurrentText(self._cfg.get("infill_engine", "inspatio_world"))
         self.spin_parallel.setValue(self._cfg.get("parallel", 2))
         for widget in (self.combo_global_depth, self.combo_global_infill, self.spin_parallel):
             widget.blockSignals(False)
@@ -1046,7 +1046,7 @@ class ProjectViewScreen(QtWidgets.QWidget):
         for w in (self.combo_depth, self.combo_infill, self.chk_infill, self.chk_convergence):
             w.blockSignals(True)
         self.combo_depth.setCurrentText(s.get("Engine", self._cfg.get("depth_engine", "da3")))
-        self.combo_infill.setCurrentText(s.get("Infill", self._cfg.get("infill_engine", "m2svid")))
+        self.combo_infill.setCurrentText(s.get("Infill", self._cfg.get("infill_engine", "inspatio_world")))
         self.chk_infill.setChecked(s.get("do_infill", True))
         self.chk_convergence.setChecked(s.get("do_convergence", True))
         for w in (self.combo_depth, self.combo_infill, self.chk_infill, self.chk_convergence):
@@ -1173,7 +1173,7 @@ class ProjectViewScreen(QtWidgets.QWidget):
         a.no_render        = False
         a.max_scene_frames = 999999
 
-        infill_eng = scene.get("Infill", self._cfg.get("infill_engine", "m2svid"))
+        infill_eng = scene.get("Infill", self._cfg.get("infill_engine", "inspatio_world"))
         do_infill  = scene.get("do_infill", True)
         # When infill is disabled per-scene, treat as 'none' so step6 is skipped
         a.infill_engine = infill_eng if do_infill else "none"
