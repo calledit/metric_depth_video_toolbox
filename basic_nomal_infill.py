@@ -83,136 +83,6 @@ def blur_under_mask(img, bool_mask, ksize=(6,6), sigma=0):
 
     return np.clip(out, 0, 255).astype(np.uint8)
 
-
-def generate_infilled_frames(input_frames, input_masks, fps: float):
-    """GPU-heavy section — guarded by a global semaphore so only one thread runs at once."""
-    global num_inference_steps, pipeline
-    # Pre-format on CPU
-    input_frames = torch.tensor(input_frames).permute(0, 3, 1, 2).float() / 255.0
-    frames_mask  = torch.tensor(input_masks).permute(0, 1, 2).float() / 255.0
-
-    with _GPU_GATE:
-        # Everything under this lock may use lots of VRAM.
-        video_latents = pipeline(
-            frames=input_frames,
-            frames_mask=frames_mask,
-            height=input_frames.shape[2],
-            width=input_frames.shape[3],
-            num_frames=len(input_frames),
-            output_type="latent",
-            min_guidance_scale=1.01,
-            max_guidance_scale=1.01,
-            decode_chunk_size=8,
-            fps=fps,
-            motion_bucket_id=127,
-            noise_aug_strength=0.0,
-            num_inference_steps=num_inference_steps,
-        ).frames[0]
-
-        video_latents = video_latents.unsqueeze(0)
-        if video_latents == torch.float16:
-            pipeline.vae.to(dtype=torch.float16)
-
-        # decode_latents uses VAE (GPU); keep it inside the gate.
-        video_frames = pipeline.decode_latents(
-            video_latents, num_frames=video_latents.shape[1], decode_chunk_size=2
-        )
-        del video_latents
-        video_frames = tensor2vid(video_frames, pipeline.image_processor, output_type="np")[0]
-        
-        # Proactively free/cycle memory between clips
-        if torch.cuda.is_available():
-            torch.cuda.synchronize()
-            torch.cuda.empty_cache()
-
-    return (video_frames * 255).astype(np.uint8)
-
-def transfer_lhm_video_refmask(
-    video: np.ndarray,
-    reference: np.ndarray,
-    reference_mask: np.ndarray | None = None,   # (H,W) or (T,H,W); 0 = include
-    single_precision: bool = True,
-    eps: float = 1e-5,
-) -> np.ndarray:
-    """
-    Linear Histogram Matching (per-frame) from a reference (image or video) to a video,
-    where ONLY the reference statistics are sampled using a mask (black==0).
-    Content statistics are computed per frame on the full image (no masking).
-    """
-    assert video.ndim == 4, "video must be (T,H,W,C)"
-    T, H, W, C = video.shape
-    dtype = np.float32 if single_precision else np.float64
-    N = H * W
-
-    X = video.reshape(T, N, C).astype(dtype, copy=False)
-
-    if reference.ndim == 3:
-        ref_is_video = False
-        R_all = reference.astype(dtype, copy=False)
-    elif reference.ndim == 4:
-        ref_is_video = True
-        assert reference.shape[0] == T, "reference video must have same T"
-        R_all = reference.astype(dtype, copy=False)
-    else:
-        raise ValueError("reference must be (H,W,C) or (T,H,W,C)")
-
-    if reference_mask is None:
-        mask_T = None
-    else:
-        if reference_mask.ndim == 2:
-            assert reference_mask.shape == (H, W)
-            mask_T = np.broadcast_to(reference_mask[None, ...], (T, H, W))
-        elif reference_mask.ndim == 3:
-            assert reference_mask.shape == (T, H, W), "mask video must match (T,H,W)"
-            mask_T = reference_mask
-        else:
-            raise ValueError("reference_mask must be (H,W) or (T,H,W)")
-        mask_T = (mask_T == 0)  # include where == 0
-
-    # Content stats (per frame, full image)
-    mu_x = X.mean(axis=1)                                  # (T, C)
-    Xc = X - mu_x[:, None, :]                              # (T, N, C)
-    cov_x = np.matmul(np.transpose(Xc, (0, 2, 1)), Xc) / max(N - 1, 1)
-    cov_x = 0.5 * (cov_x + np.transpose(cov_x, (0, 2, 1)))
-    cov_x[:, np.arange(C), np.arange(C)] += eps
-
-    eval_x, evec_x = np.linalg.eigh(cov_x)
-    invsqrt_vals = 1.0 / np.sqrt(np.clip(eval_x, eps, None))
-    tmp = evec_x * invsqrt_vals[:, None, :]
-    invsqrt_x = tmp @ np.transpose(evec_x, (0, 2, 1))      # (T, C, C)
-
-    # Reference stats (per frame, masked)
-    mu_r_list, sqrt_r_list = [], []
-    for t in range(T):
-        R_t = R_all[t] if ref_is_video else R_all          # (H, W, C)
-        Rt = R_t.reshape(-1, C)
-        keep = np.ones(N, dtype=bool) if mask_T is None else mask_T[t].reshape(-1)
-        if keep.sum() < C:
-            keep = np.ones(N, dtype=bool)
-        Rt_sel = Rt[keep]
-        mu_r_t = Rt_sel.mean(axis=0)
-        Rc = Rt_sel - mu_r_t
-        cov_r_t = (Rc.T @ Rc) / max(len(Rt_sel) - 1, 1)
-        cov_r_t = 0.5 * (cov_r_t + cov_r_t.T)
-        cov_r_t[np.diag_indices(C)] += eps
-
-        eval_r, evec_r = np.linalg.eigh(cov_r_t)
-        sqrt_r_t = (evec_r * np.sqrt(np.clip(eval_r, 0, None))) @ evec_r.T
-
-        mu_r_list.append(mu_r_t)
-        sqrt_r_list.append(sqrt_r_t)
-
-    mu_r = np.stack(mu_r_list, axis=0)            # (T, C)
-    sqrt_r = np.stack(sqrt_r_list, axis=0)        # (T, C, C)
-
-    # Apply transform
-    A = np.matmul(sqrt_r, invsqrt_x)              # (T, C, C)
-    Yc = np.matmul(X - mu_x[:, None, :], np.transpose(A, (0, 2, 1)))  # (T, N, C)
-    Y = Yc + mu_r[:, None, :]                     # <<< fixed broadcasting here
-
-    Y = np.clip(np.round(Y), 0, 255).astype(np.uint8).reshape(T, H, W, C)
-    return Y
-
 def mark_lower_side(normals_img, max_steps=30):
     H, W = normals_img.shape[:2]
     orig = normals_img
@@ -259,107 +129,6 @@ def mark_lower_side(normals_img, max_steps=30):
     valid_hits = (xb >= 0) & (yb >= 0)
     output[yb[valid_hits], xb[valid_hits]] = (0, 0, 255)
     return output
-
-def deal_with_frame_chunk(keep_first_three, chunk, out, keep_last_three, frame_width, frame_height, fps):
-    pic_width = int(frame_width // 2)
-
-    # Reasonable working size for the diffusion model decode
-    new_width = 1024
-    new_height = 768
-
-    right_input, left_input = [], []
-    right_mask_input, left_mask_input = [], []
-
-    for img_and_mask in chunk:
-        # Right mask
-        org_img_mask = img_and_mask[1][:frame_height, pic_width:]
-        img_mask_true_paralax = ~np.all(org_img_mask == black, axis=-1)
-        img_mask_resized = np.array(
-            cv2.resize(img_mask_true_paralax.astype(np.uint8) * 255, (new_width, new_height)) > 0
-        ).astype(np.uint8) * 255
-        right_mask_input.append(img_mask_resized)
-
-        # Right image
-        org_img = img_and_mask[0][:frame_height, pic_width:]
-        img_resized = cv2.resize(org_img, (new_width, new_height))
-        right_input.append(img_resized)
-
-        # Left mask (fliplr)
-        org_img_mask = np.fliplr(img_and_mask[1][:frame_height, :pic_width])
-        img_mask_true_paralax = ~np.all(org_img_mask == black, axis=-1)
-        img_mask_resized = np.array(
-            cv2.resize(img_mask_true_paralax.astype(np.uint8) * 255, (new_width, new_height)) > 0
-        ).astype(np.uint8) * 255
-        left_mask_input.append(img_mask_resized)
-
-        # Left image (fliplr)
-        org_img = np.fliplr(img_and_mask[0][:frame_height, :pic_width])
-        img_resized = cv2.resize(org_img, (new_width, new_height))
-        left_input.append(img_resized)
-
-    right_mask_input = np.array(right_mask_input)
-    left_mask_input  = np.array(left_mask_input)
-    right_input      = np.array(right_input)
-    left_input       = np.array(left_input)
-
-    print("generating left side images")
-    if np.all(left_mask_input == 0):
-        left_frames = left_input
-    else:
-        left_frames = generate_infilled_frames(left_input, left_mask_input, fps)
-        left_frames = transfer_lhm_video_refmask(left_frames, left_input, left_mask_input)
-
-    print("generating right side images")
-    if np.all(right_mask_input == 0):
-        right_frames = right_input
-    else:
-        right_frames = generate_infilled_frames(right_input, right_mask_input, fps)
-        right_frames = transfer_lhm_video_refmask(right_frames, right_input, right_mask_input)
-
-    sttart = 0 if keep_first_three else 3
-    eend = len(left_frames) if keep_last_three else len(left_frames) - 3
-
-    proccessed_frames = []
-    for j in range(sttart, eend):
-        left_img  = cv2.resize(np.fliplr(left_frames[j]), (pic_width, frame_height))
-        right_img = cv2.resize(right_frames[j], (pic_width, frame_height))
-
-        right_org_img = chunk[j][0][:frame_height, pic_width:].copy()
-        left_org_img  = chunk[j][0][:frame_height, :pic_width].copy()
-        right_mask    = chunk[j][1][:frame_height, pic_width:]
-        left_mask     = chunk[j][1][:frame_height, :pic_width]
-
-        # invert mask: original black = source (keep), white = infill region
-        right_black_mask = np.all(right_mask == black, axis=-1)
-        left_black_mask  = np.all(left_mask == black, axis=-1)
-
-        left_org_img[~left_black_mask]  = left_img[~left_black_mask]
-        right_org_img[~right_black_mask] = right_img[~right_black_mask]
-
-        basic_out_image = cv2.hconcat([left_org_img, right_org_img])
-        basic_out_image_uint8 = np.clip(basic_out_image, 0, 255).astype(np.uint8)
-        proccessed_frames.append(basic_out_image_uint8)
-
-        # Edge blending to avoid halos
-        right_mask_blue = mark_lower_side(right_mask)
-        right_backedge_mask = np.all(right_mask_blue == blue, axis=-1)
-        left_mask_blue = mark_lower_side(left_mask)
-        left_backedge_mask = np.all(left_mask_blue == blue, axis=-1)
-
-        right_backedge_mask = binary_dilation(right_backedge_mask, iterations=6)
-        left_backedge_mask  = binary_dilation(left_backedge_mask,  iterations=6)
-
-        right_alpha = cv2.GaussianBlur(right_backedge_mask.astype(np.float32), (15, 15), 0)[..., np.newaxis]
-        left_alpha  = cv2.GaussianBlur(left_backedge_mask.astype(np.float32),  (15, 15), 0)[..., np.newaxis]
-
-        left_img  = left_alpha * left_img + (1 - left_alpha) * left_org_img
-        right_img = right_alpha * right_img + (1 - right_alpha) * right_org_img
-
-        out_image = cv2.hconcat([left_img, right_img])
-        out_image_uint8 = np.clip(out_image, 0, 255).astype(np.uint8)
-        out.write(cv2.cvtColor(out_image_uint8, cv2.COLOR_RGB2BGR))
-
-    return proccessed_frames
 
 def normal_infill(img, infill_mask):
     bg_mask = np.all(infill_mask != black_color, axis=-1)
@@ -503,10 +272,6 @@ def process_pair(sbs_color_video_path: str, sbs_mask_video_path: str, args):
                 break
 
         last_chunk = True
-        deal_with_frame_chunk(
-            first_chunk, frame_buffer, out, last_chunk,
-            frame_width, frame_height, fps
-        )
     finally:
         raw_video.release()
         mask_video.release()
@@ -517,7 +282,7 @@ def process_pair(sbs_color_video_path: str, sbs_mask_video_path: str, args):
     print(f"Done. Wrote: {output_video_file}")
 
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser(description='Video Crafter infill script')
+    parser = argparse.ArgumentParser(description='Normal infill script')
     parser.add_argument('--sbs_color_video', type=str, required=True, help='side by side stereo video renderd with point clouds in the masked area')
     parser.add_argument('--sbs_mask_video', type=str, required=True, help='side by side stereo video mask')
     parser.add_argument('--max_frames', default=-1, type=int, help='quit after max_frames nr of frames', required=False)

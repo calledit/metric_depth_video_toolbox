@@ -59,16 +59,19 @@ python download_weights.py stereocrafter
 
 echo infill model installed
 
-echo installing infill modell m2svid
+echo installing infill modell StereoProPainter
 git clone https://github.com/calledit/StereoProPainter
-
-
 echo infill model installed
+
 echo installing infill modell m2svid
+git clone https://github.com/google-research/m2svid
+echo infill model installed
 
+echo installing infill modell inspatio-world
+git clone https://github.com/inspatio/inspatio-world
+pip install https://huggingface.co/lldacing/flash-attention-windows-wheel/resolve/main/flash_attn-2.7.0.post2%2Bcu124torch2.5.1cxx11abiFALSE-cp311-cp311-win_amd64.whl
 
 echo infill model installed
-git clone https://github.com/google-research/m2svid
 
 pip install OmegaConf kornia open-clip-torch pytorch_lightning pytorch-msssim gdown
 python download_weights.py m2svid

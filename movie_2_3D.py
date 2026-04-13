@@ -1,4 +1,5 @@
 import subprocess
+import sys
 import argparse
 import csv
 import cv2
@@ -451,7 +452,7 @@ def step5_render_sbs(args: argparse.Namespace, scene_video_files: List[Dict]) ->
         proc.wait()
 
 def step6_infill_and_collect(args: argparse.Namespace, scene_video_files: List[Dict]):
-    #none, normals, stereo_dissoclusion_net, stereocrafter, m2svid
+    #none, normals, stereo_dissoclusion_net, stereocrafter, m2svid, inspatio_world
     if args.infill_engine == 'normals':
         video_files_to_concat = step6_normal_infill_render_sbs(args, scene_video_files)
     elif args.infill_engine == 'stereo_dissoclusion_net':
@@ -460,9 +461,11 @@ def step6_infill_and_collect(args: argparse.Namespace, scene_video_files: List[D
         video_files_to_concat = step6_stereocrafter_infill_and_collect(args, scene_video_files)
     elif args.infill_engine == 'm2svid':
         video_files_to_concat = step6_m2svid_infill_and_collect(args, scene_video_files)
+    elif args.infill_engine == 'inspatio_world':
+        video_files_to_concat = step6_inspatio_world_infill_and_collect(args, scene_video_files)
     else:
         raise Exception(f"unknown infill engine: {args.infill_engine}")
-    
+
     return video_files_to_concat
         
 def step6_normal_infill_render_sbs(args: argparse.Namespace, scene_video_files: List[Dict]):
@@ -545,6 +548,64 @@ def step6_m2svid_infill_and_collect(args: argparse.Namespace, scene_video_files:
         os.remove(batch_file2)
         os.remove(batch_file3)
     
+    return video_files_to_concat
+
+def step6_inspatio_world_infill_and_collect(args: argparse.Namespace, scene_video_files: List[Dict]) -> List[str]:
+    """
+    (Optional) infill SBS, collect final per-scene video paths to join.
+    """
+    print("Step six: do SBS infill using (inspatio_world)")
+
+    _script_dir = os.path.dirname(os.path.abspath(__file__))
+    batch_file = args.color_video + '_batching.txt'
+    batch_file2 = args.color_video + '_batching2.txt'
+    batch_file3 = args.color_video + '_batching3.txt'
+    if os.path.exists(batch_file):
+        os.remove(batch_file)
+    if os.path.exists(batch_file2):
+        os.remove(batch_file2)
+    if os.path.exists(batch_file3):
+        os.remove(batch_file3)
+
+    video_files_to_concat = []
+
+    for scene in scene_video_files:
+        if not scene['finished']:
+            assert is_valid_video(scene['sbs']), "Could not find proper stereo video file to do infill on " + scene['sbs']
+
+        # If infill disabled globally or per-scene, skip infill step
+        do_infill = (not args.infill_engine == 'none') and scene.get('infill', True)
+        if not do_infill:
+            video_files_to_concat.append(scene['sbs'])
+            continue
+
+        # Queue infill work
+        if not os.path.exists(scene['infilled']):
+            with open(batch_file, "a", encoding="utf-8") as f:
+                f.write(scene['sbs'] + "\n")
+            with open(batch_file2, "a", encoding="utf-8") as f:
+                f.write(scene['sbs_infill'] + "\n")
+            with open(batch_file3, "a", encoding="utf-8") as f:
+                f.write(scene['scene_video_file'] + "\n")
+
+        video_files_to_concat.append(scene['infilled'])
+
+    if os.path.exists(batch_file):
+        # Use sys.executable so the subprocess runs in the same Python environment
+        # as the GUI (ensures flash_attn is available, preventing OOM from standard attention).
+        # cwd=_script_dir ensures inspatio_world_infill.py is always found.
+        subprocess.run(
+            [sys.executable, "inspatio_world_infill.py",
+             "--color_video", batch_file3,
+             "--sbs_color_video", batch_file,
+             "--sbs_mask_video", batch_file2,
+             "--apply_edge_blending"],
+            cwd=_script_dir
+        )
+        os.remove(batch_file)
+        os.remove(batch_file2)
+        os.remove(batch_file3)
+
     return video_files_to_concat
 
 def step6_stereocrafter_infill_and_collect(args: argparse.Namespace, scene_video_files: List[Dict]) -> List[str]:

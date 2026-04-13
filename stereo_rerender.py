@@ -253,14 +253,18 @@ def fill_nan_with_closest(values):
 def curve_fit(values):
     y = np.array(values)
     
-    # append the last 50 values again to smoth of the end
-    n_tail = 50
-    tail = y[-n_tail:]           
-    y_ext = np.concatenate([y, tail]) 
-    
-    y_smooth = savgol_filter(y_ext, window_length=100, polyorder=2)
-    
-    y_smooth = y_smooth[:-n_tail]
+    # append the last n_tail values again to smooth off the end
+    n_tail = min(50, len(y))
+    tail = y[-n_tail:]
+    y_ext = np.concatenate([y, tail])
+
+    window_length = min(100, len(y_ext))
+    if window_length % 2 == 0:
+        window_length -= 1
+    y_smooth = savgol_filter(y_ext, window_length=window_length, polyorder=2)
+
+    y_smooth = y_smooth[:-n_tail] if n_tail > 0 else y_smooth
+    assert len(y_smooth) == len(y), f"curve_fit output length {len(y_smooth)} != input length {len(y)}"
     return y_smooth
 
 if __name__ == '__main__':
