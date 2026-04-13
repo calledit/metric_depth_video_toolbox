@@ -512,6 +512,20 @@ if __name__ == "__main__":
     DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     # -----------------------
+    # Download weights if missing
+    # -----------------------
+    _wan_dir = os.path.join(_script_dir, "inspatio-world", "checkpoints", "Wan2.1-T2V-1.3B")
+    _weights_needed = [
+        CHECKPOINT_PATH,
+        os.path.join(_wan_dir, "Wan2.1_VAE.pth"),
+        os.path.join(_wan_dir, "models_t5_umt5-xxl-enc-bf16.safetensors"),
+    ]
+    if any(not os.path.exists(p) for p in _weights_needed):
+        print("inspatio-world weights not found, downloading...")
+        import subprocess as _sp
+        _sp.run([sys.executable, os.path.join(_script_dir, "download_weights.py"), "inspatio_world"], check=True)
+
+    # -----------------------
     # Load pipeline
     # -----------------------
     # WanDiffusionWrapper checks dist.is_initialized() and calls get_rank() or

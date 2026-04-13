@@ -56,6 +56,26 @@ def git_clone(url, dest):
     subprocess.run(["git", "clone", url, dest], check=True)
     print(f"Done: {dest}")
 
+def convert_pth_to_safetensors(url, pth_dest, safetensors_dest):
+    """Download a .pth file then convert it to safetensors, deleting the .pth afterwards."""
+    safetensors_dest_abs = abs_path(safetensors_dest)
+    if os.path.exists(safetensors_dest_abs):
+        print(f"Already exists, skipping: {safetensors_dest_abs}")
+        return
+    download_file(url, pth_dest)
+    pth_dest_abs = abs_path(pth_dest)
+    print(f"Converting {pth_dest_abs} -> {safetensors_dest_abs}")
+    try:
+        import torch
+        from safetensors.torch import save_file
+    except ImportError as e:
+        print(f"torch and safetensors are required for conversion: {e}")
+        sys.exit(1)
+    state_dict = torch.load(pth_dest_abs, map_location="cpu")
+    save_file(state_dict, safetensors_dest_abs)
+    os.remove(pth_dest_abs)
+    print(f"Done: {safetensors_dest_abs}")
+
 
 MODELS = {
     'vda': lambda: (
@@ -83,6 +103,21 @@ MODELS = {
             "1j_NEG2CPhFeRetYziWK6Qe62R5h7lG_V",
             "ckpts/open_clip_pytorch_model.bin",
             "ckpts/open_clip_pytorch_model.bin"
+        ),
+    ),
+    'inspatio_world': lambda: (
+        download_file(
+            "https://huggingface.co/inspatio/world/resolve/main/InSpatio-World-1.3B.safetensors",
+            "inspatio-world/checkpoints/InSpatio-World-1.3B/InSpatio-World-1.3B.safetensors"
+        ),
+        download_file(
+            "https://huggingface.co/Wan-AI/Wan2.1-T2V-1.3B/resolve/main/Wan2.1_VAE.pth",
+            "inspatio-world/checkpoints/Wan2.1-T2V-1.3B/Wan2.1_VAE.pth"
+        ),
+        convert_pth_to_safetensors(
+            "https://huggingface.co/Wan-AI/Wan2.1-T2V-1.3B/resolve/main/models_t5_umt5-xxl-enc-bf16.pth",
+            "inspatio-world/checkpoints/Wan2.1-T2V-1.3B/models_t5_umt5-xxl-enc-bf16.pth",
+            "inspatio-world/checkpoints/Wan2.1-T2V-1.3B/models_t5_umt5-xxl-enc-bf16.safetensors"
         ),
     ),
 }
