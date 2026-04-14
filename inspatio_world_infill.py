@@ -19,6 +19,7 @@ from demo_utils.memory import DynamicSwapInstaller
 from utils.render_warper import convert_mask_video
 
 import depth_frames_helper
+from infill_common import transfer_lhm_video_refmask, mark_lower_side
 
 # -----------------------
 # Config / Globals
@@ -57,6 +58,8 @@ _RAFT_CKPT_PATH = os.path.join(_script_dir, "ckpts", "raft-things.pth")
 _RFC_CKPT_PATH  = os.path.join(_script_dir, "ckpts", "recurrent_flow_completion.pth")
 _RAFT_ALIGN_H = 480   # both RAFT and RFC run at this resolution (divisible by 8)
 _RAFT_ALIGN_W = 832
+_RAFT_ITERS   = 6     # VAE drift is small; 6 iters is sufficient (was 12)
+_RAFT_BATCH   = 8     # frame pairs processed per RAFT GPU call
 _raft_model = None
 _rfc_model  = None
 
@@ -161,41 +164,46 @@ def _align_infilled_to_render(render_frames, infilled_frames, hole_masks, device
     T, H, W = render_frames.shape[:3]
     rh, rw = _RAFT_ALIGN_H, _RAFT_ALIGN_W
 
-    # ---- Step 1: compute RAFT drift flow per frame at reduced resolution ----
-    flows_raft  = []   # list of (rh, rw, 2) float32
-    masks_raft  = []   # list of (rh, rw) float32  1=unknown  0=known
-
+    # ---- Step 1: CPU prep — build resized masks; identify valid frames ----
     # Mask convention coming in: 255 = valid rendered pixel, 0 = hole to fill
+    masks_raft  = []   # (T,) list of (rh, rw) float32  1=unknown  0=known
+    valid_flags = []   # (T,) bool
     for i in range(T):
-        has_valid = np.any(hole_masks[i] > 0)   # any 255 = valid pixel exists
-
-        # Resize to RAFT resolution and convert to RFC convention (1=hole, 0=valid)
+        has_valid = np.any(hole_masks[i] > 0)
+        valid_flags.append(has_valid)
         mask_r = cv2.resize(hole_masks[i], (rw, rh), interpolation=cv2.INTER_NEAREST)
-        mask_r_f = (mask_r == 0).astype(np.float32)              # 1 = hole/unknown (RFC convention)
+        masks_raft.append((mask_r == 0).astype(np.float32))   # 1 = hole (RFC convention)
 
-        if not has_valid:
-            flows_raft.append(np.zeros((rh, rw, 2), dtype=np.float32))
-            masks_raft.append(np.ones((rh, rw), dtype=np.float32))
-            continue
+    # ---- Step 2: batched RAFT — process _RAFT_BATCH frame pairs per GPU call ----
+    flows_raft = [np.zeros((rh, rw, 2), dtype=np.float32) for _ in range(T)]
+    valid_indices = [i for i in range(T) if valid_flags[i]]
 
-        # Fill render holes (0) with infilled content so RAFT never sees black
-        render_filled = render_frames[i].copy()
-        render_filled[hole_masks[i] == 0] = infilled_frames[i][hole_masks[i] == 0]
+    for batch_start in range(0, len(valid_indices), _RAFT_BATCH):
+        batch_idx = valid_indices[batch_start:batch_start + _RAFT_BATCH]
+
+        img1_list, img2_list = [], []
+        for i in batch_idx:
+            # Fill render holes with infilled content so RAFT never sees black
+            rf = render_frames[i].copy()
+            rf[hole_masks[i] == 0] = infilled_frames[i][hole_masks[i] == 0]
+            img1_list.append(_raft_prep(rf,                 rh, rw, device))
+            img2_list.append(_raft_prep(infilled_frames[i], rh, rw, device))
+
+        img1_batch = torch.cat(img1_list, dim=0)   # (B, 3, rh, rw)
+        img2_batch = torch.cat(img2_list, dim=0)
 
         with torch.no_grad():
-            img1 = _raft_prep(render_filled,      rh, rw, device)
-            img2 = _raft_prep(infilled_frames[i], rh, rw, device)
-            _, flow_t = raft(img1, img2, iters=12, test_mode=True)
+            _, flow_batch = raft(img1_batch, img2_batch,
+                                 iters=_RAFT_ITERS, test_mode=True)
 
-        flow_np = flow_t[0].permute(1, 2, 0).cpu().numpy()  # (rh, rw, 2)
+        flow_np_batch = flow_batch.permute(0, 2, 3, 1).cpu().numpy()  # (B, rh, rw, 2)
 
-        # Zero flow in hole pixels before passing to RFC
-        flow_np[mask_r_f > 0] = 0.0
+        for j, i in enumerate(batch_idx):
+            flow_np = flow_np_batch[j].copy()
+            flow_np[masks_raft[i] > 0] = 0.0   # zero in hole pixels before RFC
+            flows_raft[i] = flow_np
 
-        flows_raft.append(flow_np)
-        masks_raft.append(mask_r_f)
-
-    # ---- Step 2: flow completion with RecurrentFlowCompleteNet ----
+    # ---- Step 3: flow completion with RecurrentFlowCompleteNet ----
     # Pack to tensors: (1, T, 2, rh, rw) and (1, T, 1, rh, rw)
     flows_np = np.stack(flows_raft, axis=0)          # (T, rh, rw, 2)
     masks_np = np.stack(masks_raft, axis=0)          # (T, rh, rw)
@@ -230,19 +238,23 @@ def _align_infilled_to_render(render_frames, infilled_frames, hole_masks, device
 
     completed = torch.cat(completed_parts, dim=1)   # (1, T, 2, rh, rw)
 
-    # ---- Step 3: apply completed flow per frame ----
+    # ---- Step 4: apply completed flow per frame ----
+    # Pre-compute the base coordinate grid once (same for every frame)
+    ys_g, xs_g = np.mgrid[0:H, 0:W].astype(np.float32)
+    scale_x = float(W) / rw
+    scale_y = float(H) / rh
+
     aligned = infilled_frames.copy()
     for i in range(T):
         flow_np = completed[0, i].permute(1, 2, 0).cpu().numpy()  # (rh, rw, 2)
 
-        # Scale to full frame resolution
+        # Scale flow to full frame resolution
         flow_full = cv2.resize(flow_np, (W, H), interpolation=cv2.INTER_LINEAR)
-        flow_full[:, :, 0] *= W / rw
-        flow_full[:, :, 1] *= H / rh
+        flow_full[:, :, 0] *= scale_x
+        flow_full[:, :, 1] *= scale_y
 
-        ys_g, xs_g = np.mgrid[0:H, 0:W].astype(np.float32)
-        map_x = (xs_g + flow_full[:, :, 0]).astype(np.float32)
-        map_y = (ys_g + flow_full[:, :, 1]).astype(np.float32)
+        map_x = xs_g + flow_full[:, :, 0]
+        map_y = ys_g + flow_full[:, :, 1]
 
         remapped = cv2.remap(infilled_frames[i], map_x, map_y,
                              cv2.INTER_LINEAR, borderMode=cv2.BORDER_REPLICATE)
@@ -422,52 +434,6 @@ def generate_infilled_frames(
 # -----------------------
 # Chunk processing
 # -----------------------
-def mark_lower_side(normals_img, max_steps=30):
-    H, W = normals_img.shape[:2]
-    orig = normals_img
-    valid = ~np.all(orig == 0, axis=-1)
-    ys, xs = np.nonzero(valid)
-    pts = np.stack([xs, ys], axis=1).astype(np.float32)
-    dirs = ((orig[ys, xs, :2].astype(np.float32) / 255) * 2 - 1)
-    norms = np.linalg.norm(dirs, axis=1, keepdims=True)
-    good = (norms[:, 0] > 1e-6)
-    pts = pts[good]
-    dirs = dirs[good] / norms[good]
-
-    N = pts.shape[0]
-    alive = np.ones(N, dtype=bool)
-    res_pts = -np.ones((N, 2), dtype=int)
-
-    for t in range(1, max_steps):
-        idx = np.nonzero(alive)[0]
-        if idx.size == 0:
-            break
-        p = pts[idx] + dirs[idx] * t
-        xi = np.rint(p[:, 0]).astype(int)
-        yi = np.rint(p[:, 1]).astype(int)
-
-        inb = (xi >= 0) & (xi < W) & (yi >= 0) & (yi < H)
-        xi_in = xi[inb]; yi_in = yi[inb]
-        orig_vals = orig[yi_in, xi_in]
-        bg_hit = np.all(orig_vals == 0, axis=1)
-
-        hit_idx = idx[inb][bg_hit]
-        if hit_idx.size > 0:
-            p0 = pts[hit_idx] + dirs[hit_idx] * (t - 1)
-            xb = np.rint(p0[:, 0]).astype(int)
-            yb = np.rint(p0[:, 1]).astype(int)
-            res_pts[hit_idx, 0] = xb
-            res_pts[hit_idx, 1] = yb
-
-        idx_oob = idx[~inb]
-        alive[idx_oob] = False
-        alive[hit_idx] = False
-
-    output = np.zeros_like(orig)
-    xb = res_pts[:, 0]; yb = res_pts[:, 1]
-    valid_hits = (xb >= 0) & (yb >= 0)
-    output[yb[valid_hits], xb[valid_hits]] = (0, 0, 255)
-    return output
 
 
 def deal_with_frame_chunk(
@@ -540,6 +506,18 @@ def deal_with_frame_chunk(
         right_frames = right_render
     else:
         right_frames = generate_infilled_frames(right_source, right_render, right_mask, fps, ref_latent=shared_ref_latent)
+
+    # Color-match infilled frames to the render before alignment.
+    # Mask convention: inspatio uses 255=valid, 0=hole.
+    # transfer_lhm_video_refmask uses mask==0 to select reference pixels,
+    # so invert: 255-mask gives 0 at valid pixels (correct) and 255 at holes.
+    #Disable color matching, it is not really needed. The ouput is very closly colormatched anyway.
+    #if not np.all(left_mask == 255):
+    #    print("color matching left infilled frames")
+    #    left_frames = transfer_lhm_video_refmask(left_frames, left_render, 255 - left_mask)
+    #if not np.all(right_mask == 255):
+    #    print("color matching right infilled frames")
+    #    right_frames = transfer_lhm_video_refmask(right_frames, right_render, 255 - right_mask)
 
     # Align infilled frames to render coordinate space to correct VAE drift.
     # RAFT flow is estimated in the non-hole (surrounding) pixels only; an

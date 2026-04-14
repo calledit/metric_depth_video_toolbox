@@ -22,6 +22,7 @@ from sgm.util import instantiate_from_config
 from scipy.ndimage import binary_dilation
 
 import depth_frames_helper
+from infill_common import mark_lower_side
 
 # -----------------------
 # Config / Globals
@@ -197,53 +198,6 @@ def transfer_lhm_video_refmask(
 
     Y = np.clip(np.round(Y), 0, 255).astype(np.uint8).reshape(T, H, W, C)
     return Y
-
-def mark_lower_side(normals_img, max_steps=30):
-    H, W = normals_img.shape[:2]
-    orig = normals_img
-    valid = ~np.all(orig == 0, axis=-1)
-    ys, xs = np.nonzero(valid)
-    pts = np.stack([xs, ys], axis=1).astype(np.float32)
-    dirs = ((orig[ys, xs, :2].astype(np.float32) / 255) * 2 - 1)
-    norms = np.linalg.norm(dirs, axis=1, keepdims=True)
-    good = (norms[:, 0] > 1e-6)
-    pts = pts[good]
-    dirs = dirs[good] / norms[good]
-
-    N = pts.shape[0]
-    alive = np.ones(N, dtype=bool)
-    res_pts = -np.ones((N, 2), dtype=int)
-
-    for t in range(1, max_steps):
-        idx = np.nonzero(alive)[0]
-        if idx.size == 0:
-            break
-        p = pts[idx] + dirs[idx] * t
-        xi = np.rint(p[:, 0]).astype(int)
-        yi = np.rint(p[:, 1]).astype(int)
-
-        inb = (xi >= 0) & (xi < W) & (yi >= 0) & (yi < H)
-        xi_in = xi[inb]; yi_in = yi[inb]
-        orig_vals = orig[yi_in, xi_in]
-        bg_hit = np.all(orig_vals == 0, axis=1)
-
-        hit_idx = idx[inb][bg_hit]
-        if hit_idx.size > 0:
-            p0 = pts[hit_idx] + dirs[hit_idx] * (t - 1)
-            xb = np.rint(p0[:, 0]).astype(int)
-            yb = np.rint(p0[:, 1]).astype(int)
-            res_pts[hit_idx, 0] = xb
-            res_pts[hit_idx, 1] = yb
-
-        idx_oob = idx[~inb]
-        alive[idx_oob] = False
-        alive[hit_idx] = False
-
-    output = np.zeros_like(orig)
-    xb = res_pts[:, 0]; yb = res_pts[:, 1]
-    valid_hits = (xb >= 0) & (yb >= 0)
-    output[yb[valid_hits], xb[valid_hits]] = (0, 0, 255)
-    return output
 
 def apply_closing(tensor, kernel=11):
     kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (kernel, kernel))
