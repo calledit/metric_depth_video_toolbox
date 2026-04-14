@@ -1307,10 +1307,12 @@ class ProjectViewScreen(QtWidgets.QWidget):
             fh  = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
             fr  = cap.get(cv2.CAP_PROP_FPS)
 
-            # Seek to the scene's start frame so step1 reads the right frames
+            # Seek to the scene's start frame so step1 reads the right frames.
+            # Start Frame is 1-indexed (PySceneDetect convention), but
+            # CAP_PROP_POS_FRAMES is 0-indexed, so subtract 1.
             start_frame = int(sd.get("Start Frame", 0))
             if start_frame > 0:
-                cap.set(cv2.CAP_PROP_POS_FRAMES, start_frame)
+                cap.set(cv2.CAP_PROP_POS_FRAMES, start_frame - 1)
 
             pl.step1_create_scene_videos(cap, [sd], fr, fw, fh)
             pl.step2_estimate_depth(a, [sd])
