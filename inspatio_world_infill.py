@@ -25,6 +25,7 @@ from infill_common import transfer_lhm_video_refmask, mark_lower_side
 # Config / Globals
 # -----------------------
 black = np.array([0, 0, 0], dtype=np.uint8)
+white = np.array([255, 255, 255], dtype=np.uint8)
 blue = np.array([0, 0, 255], dtype=np.uint8)
 pipeline = None
 
@@ -146,7 +147,7 @@ def _align_infilled_to_render(render_frames, infilled_frames, hole_masks, device
     ----------
     render_frames   : (T, H, W, 3) uint8 – per-eye render (with black holes)
     infilled_frames : (T, H, W, 3) uint8 – model output (possibly drifted)
-    hole_masks      : (T, H, W)    uint8 – 255 = hole, 0 = valid surrounding area
+    hole_masks      : (T, H, W)    uint8 – 0 = hole, 255 = valid surrounding area
     device          : torch.device
 
     Returns
@@ -168,10 +169,14 @@ def _align_infilled_to_render(render_frames, infilled_frames, hole_masks, device
     # Mask convention coming in: 255 = valid rendered pixel, 0 = hole to fill
     masks_raft  = []   # (T,) list of (rh, rw) float32  1=unknown  0=known
     valid_flags = []   # (T,) bool
+    #_erode_kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
     for i in range(T):
         has_valid = np.any(hole_masks[i] > 0)
         valid_flags.append(has_valid)
         mask_r = cv2.resize(hole_masks[i], (rw, rh), interpolation=cv2.INTER_NEAREST)
+        # Erode the valid region so seam-boundary pixels are treated as unknown by RFC
+        # Disabled as the issue this fixes is better solved by dilating the full mask
+        #mask_r = cv2.erode(mask_r, _erode_kernel)
         masks_raft.append((mask_r == 0).astype(np.float32))   # 1 = hole (RFC convention)
 
     # ---- Step 2: batched RAFT — process _RAFT_BATCH frame pairs per GPU call ----
@@ -438,7 +443,7 @@ def generate_infilled_frames(
 
 def deal_with_frame_chunk(
     keep_first_three, chunk, out, keep_last_three,
-    frame_width, frame_height, fps, apply_edge_blending
+    frame_width, frame_height, fps, apply_edge_blending, lower_mask_dilation=0
 ):
     """
     chunk entries: [sbs_render_rgb, sbs_mask_rgb, org_color_rgb]
@@ -459,6 +464,11 @@ def deal_with_frame_chunk(
         rnd_right = sbs_render[:H, pic_width:]
         msk_right_rgb = sbs_mask[:H, pic_width:]
         msk_right = (np.all(msk_right_rgb == black, axis=-1)).astype(np.uint8) * 255
+        if lower_mask_dilation:
+            right_lower = binary_dilation(
+                np.all(mark_lower_side(msk_right_rgb) == blue, axis=-1),
+                iterations=lower_mask_dilation)
+            msk_right[right_lower] = 0
         right_render.append(rnd_right)
         right_mask.append(msk_right)
         right_source.append(org_color[:H])
@@ -467,6 +477,11 @@ def deal_with_frame_chunk(
         rnd_left = sbs_render[:H, :pic_width]
         msk_left_rgb = sbs_mask[:H, :pic_width]
         msk_left = (np.all(msk_left_rgb == black, axis=-1)).astype(np.uint8) * 255
+        if lower_mask_dilation:
+            left_lower = binary_dilation(
+                np.all(mark_lower_side(msk_left_rgb) == blue, axis=-1),
+                iterations=lower_mask_dilation)
+            msk_left[left_lower] = 0
         left_render.append(rnd_left)
         left_mask.append(msk_left)
         left_source.append(org_color[:H])
@@ -477,6 +492,10 @@ def deal_with_frame_chunk(
     left_render  = np.array(left_render)
     right_mask   = np.array(right_mask)
     left_mask    = np.array(left_mask)
+
+    # Black out hole areas in the render before sending to the infill model
+    right_render[right_mask == 0] = 0
+    left_render[left_mask == 0] = 0
 
     # Encode source once — left and right eyes share the same source frames
     shared_ref_latent = None
@@ -543,11 +562,12 @@ def deal_with_frame_chunk(
         right_m   = sbs_mask_j[:frame_height, pic_width:]
         left_m    = sbs_mask_j[:frame_height, :pic_width]
 
-        right_hole = ~np.all(right_m == black, axis=-1)
-        left_hole  = ~np.all(left_m == black, axis=-1)
+        # Use the modified masks (includes lower-side dilation) for compositing
+        right_hole = (right_mask[j] == 0)
+        left_hole  = (left_mask[j] == 0)
 
-        left_org[left_hole]   = left_img[left_hole]
-        right_org[right_hole] = right_img[right_hole]
+        left_org[left_hole]   = left_img[left_hole]#white#
+        right_org[right_hole] = right_img[right_hole]#white#
 
         basic_out = cv2.hconcat([left_org, right_org])
         basic_out = np.clip(basic_out, 0, 255).astype(np.uint8)
@@ -645,6 +665,7 @@ def process_pair(
                     first_chunk, frame_buffer, out, last_chunk,
                     frame_width, frame_height, fps,
                     getattr(args, "apply_edge_blending", False),
+                    getattr(args, "lower_mask_dilation", 0),
                 )
                 if first_chunk:
                     first_chunk = False
@@ -667,6 +688,7 @@ def process_pair(
             first_chunk, frame_buffer, out, last_chunk,
             frame_width, frame_height, fps,
             getattr(args, "apply_edge_blending", False),
+            getattr(args, "lower_mask_dilation", 0),
         )
     finally:
         raw_video.release()
@@ -693,9 +715,16 @@ if __name__ == "__main__":
                         help="Stop after this many frames (-1 = all)")
     parser.add_argument("--apply_edge_blending", action="store_true",
                         help="Blend edges to reduce halo artifacts")
+    parser.add_argument("--lower_mask_dilation", type=int, default=0,
+                        help="Dilate the hole mask N pixels on the lower side of each "
+                             "disocclusion boundary before infilling (incompatible with "
+                             "--apply_edge_blending)")
     parser.add_argument("--text_prompt",      type=str, default=TEXT_PROMPT,
                         help="Text description of the scene (generic prompt works fine)")
     args = parser.parse_args()
+
+    if args.lower_mask_dilation and args.apply_edge_blending:
+        parser.error("--lower_mask_dilation and --apply_edge_blending are incompatible")
 
     if args.text_prompt != TEXT_PROMPT:
         TEXT_PROMPT = args.text_prompt
