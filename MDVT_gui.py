@@ -232,9 +232,20 @@ class FuncWorker(QtCore.QThread):
 
     def __init__(self, fn, *args, **kwargs):
         super().__init__()
-        self.fn     = fn
-        self.args   = args
-        self.kwargs = kwargs
+        self.fn              = fn
+        self.args            = args
+        self.kwargs          = kwargs
+        self._stop_requested = False
+        self._current_proc   = None
+
+    def stop(self):
+        self._stop_requested = True
+        p = self._current_proc
+        if p is not None:
+            try:
+                p.kill()
+            except Exception:
+                pass
 
     def run(self):
         import subprocess as _sp
@@ -253,6 +264,7 @@ class FuncWorker(QtCore.QThread):
         orig_popen = _sp.Popen
 
         def _streaming_run(*args, **kwargs):
+            check = kwargs.pop("check", False)
             if "stdout" in kwargs or "stderr" in kwargs:
                 kwargs.setdefault("text", True)
                 return orig_run(*args, **kwargs)
@@ -260,11 +272,18 @@ class FuncWorker(QtCore.QThread):
             env.setdefault("PYTHONUNBUFFERED", "1")
             kwargs.update(stdout=_sp.PIPE, stderr=_sp.STDOUT, text=True, env=env)
             p = orig_popen(*args, **kwargs)
+            self._current_proc = p
             assert p.stdout
             for ln in p.stdout:
                 self.line.emit(ln.rstrip("\n"))
+                if self._stop_requested:
+                    p.kill()
+                    break
             rc = p.wait()
-            if kwargs.get("check") and rc != 0:
+            self._current_proc = None
+            if self._stop_requested:
+                raise InterruptedError("Stopped by user")
+            if check and rc != 0:
                 raise _sp.CalledProcessError(rc, args[0])
             return _sp.CompletedProcess(args[0], rc)
 
@@ -275,10 +294,14 @@ class FuncWorker(QtCore.QThread):
                 env.setdefault("PYTHONUNBUFFERED", "1")
                 kwargs.update(stdout=_sp.PIPE, stderr=_sp.STDOUT, text=True, bufsize=1, env=env)
             p = orig_popen(*args, **kwargs)
+            self._current_proc = p
             if need and p.stdout:
                 def _reader():
                     for ln in p.stdout:
                         self.line.emit(ln.rstrip("\n"))
+                        if self._stop_requested:
+                            p.kill()
+                            break
                 threading.Thread(target=_reader, daemon=True).start()
             return p
 
@@ -287,6 +310,9 @@ class FuncWorker(QtCore.QThread):
             _sp.run   = _streaming_run
             _sp.Popen = _streaming_popen
             self.fn(*self.args, **self.kwargs)
+        except InterruptedError:
+            self.line.emit("◆  Stopped by user")
+            rc = 1
         except Exception as e:
             self.line.emit(f"ERROR: {e}")
             rc = 1
@@ -934,18 +960,31 @@ class ProjectViewScreen(QtWidgets.QWidget):
         self.btn_apply_global = QtWidgets.QPushButton("Apply Engines to All Scenes")
         g_lay.addWidget(self.btn_apply_global, 1, 2, 1, 2)
 
-        # Convert-all button
+        # Convert-all + Stop buttons
         self.btn_convert_all = QtWidgets.QPushButton("▶▶  Convert All Scenes")
         self.btn_convert_all.setFixedHeight(44)
-        self.btn_convert_all.setFixedWidth(220)
+        self.btn_convert_all.setFixedWidth(185)
         self.btn_convert_all.setStyleSheet(
             "background: #0a84ff; color: #fff; "
             "font-size: 14px; font-weight: bold; border-color: #0060cc;")
 
+        self.btn_stop = QtWidgets.QPushButton("■  Stop")
+        self.btn_stop.setFixedHeight(44)
+        self.btn_stop.setFixedWidth(85)
+        self.btn_stop.setStyleSheet(
+            "background: #c0392b; color: #fff; "
+            "font-size: 14px; font-weight: bold; border-color: #922b21;")
+        self.btn_stop.setEnabled(False)
+
+        convert_bar = QtWidgets.QHBoxLayout()
+        convert_bar.setSpacing(6)
+        convert_bar.addWidget(self.btn_convert_all)
+        convert_bar.addWidget(self.btn_stop)
+
         bottom_bar = QtWidgets.QHBoxLayout()
         bottom_bar.addWidget(glob_grp, 1)
         bottom_bar.addSpacing(8)
-        bottom_bar.addWidget(self.btn_convert_all, 0, Qt.AlignBottom)
+        bottom_bar.addLayout(convert_bar)
 
         # ── Console ───────────────────────────────────────────────────────────
         self.console = QtWidgets.QPlainTextEdit()
@@ -973,6 +1012,7 @@ class ProjectViewScreen(QtWidgets.QWidget):
         self.btn_split.clicked.connect(self._on_split)
         self.btn_convert_scene.clicked.connect(self._on_convert_scene)
         self.btn_convert_all.clicked.connect(self._on_convert_all)
+        self.btn_stop.clicked.connect(self._on_stop)
         self.btn_apply_global.clicked.connect(self._on_apply_global)
         self.combo_global_depth.currentTextChanged.connect(self._save_global)
         self.combo_global_infill.currentTextChanged.connect(self._save_global)
@@ -1123,13 +1163,16 @@ class ProjectViewScreen(QtWidgets.QWidget):
         ss = float(s["Start Time (seconds)"]); es = float(s["End Time (seconds)"])
         spf = (es - ss) / (ef - sf) if ef != sf else 0.0
 
-        cur = self.player.current_seconds()
-        cur = min(max(cur, ss + 1e-6), es - 1e-6)
-        split_f = int(sf + (cur - ss) / spf) if spf > 0 else (sf + ef) // 2
+        # current_seconds() is relative to the clip (always 0-based), not the full video
+        cur_in_clip = self.player.current_seconds()
+        split_f = int(sf + cur_in_clip / spf) if spf > 0 else (sf + ef) // 2
 
         if split_f <= sf or split_f >= ef:
             self._log("Split ignored — cursor is too close to scene edges.")
             return
+
+        old_num  = int(s["Scene Number"])
+        n_before = len(self._scenes)
 
         def chunk(csf: int, cef: int) -> Dict:
             css = ss + (csf - sf) * spf
@@ -1155,8 +1198,63 @@ class ProjectViewScreen(QtWidgets.QWidget):
             sc["Scene Number"] = str(i + 1)
 
         self._save_scenes()
-        self._log(f"Split scene #{s['Scene Number']} at frame {split_f}.")
-        self._reload(select_row=row)
+        self._log(f"Split scene #{old_num} at frame {split_f}.")
+
+        # ── File operations ───────────────────────────────────────────────────
+        pd = self._project_dir
+
+        def _scene_paths(n: int) -> List[str]:
+            base = str(pd / f"scene_{n}.mkv")
+            dep  = base + "_depth.mkv"
+            msk  = base + "_mask.mkv"
+            xfov = base + "_xfovs.json"
+            sbs  = dep  + "_stereo.mkv"
+            si   = sbs  + "_infillmask.mkv"
+            inf  = sbs  + "_infilled.mkv"
+            return [base, dep, msk, xfov, sbs, si, inf]
+
+        # Rename files for scenes after old_num, highest first to avoid collisions
+        for n in range(n_before, old_num, -1):
+            old_base = str(pd / f"scene_{n}.mkv")
+            new_base = str(pd / f"scene_{n + 1}.mkv")
+            for src in _scene_paths(n):
+                if os.path.exists(src):
+                    dst = new_base + src[len(old_base):]
+                    os.rename(src, dst)
+
+        # Release the player before touching any files — Windows locks open media files
+        self.player.clear("Splitting…")
+
+        # Delete derived files for the split scene — they covered the old full range
+        for path in _scene_paths(old_num)[1:]:  # [0] is the raw clip, handled below
+            if os.path.exists(path):
+                os.remove(path)
+
+        # Split the raw clip if it exists; otherwise step1 will re-extract both halves
+        base_clip = str(pd / f"scene_{old_num}.mkv")
+        clip2     = str(pd / f"scene_{old_num + 1}.mkv")
+        n1        = split_f - sf + 1  # frames belonging to the first half
+
+        if os.path.exists(base_clip):
+
+            def do_split():
+                tmp1 = base_clip + "_split1_tmp.mkv"
+                tmp2 = base_clip + "_split2_tmp.mkv"
+                subprocess.run([
+                    "ffmpeg", "-y", "-i", base_clip,
+                    "-frames:v", str(n1), "-c:v", "ffv1", tmp1
+                ], check=True)
+                subprocess.run([
+                    "ffmpeg", "-y", "-i", base_clip,
+                    "-vf", f"select=gte(n\\,{n1}),setpts=PTS-STARTPTS",
+                    "-vsync", "0", "-c:v", "ffv1", tmp2
+                ], check=True)
+                os.replace(tmp1, base_clip)
+                os.replace(tmp2, clip2)
+
+            self._run_worker(do_split, f"Splitting clip for scene #{old_num}")
+        else:
+            self._reload(select_row=row)
 
     # ── Conversion ────────────────────────────────────────────────────────────
 
@@ -1293,19 +1391,25 @@ class ProjectViewScreen(QtWidgets.QWidget):
 
         self._run_worker(work, "Converting all scenes")
 
+    def _on_stop(self) -> None:
+        if self._worker is not None:
+            self._worker.stop()
+        self.btn_stop.setEnabled(False)
+
     def _run_worker(self, fn, title: str) -> None:
         self._log(f"▶  {title}")
         self._worker = FuncWorker(fn)
         self._worker.line.connect(self._log)
         self._worker.done.connect(self._on_job_done)
         self._worker.start()
-        # Disable convert buttons while running
         self.btn_convert_scene.setEnabled(False)
         self.btn_convert_all.setEnabled(False)
+        self.btn_stop.setEnabled(True)
 
     def _on_job_done(self, rc: int) -> None:
         self.btn_convert_scene.setEnabled(True)
         self.btn_convert_all.setEnabled(True)
+        self.btn_stop.setEnabled(False)
         sel = self.scene_table.currentRow()
         self._log(f"◆  Finished (exit code {rc})")
         self._reload(select_row=max(0, sel))
@@ -1356,6 +1460,14 @@ class MainWindow(QtWidgets.QMainWindow):
     def _go_home(self) -> None:
         self.screen_list.refresh()
         self.stack.setCurrentIndex(0)
+
+    def closeEvent(self, event) -> None:
+        for screen in (self.screen_init, self.screen_view):
+            w = getattr(screen, "_worker", None)
+            if w is not None and w.isRunning():
+                w.stop()
+                w.wait()
+        event.accept()
 
 
 # ── Entry point ──────────────────────────────────────────────────────────────

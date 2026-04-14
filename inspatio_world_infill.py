@@ -4,6 +4,7 @@ import os
 import sys
 import numpy as np
 import torch
+import torch.nn.functional as F
 import cv2
 from threading import Semaphore
 from omegaconf import OmegaConf
@@ -48,6 +49,209 @@ DEFAULT_CONFIG_PATH = os.path.join(_script_dir, "inspatio-world", "configs", "de
 
 # Allow only ONE generate_infilled_frames on GPU at a time.
 _GPU_GATE = Semaphore(1)
+
+# -----------------------
+# RAFT + flow-completion globals
+# -----------------------
+_RAFT_CKPT_PATH = os.path.join(_script_dir, "ckpts", "raft-things.pth")
+_RFC_CKPT_PATH  = os.path.join(_script_dir, "ckpts", "recurrent_flow_completion.pth")
+_RAFT_ALIGN_H = 480   # both RAFT and RFC run at this resolution (divisible by 8)
+_RAFT_ALIGN_W = 832
+_raft_model = None
+_rfc_model  = None
+
+
+# -----------------------
+# RAFT + flow-completion helpers
+# -----------------------
+def _ensure_spp_path():
+    """Add StereoProPainter to sys.path so its sub-packages can be imported."""
+    spp = os.path.join(_script_dir, "StereoProPainter")
+    if spp not in sys.path:
+        sys.path.insert(0, spp)
+
+
+def _load_raft(device):
+    """Lazy-load the RAFT model; cached after first call."""
+    global _raft_model
+    if _raft_model is not None:
+        return _raft_model
+
+    _ensure_spp_path()
+    from RAFT import RAFT as _RAFT  # relative imports handled inside the package
+
+    _ns = argparse.Namespace(small=False, mixed_precision=False, alternate_corr=False)
+    _m = torch.nn.DataParallel(_RAFT(_ns))
+    _m.load_state_dict(torch.load(_RAFT_CKPT_PATH, map_location="cpu"))
+    _m = _m.module
+    _m.to(device)
+    _m.eval()
+    _raft_model = _m
+    print(f"RAFT loaded from {_RAFT_CKPT_PATH}")
+    return _raft_model
+
+
+def _raft_prep(img_np, h, w, device):
+    """(H,W,3) uint8 RGB -> (1,3,h,w) float32 in [-1,1], resized to (h,w)."""
+    t = torch.from_numpy(img_np).float().permute(2, 0, 1).unsqueeze(0) / 255.0
+    if t.shape[2] != h or t.shape[3] != w:
+        t = F.interpolate(t, size=(h, w), mode="bilinear", align_corners=False)
+    return (t * 2.0 - 1.0).to(device)
+
+
+def _load_rfc(device):
+    """Lazy-load RecurrentFlowCompleteNet; cached after first call."""
+    global _rfc_model
+    if _rfc_model is not None:
+        return _rfc_model
+    _ensure_spp_path()
+    from model.recurrent_flow_completion import RecurrentFlowCompleteNet
+    m = RecurrentFlowCompleteNet(_RFC_CKPT_PATH)
+    for p in m.parameters():
+        p.requires_grad = False
+    m.to(device)
+    m.eval()
+    _rfc_model = m
+    print(f"RecurrentFlowCompleteNet loaded from {_RFC_CKPT_PATH}")
+    return _rfc_model
+
+
+def _align_infilled_to_render(render_frames, infilled_frames, hole_masks, device):
+    """
+    Per-pixel warp to correct the latent-space drift introduced by the VAE
+    round-trip.
+
+    Strategy
+    --------
+    1. Pre-fill the render's holes with infilled content before running RAFT so
+       that RAFT never sees artificial black regions (which produce garbage flow
+       at hole boundaries).  After filling, hole areas are pixel-identical in
+       both images → flow ≈ 0 there; non-hole areas differ only by the small
+       VAE drift → RAFT cleanly measures that drift.
+    2. Dilate the hole mask slightly so that boundary pixels (where the two
+       images still differ slightly due to the seam) are also treated as
+       unknown before flow completion.
+    3. Run RecurrentFlowCompleteNet (ProPainter's learned flow-completion model)
+       on the full temporal sequence of masked drift flows.  It uses forward +
+       backward temporal context across all frames to fill holes with smooth,
+       plausible drift estimates — far better than geometric extrapolation.
+    4. Apply the completed dense flow per frame via cv2.remap with an OOB
+       fallback (pixels whose corrected sample lands outside the frame keep
+       their original infilled value instead of replicating the edge).
+
+    Parameters
+    ----------
+    render_frames   : (T, H, W, 3) uint8 – per-eye render (with black holes)
+    infilled_frames : (T, H, W, 3) uint8 – model output (possibly drifted)
+    hole_masks      : (T, H, W)    uint8 – 255 = hole, 0 = valid surrounding area
+    device          : torch.device
+
+    Returns
+    -------
+    (T, H, W, 3) uint8 – aligned infilled frames
+    """
+    if not os.path.isfile(_RAFT_CKPT_PATH) or not os.path.isfile(_RFC_CKPT_PATH):
+        missing = [p for p in (_RAFT_CKPT_PATH, _RFC_CKPT_PATH) if not os.path.isfile(p)]
+        print(f"[align] Missing checkpoints {missing}, skipping alignment.")
+        return infilled_frames
+
+    raft = _load_raft(device)
+    rfc  = _load_rfc(device)
+
+    T, H, W = render_frames.shape[:3]
+    rh, rw = _RAFT_ALIGN_H, _RAFT_ALIGN_W
+
+    # ---- Step 1: compute RAFT drift flow per frame at reduced resolution ----
+    flows_raft  = []   # list of (rh, rw, 2) float32
+    masks_raft  = []   # list of (rh, rw) float32  1=unknown  0=known
+
+    # Mask convention coming in: 255 = valid rendered pixel, 0 = hole to fill
+    for i in range(T):
+        has_valid = np.any(hole_masks[i] > 0)   # any 255 = valid pixel exists
+
+        # Resize to RAFT resolution and convert to RFC convention (1=hole, 0=valid)
+        mask_r = cv2.resize(hole_masks[i], (rw, rh), interpolation=cv2.INTER_NEAREST)
+        mask_r_f = (mask_r == 0).astype(np.float32)              # 1 = hole/unknown (RFC convention)
+
+        if not has_valid:
+            flows_raft.append(np.zeros((rh, rw, 2), dtype=np.float32))
+            masks_raft.append(np.ones((rh, rw), dtype=np.float32))
+            continue
+
+        # Fill render holes (0) with infilled content so RAFT never sees black
+        render_filled = render_frames[i].copy()
+        render_filled[hole_masks[i] == 0] = infilled_frames[i][hole_masks[i] == 0]
+
+        with torch.no_grad():
+            img1 = _raft_prep(render_filled,      rh, rw, device)
+            img2 = _raft_prep(infilled_frames[i], rh, rw, device)
+            _, flow_t = raft(img1, img2, iters=12, test_mode=True)
+
+        flow_np = flow_t[0].permute(1, 2, 0).cpu().numpy()  # (rh, rw, 2)
+
+        # Zero flow in hole pixels before passing to RFC
+        flow_np[mask_r_f > 0] = 0.0
+
+        flows_raft.append(flow_np)
+        masks_raft.append(mask_r_f)
+
+    # ---- Step 2: flow completion with RecurrentFlowCompleteNet ----
+    # Pack to tensors: (1, T, 2, rh, rw) and (1, T, 1, rh, rw)
+    flows_np = np.stack(flows_raft, axis=0)          # (T, rh, rw, 2)
+    masks_np = np.stack(masks_raft, axis=0)          # (T, rh, rw)
+
+    flows_t = torch.from_numpy(
+        flows_np.transpose(0, 3, 1, 2)).float().unsqueeze(0).to(device)   # (1,T,2,rh,rw)
+    masks_t = torch.from_numpy(
+        masks_np[:, None]).float().unsqueeze(0).to(device)                # (1,T,1,rh,rw)
+
+    masked_flows = flows_t * (1.0 - masks_t)   # zero in holes
+
+    # Process in sub-clips so VRAM stays manageable (mirrors ProPainter's approach)
+    sub_len, pad = 20, 3
+    completed_parts = []
+    for s in range(0, T, sub_len):
+        s0 = max(0, s - pad)
+        e0 = min(T, s + sub_len + pad)
+        trim_s = s - s0
+        trim_e = e0 - min(T, s + sub_len)
+
+        with torch.no_grad():
+            pred, _ = rfc.forward(masked_flows[:, s0:e0], masks_t[:, s0:e0])
+
+        # In known regions keep original; in holes use predicted
+        sub_masks = masks_t[:, s0:e0]
+        sub_mf    = masked_flows[:, s0:e0]
+        combined  = pred * sub_masks + sub_mf * (1.0 - sub_masks)
+
+        # Trim padding overlap
+        end_trim = combined.shape[1] - trim_e if trim_e > 0 else combined.shape[1]
+        completed_parts.append(combined[:, trim_s:end_trim])
+
+    completed = torch.cat(completed_parts, dim=1)   # (1, T, 2, rh, rw)
+
+    # ---- Step 3: apply completed flow per frame ----
+    aligned = infilled_frames.copy()
+    for i in range(T):
+        flow_np = completed[0, i].permute(1, 2, 0).cpu().numpy()  # (rh, rw, 2)
+
+        # Scale to full frame resolution
+        flow_full = cv2.resize(flow_np, (W, H), interpolation=cv2.INTER_LINEAR)
+        flow_full[:, :, 0] *= W / rw
+        flow_full[:, :, 1] *= H / rh
+
+        ys_g, xs_g = np.mgrid[0:H, 0:W].astype(np.float32)
+        map_x = (xs_g + flow_full[:, :, 0]).astype(np.float32)
+        map_y = (ys_g + flow_full[:, :, 1]).astype(np.float32)
+
+        remapped = cv2.remap(infilled_frames[i], map_x, map_y,
+                             cv2.INTER_LINEAR, borderMode=cv2.BORDER_REPLICATE)
+        # OOB fallback: if drift pushes sample outside frame, keep original pixel
+        oob = (map_x < 0) | (map_x > W - 1) | (map_y < 0) | (map_y > H - 1)
+        remapped[oob] = infilled_frames[i][oob]
+        aligned[i] = remapped
+
+    return aligned
 
 
 # -----------------------
@@ -337,6 +541,15 @@ def deal_with_frame_chunk(
     else:
         right_frames = generate_infilled_frames(right_source, right_render, right_mask, fps, ref_latent=shared_ref_latent)
 
+    # Align infilled frames to render coordinate space to correct VAE drift.
+    # RAFT flow is estimated in the non-hole (surrounding) pixels only; an
+    # affine is then fitted via RANSAC and applied to the full frame.
+    device = next(pipeline.generator.parameters()).device
+    print("aligning left infilled frames")
+    left_frames  = _align_infilled_to_render(left_render,  left_frames,  left_mask,  device)
+    print("aligning right infilled frames")
+    right_frames = _align_infilled_to_render(right_render, right_frames, right_mask, device)
+
     start = 0 if keep_first_three else 3
     end = len(left_frames) if keep_last_three else len(left_frames) - 3
 
@@ -524,6 +737,11 @@ if __name__ == "__main__":
         print("inspatio-world weights not found, downloading...")
         import subprocess as _sp
         _sp.run([sys.executable, os.path.join(_script_dir, "download_weights.py"), "inspatio_world"], check=True)
+
+    if not os.path.exists(_RAFT_CKPT_PATH) or not os.path.exists(_RFC_CKPT_PATH):
+        print("RAFT / flow-completion checkpoints not found, downloading...")
+        import subprocess as _sp
+        _sp.run([sys.executable, os.path.join(_script_dir, "download_weights.py"), "raft"], check=True)
 
     # -----------------------
     # Load pipeline

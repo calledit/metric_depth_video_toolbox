@@ -105,6 +105,16 @@ MODELS = {
             "ckpts/open_clip_pytorch_model.bin"
         ),
     ),
+    'raft': lambda: (
+        download_file(
+            "https://github.com/sczhou/ProPainter/releases/download/v0.1.0/raft-things.pth",
+            "ckpts/raft-things.pth"
+        ),
+        download_file(
+            "https://github.com/sczhou/ProPainter/releases/download/v0.1.0/recurrent_flow_completion.pth",
+            "ckpts/recurrent_flow_completion.pth"
+        ),
+    ),
     'inspatio_world': lambda: (
         download_file(
             "https://huggingface.co/inspatio/world/resolve/main/InSpatio-World-1.3B.safetensors",
