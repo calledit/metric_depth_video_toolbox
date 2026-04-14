@@ -729,6 +729,20 @@ def step7_concat_and_mux(args: argparse.Namespace, video_files_to_concat: List[s
     except Exception:
         has_audio = True
 
+    # Determine display aspect ratio: SBS video is twice as wide as it should
+    # display, so set -aspect to (width/2):height so players show it correctly.
+    aspect_arg = ""
+    try:
+        probe = subprocess.run(
+            "ffprobe -v error -select_streams v:0 -show_entries stream=width,height"
+            " -of csv=p=0 " + video_files_to_concat[0],
+            shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE
+        )
+        w, h = (int(x) for x in probe.stdout.decode().strip().split(","))
+        aspect_arg = f" -aspect {w // 2}:{h} "
+    except Exception:
+        pass
+
     if has_audio:
         audio_args = " -map 0:v:0 -map 1:a:0 -c:a copy -shortest "
     else:
@@ -741,6 +755,7 @@ def step7_concat_and_mux(args: argparse.Namespace, video_files_to_concat: List[s
         + " -metadata:s:v:0 stereo_mode=left_right -x264opts \"frame-packing=3\""
         + audio_args
         + "-c:v libx264 -crf 18 -preset veryfast -pix_fmt yuv420p "
+        + aspect_arg
         + mp4_result_video_file,
         shell=True
     )
@@ -755,6 +770,7 @@ def step7_concat_and_mux(args: argparse.Namespace, video_files_to_concat: List[s
             + " -metadata:s:v:0 stereo_mode=left_right -x264opts \"frame-packing=3\""
             + " -map 0:v:0 -map 1:a:0 "
             + "-c:v libx264 -crf 18 -preset veryfast -pix_fmt yuv420p "
+            + aspect_arg
             + "-c:a aac -shortest "
             + mp4_result_video_file,
             shell=True
