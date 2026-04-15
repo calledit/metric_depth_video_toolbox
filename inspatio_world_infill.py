@@ -4,7 +4,6 @@ import os
 import sys
 import numpy as np
 import torch
-import torch.nn.functional as F
 import cv2
 from threading import Semaphore
 from omegaconf import OmegaConf
@@ -52,221 +51,41 @@ DEFAULT_CONFIG_PATH = os.path.join(_script_dir, "inspatio-world", "configs", "de
 # Allow only ONE generate_infilled_frames on GPU at a time.
 _GPU_GATE = Semaphore(1)
 
-# -----------------------
-# RAFT + flow-completion globals
-# -----------------------
-_RAFT_CKPT_PATH = os.path.join(_script_dir, "ckpts", "raft-things.pth")
-_RFC_CKPT_PATH  = os.path.join(_script_dir, "ckpts", "recurrent_flow_completion.pth")
-_RAFT_ALIGN_H = 480   # both RAFT and RFC run at this resolution (divisible by 8)
-_RAFT_ALIGN_W = 832
-_RAFT_ITERS   = 6     # VAE drift is small; 6 iters is sufficient (was 12)
-_RAFT_BATCH   = 8     # frame pairs processed per RAFT GPU call
-_raft_model = None
-_rfc_model  = None
 
-
-# -----------------------
-# RAFT + flow-completion helpers
-# -----------------------
-def _ensure_spp_path():
-    """Add StereoProPainter to sys.path so its sub-packages can be imported."""
-    spp = os.path.join(_script_dir, "StereoProPainter")
-    if spp not in sys.path:
-        sys.path.insert(0, spp)
-
-
-def _load_raft(device):
-    """Lazy-load the RAFT model; cached after first call."""
-    global _raft_model
-    if _raft_model is not None:
-        return _raft_model
-
-    _ensure_spp_path()
-    from RAFT import RAFT as _RAFT  # relative imports handled inside the package
-
-    _ns = argparse.Namespace(small=False, mixed_precision=False, alternate_corr=False)
-    _m = torch.nn.DataParallel(_RAFT(_ns))
-    _m.load_state_dict(torch.load(_RAFT_CKPT_PATH, map_location="cpu"))
-    _m = _m.module
-    _m.to(device)
-    _m.eval()
-    _raft_model = _m
-    print(f"RAFT loaded from {_RAFT_CKPT_PATH}")
-    return _raft_model
-
-
-def _raft_prep(img_np, h, w, device):
-    """(H,W,3) uint8 RGB -> (1,3,h,w) float32 in [-1,1], resized to (h,w)."""
-    t = torch.from_numpy(img_np).float().permute(2, 0, 1).unsqueeze(0) / 255.0
-    if t.shape[2] != h or t.shape[3] != w:
-        t = F.interpolate(t, size=(h, w), mode="bilinear", align_corners=False)
-    return (t * 2.0 - 1.0).to(device)
-
-
-def _load_rfc(device):
-    """Lazy-load RecurrentFlowCompleteNet; cached after first call."""
-    global _rfc_model
-    if _rfc_model is not None:
-        return _rfc_model
-    _ensure_spp_path()
-    from model.recurrent_flow_completion import RecurrentFlowCompleteNet
-    m = RecurrentFlowCompleteNet(_RFC_CKPT_PATH)
-    for p in m.parameters():
-        p.requires_grad = False
-    m.to(device)
-    m.eval()
-    _rfc_model = m
-    print(f"RecurrentFlowCompleteNet loaded from {_RFC_CKPT_PATH}")
-    return _rfc_model
-
-
-def _align_infilled_to_render(render_frames, infilled_frames, hole_masks, device):
+def _align_infilled_to_render(render_frames, infilled_frames, hole_masks):
     """
-    Per-pixel warp to correct the latent-space drift introduced by the VAE
-    round-trip.
-
-    Strategy
-    --------
-    1. Pre-fill the render's holes with infilled content before running RAFT so
-       that RAFT never sees artificial black regions (which produce garbage flow
-       at hole boundaries).  After filling, hole areas are pixel-identical in
-       both images → flow ≈ 0 there; non-hole areas differ only by the small
-       VAE drift → RAFT cleanly measures that drift.
-    2. Dilate the hole mask slightly so that boundary pixels (where the two
-       images still differ slightly due to the seam) are also treated as
-       unknown before flow completion.
-    3. Run RecurrentFlowCompleteNet (ProPainter's learned flow-completion model)
-       on the full temporal sequence of masked drift flows.  It uses forward +
-       backward temporal context across all frames to fill holes with smooth,
-       plausible drift estimates — far better than geometric extrapolation.
-    4. Apply the completed dense flow per frame via cv2.remap with an OOB
-       fallback (pixels whose corrected sample lands outside the frame keep
-       their original infilled value instead of replicating the edge).
+    Align infilled frames to render using phase correlation (global shift).
 
     Parameters
     ----------
     render_frames   : (T, H, W, 3) uint8 – per-eye render (with black holes)
     infilled_frames : (T, H, W, 3) uint8 – model output (possibly drifted)
     hole_masks      : (T, H, W)    uint8 – 0 = hole, 255 = valid surrounding area
-    device          : torch.device
 
     Returns
     -------
     (T, H, W, 3) uint8 – aligned infilled frames
     """
-    if not os.path.isfile(_RAFT_CKPT_PATH) or not os.path.isfile(_RFC_CKPT_PATH):
-        missing = [p for p in (_RAFT_CKPT_PATH, _RFC_CKPT_PATH) if not os.path.isfile(p)]
-        print(f"[align] Missing checkpoints {missing}, skipping alignment.")
-        return infilled_frames
-
-    raft = _load_raft(device)
-    rfc  = _load_rfc(device)
-
     T, H, W = render_frames.shape[:3]
-    rh, rw = _RAFT_ALIGN_H, _RAFT_ALIGN_W
-
-    # ---- Step 1: CPU prep — build resized masks; identify valid frames ----
-    # Mask convention coming in: 255 = valid rendered pixel, 0 = hole to fill
-    masks_raft  = []   # (T,) list of (rh, rw) float32  1=unknown  0=known
-    valid_flags = []   # (T,) bool
-    #_erode_kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
-    for i in range(T):
-        has_valid = np.any(hole_masks[i] > 0)
-        valid_flags.append(has_valid)
-        mask_r = cv2.resize(hole_masks[i], (rw, rh), interpolation=cv2.INTER_NEAREST)
-        # Erode the valid region so seam-boundary pixels are treated as unknown by RFC
-        # Disabled as the issue this fixes is better solved by dilating the full mask
-        #mask_r = cv2.erode(mask_r, _erode_kernel)
-        masks_raft.append((mask_r == 0).astype(np.float32))   # 1 = hole (RFC convention)
-
-    # ---- Step 2: batched RAFT — process _RAFT_BATCH frame pairs per GPU call ----
-    flows_raft = [np.zeros((rh, rw, 2), dtype=np.float32) for _ in range(T)]
-    valid_indices = [i for i in range(T) if valid_flags[i]]
-
-    for batch_start in range(0, len(valid_indices), _RAFT_BATCH):
-        batch_idx = valid_indices[batch_start:batch_start + _RAFT_BATCH]
-
-        img1_list, img2_list = [], []
-        for i in batch_idx:
-            # Fill render holes with infilled content so RAFT never sees black
-            rf = render_frames[i].copy()
-            rf[hole_masks[i] == 0] = infilled_frames[i][hole_masks[i] == 0]
-            img1_list.append(_raft_prep(rf,                 rh, rw, device))
-            img2_list.append(_raft_prep(infilled_frames[i], rh, rw, device))
-
-        img1_batch = torch.cat(img1_list, dim=0)   # (B, 3, rh, rw)
-        img2_batch = torch.cat(img2_list, dim=0)
-
-        with torch.no_grad():
-            _, flow_batch = raft(img1_batch, img2_batch,
-                                 iters=_RAFT_ITERS, test_mode=True)
-
-        flow_np_batch = flow_batch.permute(0, 2, 3, 1).cpu().numpy()  # (B, rh, rw, 2)
-
-        for j, i in enumerate(batch_idx):
-            flow_np = flow_np_batch[j].copy()
-            flow_np[masks_raft[i] > 0] = 0.0   # zero in hole pixels before RFC
-            flows_raft[i] = flow_np
-
-    # ---- Step 3: flow completion with RecurrentFlowCompleteNet ----
-    # Pack to tensors: (1, T, 2, rh, rw) and (1, T, 1, rh, rw)
-    flows_np = np.stack(flows_raft, axis=0)          # (T, rh, rw, 2)
-    masks_np = np.stack(masks_raft, axis=0)          # (T, rh, rw)
-
-    flows_t = torch.from_numpy(
-        flows_np.transpose(0, 3, 1, 2)).float().unsqueeze(0).to(device)   # (1,T,2,rh,rw)
-    masks_t = torch.from_numpy(
-        masks_np[:, None]).float().unsqueeze(0).to(device)                # (1,T,1,rh,rw)
-
-    masked_flows = flows_t * (1.0 - masks_t)   # zero in holes
-
-    # Process in sub-clips so VRAM stays manageable (mirrors ProPainter's approach)
-    sub_len, pad = 20, 3
-    completed_parts = []
-    for s in range(0, T, sub_len):
-        s0 = max(0, s - pad)
-        e0 = min(T, s + sub_len + pad)
-        trim_s = s - s0
-        trim_e = e0 - min(T, s + sub_len)
-
-        with torch.no_grad():
-            pred, _ = rfc.forward(masked_flows[:, s0:e0], masks_t[:, s0:e0])
-
-        # In known regions keep original; in holes use predicted
-        sub_masks = masks_t[:, s0:e0]
-        sub_mf    = masked_flows[:, s0:e0]
-        combined  = pred * sub_masks + sub_mf * (1.0 - sub_masks)
-
-        # Trim padding overlap
-        end_trim = combined.shape[1] - trim_e if trim_e > 0 else combined.shape[1]
-        completed_parts.append(combined[:, trim_s:end_trim])
-
-    completed = torch.cat(completed_parts, dim=1)   # (1, T, 2, rh, rw)
-
-    # ---- Step 4: apply completed flow per frame ----
-    # Pre-compute the base coordinate grid once (same for every frame)
-    ys_g, xs_g = np.mgrid[0:H, 0:W].astype(np.float32)
-    scale_x = float(W) / rw
-    scale_y = float(H) / rh
-
     aligned = infilled_frames.copy()
+
+    from skimage.registration import phase_cross_correlation
+
     for i in range(T):
-        flow_np = completed[0, i].permute(1, 2, 0).cpu().numpy()  # (rh, rw, 2)
+        hole_bool = hole_masks[i] == 0
+        if not np.any(hole_bool):
+            continue
 
-        # Scale flow to full frame resolution
-        flow_full = cv2.resize(flow_np, (W, H), interpolation=cv2.INTER_LINEAR)
-        flow_full[:, :, 0] *= scale_x
-        flow_full[:, :, 1] *= scale_y
-
-        map_x = xs_g + flow_full[:, :, 0]
-        map_y = ys_g + flow_full[:, :, 1]
-
-        remapped = cv2.remap(infilled_frames[i], map_x, map_y,
-                             cv2.INTER_LINEAR, borderMode=cv2.BORDER_REPLICATE)
-        # OOB fallback: if drift pushes sample outside frame, keep original pixel
-        oob = (map_x < 0) | (map_x > W - 1) | (map_y < 0) | (map_y > H - 1)
-        remapped[oob] = infilled_frames[i][oob]
-        aligned[i] = remapped
+        render_gray   = cv2.cvtColor(render_frames[i],   cv2.COLOR_RGB2GRAY).astype(np.float32)
+        infilled_gray = cv2.cvtColor(infilled_frames[i], cv2.COLOR_RGB2GRAY).astype(np.float32)
+        valid         = ~hole_bool
+        shift, _, _   = phase_cross_correlation(
+            render_gray, infilled_gray,
+            reference_mask=valid,
+        )
+        dy, dx = float(shift[0]), float(shift[1])
+        M      = np.float32([[1, 0, dx], [0, 1, dy]])
+        aligned[i] = cv2.warpAffine(infilled_frames[i], M, (W, H))
 
     return aligned
 
@@ -457,7 +276,7 @@ def deal_with_frame_chunk(
     right_render, left_render = [], []
     right_mask, left_mask = [], []
 
-    for sbs_render, sbs_mask, org_color in chunk:
+    for frame_idx, (sbs_render, sbs_mask, org_color) in enumerate(chunk):
         H = frame_height
 
         # --- Right eye ---
@@ -469,6 +288,7 @@ def deal_with_frame_chunk(
                 np.all(mark_lower_side(msk_right_rgb) == blue, axis=-1),
                 iterations=lower_mask_dilation)
             msk_right[right_lower] = 0
+            chunk[frame_idx][0][:H, pic_width:][right_lower] = (255, 0, 0)
         right_render.append(rnd_right)
         right_mask.append(msk_right)
         right_source.append(org_color[:H])
@@ -479,9 +299,11 @@ def deal_with_frame_chunk(
         msk_left = (np.all(msk_left_rgb == black, axis=-1)).astype(np.uint8) * 255
         if lower_mask_dilation:
             left_lower = binary_dilation(
+                #~np.all(msk_left_rgb == black, axis=-1),
                 np.all(mark_lower_side(msk_left_rgb) == blue, axis=-1),
                 iterations=lower_mask_dilation)
             msk_left[left_lower] = 0
+            #chunk[frame_idx][0][:H, :pic_width][left_lower] = (255, 0, 0)
         left_render.append(rnd_left)
         left_mask.append(msk_left)
         left_source.append(org_color[:H])
@@ -538,14 +360,13 @@ def deal_with_frame_chunk(
     #    print("color matching right infilled frames")
     #    right_frames = transfer_lhm_video_refmask(right_frames, right_render, 255 - right_mask)
 
-    # Align infilled frames to render coordinate space to correct VAE drift.
-    # RAFT flow is estimated in the non-hole (surrounding) pixels only; an
-    # affine is then fitted via RANSAC and applied to the full frame.
-    device = next(pipeline.generator.parameters()).device
+    # Align infilled frames to render coordinate space to correct VAE drift
+    # using phase correlation (per-frame global shift estimation).
     print("aligning left infilled frames")
-    left_frames  = _align_infilled_to_render(left_render,  left_frames,  left_mask,  device)
+    #left_frames_inferd = left_frames
+    left_frames  = _align_infilled_to_render(left_render,  left_frames,  left_mask)
     print("aligning right infilled frames")
-    right_frames = _align_infilled_to_render(right_render, right_frames, right_mask, device)
+    right_frames = _align_infilled_to_render(right_render, right_frames, right_mask)
 
     start = 0 if keep_first_three else 3
     end = len(left_frames) if keep_last_three else len(left_frames) - 3
@@ -568,7 +389,7 @@ def deal_with_frame_chunk(
 
         left_org[left_hole]   = left_img[left_hole]#white#
         right_org[right_hole] = right_img[right_hole]#white#
-
+        #left_img_inf  = cv2.resize(left_frames_inferd[j], (pic_width, frame_height))
         basic_out = cv2.hconcat([left_org, right_org])
         basic_out = np.clip(basic_out, 0, 255).astype(np.uint8)
         processed_frames.append(basic_out)
@@ -745,10 +566,10 @@ if __name__ == "__main__":
         import subprocess as _sp
         _sp.run([sys.executable, os.path.join(_script_dir, "download_weights.py"), "inspatio_world"], check=True)
 
-    if not os.path.exists(_RAFT_CKPT_PATH) or not os.path.exists(_RFC_CKPT_PATH):
-        print("RAFT / flow-completion checkpoints not found, downloading...")
-        import subprocess as _sp
-        _sp.run([sys.executable, os.path.join(_script_dir, "download_weights.py"), "raft"], check=True)
+    #if not os.path.exists(_RAFT_CKPT_PATH) or not os.path.exists(_RFC_CKPT_PATH):
+    #    print("RAFT / flow-completion checkpoints not found, downloading...")
+    #    import subprocess as _sp
+    #    _sp.run([sys.executable, os.path.join(_script_dir, "download_weights.py"), "raft"], check=True)
 
     # -----------------------
     # Load pipeline
