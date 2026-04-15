@@ -725,9 +725,10 @@ def step7_concat_and_mux(args: argparse.Namespace, video_files_to_concat: List[s
             "ffprobe -v error -select_streams a:0 -show_entries stream=codec_type -of csv=p=0 "
             + args.color_video,
             shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE
-        ).stdout.strip() == b"audio"
+        ).stdout.strip() == "audio"
     except Exception:
         has_audio = True
+        
 
     # Determine display aspect ratio: SBS video is twice as wide as it should
     # display, so set -aspect to (width/2):height so players show it correctly.
