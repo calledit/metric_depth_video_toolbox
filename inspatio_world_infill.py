@@ -52,9 +52,16 @@ DEFAULT_CONFIG_PATH = os.path.join(_script_dir, "inspatio-world", "configs", "de
 _GPU_GATE = Semaphore(1)
 
 
+GRID_ROWS = 4
+GRID_COLS = 4
+
 def _align_infilled_to_render(render_frames, infilled_frames, hole_masks):
     """
-    Align infilled frames to render using phase correlation (global shift).
+    Align infilled frames to render using a local phase-correlation flow map.
+
+    The image is divided into a GRID_ROWS x GRID_COLS grid.  Phase correlation
+    is run independently in each cell to produce a coarse (8x16) flow map,
+    which is then upscaled to full resolution and used with cv2.remap.
 
     Parameters
     ----------
@@ -66,10 +73,14 @@ def _align_infilled_to_render(render_frames, infilled_frames, hole_masks):
     -------
     (T, H, W, 3) uint8 – aligned infilled frames
     """
+    from skimage.registration import phase_cross_correlation
+
     T, H, W = render_frames.shape[:3]
     aligned = infilled_frames.copy()
 
-    from skimage.registration import phase_cross_correlation
+    # Precompute cell boundaries
+    y_edges = [gy * H // GRID_ROWS for gy in range(GRID_ROWS + 1)]
+    x_edges = [gx * W // GRID_COLS for gx in range(GRID_COLS + 1)]
 
     for i in range(T):
         hole_bool = hole_masks[i] == 0
@@ -78,16 +89,77 @@ def _align_infilled_to_render(render_frames, infilled_frames, hole_masks):
 
         render_gray   = cv2.cvtColor(render_frames[i],   cv2.COLOR_RGB2GRAY).astype(np.float32)
         infilled_gray = cv2.cvtColor(infilled_frames[i], cv2.COLOR_RGB2GRAY).astype(np.float32)
-        valid         = ~hole_bool
-        shift, _, _   = phase_cross_correlation(
-            render_gray, infilled_gray,
-            reference_mask=valid,
-        )
-        dy, dx = float(shift[0]), float(shift[1])
-        M      = np.float32([[1, 0, dx], [0, 1, dy]])
-        aligned[i] = cv2.warpAffine(infilled_frames[i], M, (W, H),
-                                    flags=cv2.INTER_LINEAR,
-                                    borderMode=cv2.BORDER_REPLICATE)
+        valid = ~hole_bool
+
+        # Build coarse flow map: [GRID_ROWS, GRID_COLS, 2] storing (dx, dy)
+        flow_grid   = np.zeros((GRID_ROWS, GRID_COLS, 2), dtype=np.float32)
+        computed    = np.zeros((GRID_ROWS, GRID_COLS),    dtype=bool)
+
+        for gy in range(GRID_ROWS):
+            for gx in range(GRID_COLS):
+                y0, y1 = y_edges[gy], y_edges[gy + 1]
+                x0, x1 = x_edges[gx], x_edges[gx + 1]
+
+                patch_valid = valid[y0:y1, x0:x1]
+                if not np.any(patch_valid):
+                    continue
+
+                if gx == 0 or gx == GRID_COLS - 1:
+                    # Edge columns: collapse horizontally so only vertical shift is possible.
+                    # Average only valid (non-hole) pixels per row.
+                    v = patch_valid.astype(np.float32)
+                    count = v.sum(axis=1, keepdims=True) + 1e-8
+                    ref_1d = (render_gray[y0:y1, x0:x1] * v).sum(axis=1, keepdims=True) / count
+                    mov_1d = (infilled_gray[y0:y1, x0:x1] * v).sum(axis=1, keepdims=True) / count
+                    msk_1d = patch_valid.any(axis=1, keepdims=True)
+                    if not np.any(msk_1d):
+                        continue
+                    shift, _, _ = phase_cross_correlation(ref_1d, mov_1d, reference_mask=msk_1d)
+                    flow_grid[gy, gx, 0] = 0.0
+                    flow_grid[gy, gx, 1] = float(shift[0])
+                else:
+                    shift, _, _ = phase_cross_correlation(
+                        render_gray[y0:y1, x0:x1],
+                        infilled_gray[y0:y1, x0:x1],
+                        reference_mask=patch_valid,
+                    )
+                    flow_grid[gy, gx, 0] = float(shift[1])  # dx (col)
+                    flow_grid[gy, gx, 1] = float(shift[0])  # dy (row)
+                computed[gy, gx] = True
+
+        # Outlier rejection via MAD: cells whose shift deviates more than
+        # 3 MADs from the median are replaced with the mean of their neighbours.
+        if computed.sum() > 1:
+            for ch in range(2):
+                vals    = flow_grid[computed, ch]
+                median  = np.median(vals)
+                mad     = np.median(np.abs(vals - median)) + 1e-8
+                outlier = computed & (np.abs(flow_grid[..., ch] - median) > 3.0 * mad)
+                for gy, gx in zip(*np.where(outlier)):
+                    neighbours = []
+                    for dy in (-1, 0, 1):
+                        for dx in (-1, 0, 1):
+                            if dy == 0 and dx == 0:
+                                continue
+                            ny, nx = gy + dy, gx + dx
+                            if 0 <= ny < GRID_ROWS and 0 <= nx < GRID_COLS and computed[ny, nx] and not outlier[ny, nx]:
+                                neighbours.append(flow_grid[ny, nx, ch])
+                    if neighbours:
+                        flow_grid[gy, gx, ch] = float(np.mean(neighbours))
+
+        # Upscale coarse flow to full resolution
+        flow_dx = cv2.resize(flow_grid[..., 0], (W, H), interpolation=cv2.INTER_LINEAR)
+        flow_dy = cv2.resize(flow_grid[..., 1], (W, H), interpolation=cv2.INTER_LINEAR)
+
+        grid_y, grid_x = np.mgrid[0:H, 0:W].astype(np.float32)
+        map_x = grid_x - flow_dx
+        map_y = grid_y - flow_dy
+
+        infilled_bgr = cv2.cvtColor(infilled_frames[i], cv2.COLOR_RGB2BGR)
+        warped_bgr   = cv2.remap(infilled_bgr, map_x, map_y,
+                                 cv2.INTER_LINEAR,
+                                 borderMode=cv2.BORDER_REPLICATE)
+        aligned[i] = cv2.cvtColor(warped_bgr, cv2.COLOR_BGR2RGB)
 
     return aligned
 
