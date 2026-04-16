@@ -55,13 +55,88 @@ _GPU_GATE = Semaphore(1)
 GRID_ROWS = 4
 GRID_COLS = 4
 
+MIN_VALID_FRACTION = 0.2  # discard cells where fewer than this fraction of pixels are valid
+
+
+def _fill_from_neighbours(flow_grid, mask):
+    """Replace cells where mask==True with the mean of their reliable neighbours."""
+    for gy, gx in zip(*np.where(mask)):
+        neighbours = []
+        for dy in (-1, 0, 1):
+            for dx in (-1, 0, 1):
+                if dy == 0 and dx == 0:
+                    continue
+                ny, nx = gy + dy, gx + dx
+                if 0 <= ny < GRID_ROWS and 0 <= nx < GRID_COLS and not mask[ny, nx]:
+                    neighbours.append(flow_grid[ny, nx])
+        if neighbours:
+            flow_grid[gy, gx] = np.mean(neighbours, axis=0)
+
+
+def _compute_flow_grid(render_gray, infilled_gray, valid, y_edges, x_edges):
+    """Compute and outlier-clean a GRID_ROWS x GRID_COLS flow grid for one frame."""
+    from skimage.registration import phase_cross_correlation
+
+    flow_grid  = np.zeros((GRID_ROWS, GRID_COLS, 2), dtype=np.float32)
+    unreliable = np.ones((GRID_ROWS, GRID_COLS),     dtype=bool)
+
+    for gy in range(GRID_ROWS):
+        for gx in range(GRID_COLS):
+            y0, y1 = y_edges[gy], y_edges[gy + 1]
+            x0, x1 = x_edges[gx], x_edges[gx + 1]
+
+            patch_valid = valid[y0:y1, x0:x1]
+            if patch_valid.mean() < MIN_VALID_FRACTION:
+                continue
+
+            if gx == 0 or gx == GRID_COLS - 1:
+                v     = patch_valid.astype(np.float32)
+                count = v.sum(axis=1, keepdims=True) + 1e-8
+                ref_1d = (render_gray[y0:y1, x0:x1] * v).sum(axis=1, keepdims=True) / count
+                mov_1d = (infilled_gray[y0:y1, x0:x1] * v).sum(axis=1, keepdims=True) / count
+                msk_1d = patch_valid.any(axis=1, keepdims=True)
+                if not np.any(msk_1d):
+                    continue
+                shift, _, _ = phase_cross_correlation(ref_1d, mov_1d, reference_mask=msk_1d)
+                dy, dx = float(shift[0]), 0.0
+            else:
+                shift, _, _ = phase_cross_correlation(
+                    render_gray[y0:y1, x0:x1],
+                    infilled_gray[y0:y1, x0:x1],
+                    reference_mask=patch_valid,
+                )
+                dy, dx = float(shift[0]), float(shift[1])
+
+            if abs(dx) > 20 or abs(dy) > 20:
+                continue
+
+            flow_grid[gy, gx, 0] = dx
+            flow_grid[gy, gx, 1] = dy
+            unreliable[gy, gx] = False
+
+    # MAD outlier rejection on confident cells
+    computed = ~unreliable
+    if computed.sum() > 1:
+        for ch in range(2):
+            vals    = flow_grid[computed, ch]
+            median  = np.median(vals)
+            mad     = np.median(np.abs(vals - median)) + 1e-8
+            unreliable |= computed & (np.abs(flow_grid[..., ch] - median) > 2.0 * mad)
+
+    # Fill all unreliable/discarded cells from their neighbours
+    _fill_from_neighbours(flow_grid, unreliable)
+
+    return flow_grid
+
+
 def _align_infilled_to_render(render_frames, infilled_frames, hole_masks):
     """
     Align infilled frames to render using a local phase-correlation flow map.
 
     The image is divided into a GRID_ROWS x GRID_COLS grid.  Phase correlation
-    is run independently in each cell to produce a coarse (8x16) flow map,
-    which is then upscaled to full resolution and used with cv2.remap.
+    is run independently in each cell to produce a coarse flow map, which is
+    temporally averaged over 3 frames (prev, current, next) to reduce jitter,
+    then upscaled to full resolution and used with cv2.remap.
 
     Parameters
     ----------
@@ -73,81 +148,38 @@ def _align_infilled_to_render(render_frames, infilled_frames, hole_masks):
     -------
     (T, H, W, 3) uint8 – aligned infilled frames
     """
-    from skimage.registration import phase_cross_correlation
-
     T, H, W = render_frames.shape[:3]
     aligned = infilled_frames.copy()
 
-    # Precompute cell boundaries
     y_edges = [gy * H // GRID_ROWS for gy in range(GRID_ROWS + 1)]
     x_edges = [gx * W // GRID_COLS for gx in range(GRID_COLS + 1)]
 
+    # Pass 1: compute a flow grid for every frame
+    all_flow_grids = []
     for i in range(T):
         hole_bool = hole_masks[i] == 0
         if not np.any(hole_bool):
+            all_flow_grids.append(None)
             continue
-
         render_gray   = cv2.cvtColor(render_frames[i],   cv2.COLOR_RGB2GRAY).astype(np.float32)
         infilled_gray = cv2.cvtColor(infilled_frames[i], cv2.COLOR_RGB2GRAY).astype(np.float32)
-        valid = ~hole_bool
+        all_flow_grids.append(
+            _compute_flow_grid(render_gray, infilled_gray, ~hole_bool, y_edges, x_edges)
+        )
 
-        # Build coarse flow map: [GRID_ROWS, GRID_COLS, 2] storing (dx, dy)
-        flow_grid   = np.zeros((GRID_ROWS, GRID_COLS, 2), dtype=np.float32)
-        computed    = np.zeros((GRID_ROWS, GRID_COLS),    dtype=bool)
+    # Pass 2: temporally average each flow grid with its neighbours, then remap
+    for i in range(T):
+        if all_flow_grids[i] is None:
+            continue
 
-        for gy in range(GRID_ROWS):
-            for gx in range(GRID_COLS):
-                y0, y1 = y_edges[gy], y_edges[gy + 1]
-                x0, x1 = x_edges[gx], x_edges[gx + 1]
+        grids = [g for g in [
+            all_flow_grids[i - 1] if i > 0     else None,
+            all_flow_grids[i],
+            #all_flow_grids[i + 1] if i + 1 < T else None,
+            #all_flow_grids[i + 2] if i + 2 < T else None,
+        ] if g is not None]
+        flow_grid = np.mean(grids, axis=0)
 
-                patch_valid = valid[y0:y1, x0:x1]
-                if not np.any(patch_valid):
-                    continue
-
-                if gx == 0 or gx == GRID_COLS - 1:
-                    # Edge columns: collapse horizontally so only vertical shift is possible.
-                    # Average only valid (non-hole) pixels per row.
-                    v = patch_valid.astype(np.float32)
-                    count = v.sum(axis=1, keepdims=True) + 1e-8
-                    ref_1d = (render_gray[y0:y1, x0:x1] * v).sum(axis=1, keepdims=True) / count
-                    mov_1d = (infilled_gray[y0:y1, x0:x1] * v).sum(axis=1, keepdims=True) / count
-                    msk_1d = patch_valid.any(axis=1, keepdims=True)
-                    if not np.any(msk_1d):
-                        continue
-                    shift, _, _ = phase_cross_correlation(ref_1d, mov_1d, reference_mask=msk_1d)
-                    flow_grid[gy, gx, 0] = 0.0
-                    flow_grid[gy, gx, 1] = float(shift[0])
-                else:
-                    shift, _, _ = phase_cross_correlation(
-                        render_gray[y0:y1, x0:x1],
-                        infilled_gray[y0:y1, x0:x1],
-                        reference_mask=patch_valid,
-                    )
-                    flow_grid[gy, gx, 0] = float(shift[1])  # dx (col)
-                    flow_grid[gy, gx, 1] = float(shift[0])  # dy (row)
-                computed[gy, gx] = True
-
-        # Outlier rejection via MAD: cells whose shift deviates more than
-        # 3 MADs from the median are replaced with the mean of their neighbours.
-        if computed.sum() > 1:
-            for ch in range(2):
-                vals    = flow_grid[computed, ch]
-                median  = np.median(vals)
-                mad     = np.median(np.abs(vals - median)) + 1e-8
-                outlier = computed & (np.abs(flow_grid[..., ch] - median) > 3.0 * mad)
-                for gy, gx in zip(*np.where(outlier)):
-                    neighbours = []
-                    for dy in (-1, 0, 1):
-                        for dx in (-1, 0, 1):
-                            if dy == 0 and dx == 0:
-                                continue
-                            ny, nx = gy + dy, gx + dx
-                            if 0 <= ny < GRID_ROWS and 0 <= nx < GRID_COLS and computed[ny, nx] and not outlier[ny, nx]:
-                                neighbours.append(flow_grid[ny, nx, ch])
-                    if neighbours:
-                        flow_grid[gy, gx, ch] = float(np.mean(neighbours))
-
-        # Upscale coarse flow to full resolution
         flow_dx = cv2.resize(flow_grid[..., 0], (W, H), interpolation=cv2.INTER_LINEAR)
         flow_dy = cv2.resize(flow_grid[..., 1], (W, H), interpolation=cv2.INTER_LINEAR)
 
