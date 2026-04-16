@@ -85,7 +85,9 @@ def _align_infilled_to_render(render_frames, infilled_frames, hole_masks):
         )
         dy, dx = float(shift[0]), float(shift[1])
         M      = np.float32([[1, 0, dx], [0, 1, dy]])
-        aligned[i] = cv2.warpAffine(infilled_frames[i], M, (W, H))
+        aligned[i] = cv2.warpAffine(infilled_frames[i], M, (W, H),
+                                    flags=cv2.INTER_LINEAR,
+                                    borderMode=cv2.BORDER_REPLICATE)
 
     return aligned
 
