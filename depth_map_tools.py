@@ -538,7 +538,7 @@ def remap_ids_to_img(rgb_image, id_maps, invalid_color=(0,0,0)):
 
     return out.reshape(final_shape[0], final_shape[1], 3)
 
-def steep_disparity_lr(depth, K, parallax_shift=0.0351, threshold=0.1):
+def steep_disparity_lr(depth, K, parallax_shift=0.0351, threshold=0.09):
     """
     depth  : (H,W) depth map
     K      : 3x3 intrinsic matrix
@@ -652,17 +652,22 @@ def generate_normal_bg_image(width, height):
 
 
 
-glwindow = None
-render_shader = None
+import threading as _threading
+_gl_state    = _threading.local()   # per-thread: .glwindow, .render_shader
+_glfw_lock   = _threading.Lock()    # serialises the one-time glfw.init() call
+_glfw_inited = False
 
 def gl_render(vertices_and_indices, mvp, width, height, near, far, bg_color = [0.0,0.0,0.0]):
-    global glwindow, render_shader
-    
-    if glwindow is None:
-        
-        if not glfw.init():
-            raise RuntimeError("Could not init GLFW")
-        
+    global _glfw_inited
+
+    if not hasattr(_gl_state, 'glwindow') or _gl_state.glwindow is None:
+
+        with _glfw_lock:
+            if not _glfw_inited:
+                if not glfw.init():
+                    raise RuntimeError("Could not init GLFW")
+                _glfw_inited = True
+
         glfw.window_hint(glfw.CONTEXT_VERSION_MAJOR, 3)
         glfw.window_hint(glfw.CONTEXT_VERSION_MINOR, 3)
         glfw.window_hint(glfw.OPENGL_PROFILE, glfw.OPENGL_CORE_PROFILE)
@@ -670,10 +675,10 @@ def gl_render(vertices_and_indices, mvp, width, height, near, far, bg_color = [0
         glfw.window_hint(glfw.VISIBLE, glfw.FALSE)   # Hide the window
         glfw.window_hint(glfw.FOCUSED, glfw.FALSE)
         glfw.window_hint(glfw.AUTO_ICONIFY, glfw.FALSE)
-        
+
         #Create hidden window to be able to set context
-        glwindow = glfw.create_window(1, 1, "", None, None)
-        glfw.make_context_current(glwindow)
+        _gl_state.glwindow = glfw.create_window(1, 1, "", None, None)
+        glfw.make_context_current(_gl_state.glwindow)
         glEnable(GL_DEPTH_TEST)
         
         # ---------- SHADERS ----------
@@ -720,7 +725,7 @@ def gl_render(vertices_and_indices, mvp, width, height, near, far, bg_color = [0
 
         """
 
-        render_shader = compileProgram(
+        _gl_state.render_shader = compileProgram(
             compileShader(VERT_SHADER, GL_VERTEX_SHADER),
             compileShader(FRAG_SHADER, GL_FRAGMENT_SHADER)
         )
@@ -810,8 +815,8 @@ def gl_render(vertices_and_indices, mvp, width, height, near, far, bg_color = [0
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)
     glClearBufferiv(GL_COLOR, 2, np.array([0], dtype=np.int32)) # set ids to zero
 
-    glUseProgram(render_shader)
-    loc_mvp = glGetUniformLocation(render_shader, "uMVP")
+    glUseProgram(_gl_state.render_shader)
+    loc_mvp = glGetUniformLocation(_gl_state.render_shader, "uMVP")
     glUniformMatrix4fv(loc_mvp, 1, GL_FALSE, mvp.T)
 
     glDrawElements(GL_TRIANGLES, len(indices), GL_UNSIGNED_INT, None)
